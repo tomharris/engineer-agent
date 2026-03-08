@@ -57,7 +57,7 @@ For each new ticket, create a file in `${CLAUDE_PLUGIN_ROOT}/queue/incoming/`:
 ---
 type: ticket
 source: jira
-source_url: "{base_url}/browse/{ticket_key}"
+source_url: "{ticket_url_from_mcp_response}"
 source_id: "{ticket_key}"
 title: "{ticket_summary}"
 priority: "{map_jira_priority}"
