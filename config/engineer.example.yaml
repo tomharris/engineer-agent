@@ -19,6 +19,8 @@ jira:
 
 slite:
   doc_labels: ["needs-review"]
+  design_doc_parent: ""           # Slite note ID or channel where design docs are created
+  design_doc_template: ""         # Slite note ID of a template doc (optional, uses built-in default if empty)
 
 agent:
   max_pr_files: 50
