@@ -48,5 +48,5 @@ Body sections:
 
 - GitHub: `mcp__plugin_github_github__*` tools
 - Slack: `mcp__claude_ai_Slack__*` tools
-- Jira: Atlassian MCP if available, fallback to REST API via curl
-- Slite: REST API via curl (no MCP available)
+- Jira: `mcp__atlassian__*` tools
+- Slite: `mcp__slite__*` tools
