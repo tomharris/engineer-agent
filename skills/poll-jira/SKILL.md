@@ -10,7 +10,8 @@ Check Jira for tickets assigned to the configured user that need implementation.
 
 ## Tools Needed
 
-- `Bash` — curl to Jira REST API (or Atlassian MCP if available)
+- `mcp__atlassian__searchJiraIssuesUsingJql` — search for tickets by JQL
+- `mcp__atlassian__getJiraIssue` — fetch individual ticket details
 - `Read` — read config and state
 - `Write` — create queue items
 - `Glob` — check for existing queue items
@@ -19,7 +20,7 @@ Check Jira for tickets assigned to the configured user that need implementation.
 
 ### 1. Load Config
 
-Read `${CLAUDE_PLUGIN_ROOT}/config/engineer.yaml`. Extract `jira.base_url`, `jira.project`, `jira.assignee`, and `jira.statuses`.
+Read `${CLAUDE_PLUGIN_ROOT}/config/engineer.yaml`. Extract `jira.project`, `jira.assignee`, and `jira.statuses`.
 
 ### 2. Load Dedup State
 
@@ -32,16 +33,11 @@ Build a JQL query:
 project = {project} AND assignee = "{assignee}" AND status IN ({statuses}) AND updated > "{last_checked}"
 ```
 
-**Try Atlassian MCP first:** Check if Atlassian MCP tools are available. If so, use them to query.
+Call `mcp__atlassian__searchJiraIssuesUsingJql` with the JQL query to get matching tickets.
 
-**Fallback to REST API:** Use Bash with curl:
-```bash
-curl -s -u "$JIRA_EMAIL:$JIRA_API_TOKEN" \
-  -H "Content-Type: application/json" \
-  "{base_url}/rest/api/3/search?jql={encoded_jql}&fields=summary,description,status,priority,labels,comment"
-```
-
-The user must have `JIRA_EMAIL` and `JIRA_API_TOKEN` environment variables set.
+For each ticket that needs detailed information (description, comments), call `mcp__atlassian__getJiraIssue` with the ticket key to fetch full details including:
+- summary, description, status, priority, labels
+- recent comments
 
 ### 4. Filter Results
 
@@ -61,7 +57,7 @@ For each new ticket, create a file in `${CLAUDE_PLUGIN_ROOT}/queue/incoming/`:
 ---
 type: ticket
 source: jira
-source_url: "{base_url}/browse/{ticket_key}"
+source_url: "{ticket_url_from_mcp_response}"
 source_id: "{ticket_key}"
 title: "{ticket_summary}"
 priority: "{map_jira_priority}"

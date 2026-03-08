@@ -10,7 +10,9 @@ Check Slite for documents tagged with review labels.
 
 ## Tools Needed
 
-- `Bash` — curl to Slite API
+- `mcp__slite__search-notes` — search for documents
+- `mcp__slite__get-note` — fetch full document content
+- `mcp__slite__get-note-children` — navigate document tree
 - `Read` — read config and state
 - `Write` — create queue items
 - `Glob` — check for existing queue items
@@ -19,29 +21,23 @@ Check Slite for documents tagged with review labels.
 
 ### 1. Load Config
 
-Read `${CLAUDE_PLUGIN_ROOT}/config/engineer.yaml`. Extract `slite.api_token_env` and `slite.doc_labels`.
-
-Get the API token from the environment variable named in `slite.api_token_env`.
+Read `${CLAUDE_PLUGIN_ROOT}/config/engineer.yaml`. Extract `slite.doc_labels`.
 
 ### 2. Load Dedup State
 
 Read `${CLAUDE_PLUGIN_ROOT}/state/last-poll.yaml`. Note `slite.last_checked` and `slite.seen_docs`.
 
-### 3. Query Slite API
+### 3. Query Slite
 
-Use Bash with curl to search for documents:
-
-```bash
-curl -s -H "Authorization: Bearer $SLITE_API_TOKEN" \
-  -H "Content-Type: application/json" \
-  "https://api.slite.com/v1/notes?limit=20"
-```
+Call `mcp__slite__search-notes` to search for documents.
 
 Filter results for documents that:
 - Have labels matching `slite.doc_labels` (e.g., "needs-review")
 - Were updated after `slite.last_checked`
 - Are not already in `slite.seen_docs`
 - Don't already exist in any queue directory
+
+For each matching document, call `mcp__slite__get-note` with the document ID to fetch the full content.
 
 ### 4. Create Queue Items
 
@@ -71,7 +67,7 @@ doc_id: "{doc_id}"
 **Author:** {author_name}
 
 ### Document Content
-{full document text fetched via API}
+{full document text from mcp__slite__get-note}
 ```
 
 ### 5. Process Incoming Items

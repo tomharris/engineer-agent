@@ -1,7 +1,7 @@
 ---
 description: "Review and approve/reject queued engineer-agent work items"
 argument-hint: "[filter: pr|slack|ticket|doc] [--all]"
-allowed-tools: ["Bash", "Read", "Write", "Edit", "Glob", "Grep", "Agent", "AskUserQuestion", "mcp__plugin_github_github__pull_request_review_write", "mcp__plugin_github_github__create_pull_request", "mcp__plugin_github_github__add_issue_comment", "mcp__claude_ai_Slack__slack_send_message"]
+allowed-tools: ["Bash", "Read", "Write", "Edit", "Glob", "Grep", "Agent", "AskUserQuestion", "mcp__plugin_github_github__pull_request_review_write", "mcp__plugin_github_github__create_pull_request", "mcp__plugin_github_github__add_issue_comment", "mcp__claude_ai_Slack__slack_send_message", "mcp__slite__append-blocks"]
 ---
 
 # Engineer Agent: Review Queue
@@ -61,7 +61,7 @@ Ask the user what to do:
 - For `pr-review` type: Call `mcp__plugin_github_github__pull_request_review_write` to submit the review on the PR.
 - For `slack-question` type: Call `mcp__claude_ai_Slack__slack_send_message` to post the reply in the thread.
 - For `ticket` type: Call `mcp__plugin_github_github__create_pull_request` to open a PR from the implementation branch.
-- For `doc-review` type: Use Bash with curl to post comments to the Slite API.
+- For `doc-review` type: Call `mcp__slite__append-blocks` to post review comments on the document.
 
 After executing, update the file's frontmatter `status` to `completed` and move it from `queue/drafts/` to `queue/completed/` (write to new location, delete from old).
 
