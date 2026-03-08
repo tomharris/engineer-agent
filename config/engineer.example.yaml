@@ -13,13 +13,11 @@ slack:
   ignore_bots: true
 
 jira:
-  base_url: "https://myorg.atlassian.net"
   project: "ENG"
   assignee: "me@example.com"
   statuses: ["To Do", "In Progress"]
 
 slite:
-  api_token_env: "SLITE_API_TOKEN"
   doc_labels: ["needs-review"]
 
 agent:
