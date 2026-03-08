@@ -1,0 +1,7 @@
+{
+  "name": "engineer-agent",
+  "description": "Automates senior software engineer tasks: PR review, Slack Q&A, ticket implementation, design doc review, and standup generation. Uses an approval queue so you stay in control.",
+  "author": {
+    "name": "Tom"
+  }
+}

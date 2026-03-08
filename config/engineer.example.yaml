@@ -1,0 +1,29 @@
+# Engineer Agent Configuration
+# Copy this file to config/engineer.yaml and fill in your values.
+
+github:
+  owner: "myorg"
+  repos: ["repo-a", "repo-b"]
+  review_requested_for: "my-username"
+  ignore_labels: ["wip", "draft"]
+
+slack:
+  channels: ["C12345678"]
+  keywords: ["@myname"]
+  ignore_bots: true
+
+jira:
+  base_url: "https://myorg.atlassian.net"
+  project: "ENG"
+  assignee: "me@example.com"
+  statuses: ["To Do", "In Progress"]
+
+slite:
+  api_token_env: "SLITE_API_TOKEN"
+  doc_labels: ["needs-review"]
+
+agent:
+  max_pr_files: 50
+  standup_channel: "C98765432"
+  digest_channel: "C98765432"
+  cron_interval_minutes: 15
