@@ -24,8 +24,13 @@ Everything goes through an approval queue — nothing is posted until you say so
 ## Installation
 
 ```bash
-# Install the plugin
-claude plugin add /path/to/engineer-agent
+# For development (loads plugin for this session only)
+claude --plugin-dir /path/to/engineer-agent
+
+# For permanent installation
+# Inside a Claude Code session, run:
+#   /plugin marketplace add /path/to/engineer-agent
+#   /plugin install engineer-agent
 
 # Copy the example config and edit with your values
 cp config/engineer.example.yaml config/engineer.yaml
