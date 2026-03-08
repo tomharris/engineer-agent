@@ -10,7 +10,8 @@ Generate a thorough review of a design document with brief inline comments.
 
 ## Tools Needed
 
-- `Bash` — curl to Slite API for fetching/commenting
+- `mcp__slite__get-note` — fetch document content from Slite
+- `mcp__slite__append-blocks` — post review comments to Slite documents
 - `Read` — read queue items
 - `Write` — write draft review
 - `Grep`, `Glob` — search codebase for referenced code
