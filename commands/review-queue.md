@@ -1,7 +1,7 @@
 ---
 description: "Review and approve/reject queued engineer-agent work items"
-argument-hint: "[filter: pr|slack|ticket|doc] [--all]"
-allowed-tools: ["Bash", "Read", "Write", "Edit", "Glob", "Grep", "Agent", "AskUserQuestion", "mcp__plugin_github_github__pull_request_review_write", "mcp__plugin_github_github__create_pull_request", "mcp__plugin_github_github__add_issue_comment", "mcp__claude_ai_Slack__slack_send_message", "mcp__slite__append-blocks"]
+argument-hint: "[filter: pr|slack|ticket|doc|spec|design] [--all]"
+allowed-tools: ["Bash", "Read", "Write", "Edit", "Glob", "Grep", "Agent", "AskUserQuestion", "mcp__plugin_github_github__pull_request_review_write", "mcp__plugin_github_github__create_pull_request", "mcp__plugin_github_github__add_issue_comment", "mcp__claude_ai_Slack__slack_send_message", "mcp__slite__append-blocks", "mcp__slite__create-note"]
 ---
 
 # Engineer Agent: Review Queue
@@ -10,7 +10,7 @@ Review pending draft items and approve, edit, or reject them.
 
 ## Arguments
 
-- `$ARGUMENTS` may contain a filter: `pr`, `slack`, `ticket`, or `doc` to show only that type
+- `$ARGUMENTS` may contain a filter: `pr`, `slack`, `ticket`, `doc`, `spec`, or `design` to show only that type
 - `$ARGUMENTS` may contain `--all` to show all items including completed/rejected
 
 ## Steps
@@ -62,6 +62,8 @@ Ask the user what to do:
 - For `slack-question` type: Call `mcp__claude_ai_Slack__slack_send_message` to post the reply in the thread.
 - For `ticket` type: Call `mcp__plugin_github_github__create_pull_request` to open a PR from the implementation branch.
 - For `doc-review` type: Call `mcp__slite__append-blocks` to post review comments on the document.
+- For `spec-refinement` type: No external action needed. Move to `queue/completed/`. Print: "Spec refinement complete. Run `/engineer create-design-doc {source_url}` to generate the design doc."
+- For `design-doc` type: Call `mcp__slite__create-note` with title from frontmatter, parent from `config.slite.design_doc_parent`, and content from `## Draft Response`. Print: "Design doc created in Slite: {url}"
 
 After executing, update the file's frontmatter `status` to `completed` and move it from `queue/drafts/` to `queue/completed/` (write to new location, delete from old).
 

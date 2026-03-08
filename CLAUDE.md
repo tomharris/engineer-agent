@@ -31,7 +31,7 @@ Files move through: `queue/incoming/` → `queue/drafts/` → `queue/completed/`
 Filename: `{YYYYMMDD-HHmmss}-{type}-{short-id}.md`
 
 YAML frontmatter fields:
-- `type`: pr-review | slack-question | ticket | doc-review
+- `type`: pr-review | slack-question | ticket | doc-review | spec-refinement | design-doc
 - `source`: github | slack | jira | slite
 - `source_url`: URL to the original item
 - `source_id`: Unique identifier (e.g. "org/repo#142")
