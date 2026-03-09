@@ -12,11 +12,9 @@ Generate a thorough review of a design document with brief inline comments.
 
 - `mcp__slite__get-note` — fetch document content from Slite
 - `mcp__slite__append-blocks` — post review comments to Slite documents
-- `Read` — read queue items
+- `Read` — read queue items and source code referenced in the doc
 - `Write` — write draft review
-- `Grep`, `Glob` — search codebase for referenced code
-- `mcp__plugin_github_github__get_file_contents` — read code referenced in the doc
-- `mcp__plugin_github_github__search_code` — find relevant implementations
+- `Grep`, `Glob` — search codebase for referenced code and find relevant implementations
 
 ## Input
 

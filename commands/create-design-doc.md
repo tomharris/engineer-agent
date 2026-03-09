@@ -3,7 +3,6 @@ description: "Create a design doc from a refined PM feature spec in Slite"
 argument-hint: "<slite-url-or-id>"
 allowed-tools: ["Bash", "Read", "Write", "Glob", "Grep", "AskUserQuestion",
   "mcp__slite__get-note", "mcp__slite__get-note-children", "mcp__slite__create-note",
-  "mcp__plugin_github_github__get_file_contents", "mcp__plugin_github_github__search_code",
   "mcp__atlassian__searchJiraIssuesUsingJql", "mcp__atlassian__getJiraIssue"]
 ---
 

@@ -60,9 +60,9 @@ Body sections:
 - `## Context` — metadata about the work item
 - `## Draft Response` — filled by the processing skill
 
-## Available MCP Integrations
+## Available Integrations
 
-- GitHub: `mcp__plugin_github_github__*` tools
+- GitHub: `gh` CLI via Bash (requires `gh auth login`)
 - Slack: `mcp__claude_ai_Slack__*` tools
 - Jira: `mcp__atlassian__*` tools
 - Slite: `mcp__slite__*` tools
