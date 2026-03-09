@@ -31,14 +31,15 @@ claude --plugin-dir /path/to/engineer-agent
 # Inside a Claude Code session, run:
 #   /plugin marketplace add /path/to/engineer-agent
 #   /plugin install engineer-agent
-
-# In your project directory, create the config:
-mkdir -p .claude/engineer-agent
-cp /path/to/engineer-agent/config/engineer.example.yaml .claude/engineer-agent/engineer.yaml
-
-# Create queue and state directories (run from your project root)
-/path/to/engineer-agent/scripts/install-cron.sh .
 ```
+
+Then initialize in your project:
+
+```
+/engineer setup
+```
+
+This creates the config file, queue directories, and installs automated polling in one step. After setup, edit `.claude/engineer-agent/engineer.yaml` to configure your sources.
 
 ## Configuration
 
@@ -74,6 +75,14 @@ agent:
 Only configure the sources you use — the agent skips unconfigured integrations.
 
 ## Usage
+
+### `/engineer setup`
+
+One-step project initialization. Creates config, queue directories, and installs cron polling.
+
+```
+/engineer setup
+```
 
 ### `/engineer poll [source]`
 
@@ -159,13 +168,12 @@ Skills are auto-invoked during polling and processing:
 
 ## Automated Polling
 
-Set up cron to poll automatically:
+`/engineer setup` installs cron polling automatically with the interval from your config (default: 15 minutes).
+
+To customize the interval or reinstall manually:
 
 ```bash
-# Install with default 15-minute interval (run from your project root)
-/path/to/engineer-agent/scripts/install-cron.sh .
-
-# Or specify a custom interval (in minutes)
+# Install with a custom interval (in minutes)
 /path/to/engineer-agent/scripts/install-cron.sh . 30
 ```
 
@@ -185,6 +193,7 @@ crontab -l | grep -v engineer-agent | crontab -
 ```
 .claude-plugin/plugin.json     Plugin manifest
 commands/
+  setup.md                     /engineer setup command
   poll.md                      /engineer poll command
   review-queue.md              /engineer review-queue command
   status.md                    /engineer status command
