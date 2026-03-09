@@ -20,7 +20,7 @@ Check Jira for tickets assigned to the configured user that need implementation.
 
 ### 1. Load Config
 
-Read `.claude/engineer-agent/engineer.yaml`. Extract `jira.project`, `jira.assignee`, and `jira.statuses`.
+Read `.claude/engineer-agent/engineer.yaml`. Extract `jira.project`, `jira.assignee`, `jira.statuses`, and `agent.branch_prefix` (default: `engineer-agent`).
 
 ### 2. Load Dedup State
 
@@ -102,7 +102,7 @@ The `## Draft Response` section for tickets:
 ### Implementation Plan
 
 **Target repo:** {repo}
-**Branch:** engineer-agent/{ticket_key}
+**Branch:** {branch_prefix}/{ticket_key}
 **Approach:** {2-3 sentence summary}
 
 ### Files to Modify
