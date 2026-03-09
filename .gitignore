@@ -1,5 +1,2 @@
 .worktrees/
-queue/
-state/
-config/engineer.yaml
 .claude/*.local.json

@@ -32,16 +32,17 @@ claude --plugin-dir /path/to/engineer-agent
 #   /plugin marketplace add /path/to/engineer-agent
 #   /plugin install engineer-agent
 
-# Copy the example config and edit with your values
-cp config/engineer.example.yaml config/engineer.yaml
+# In your project directory, create the config:
+mkdir -p .claude/engineer-agent
+cp /path/to/engineer-agent/config/engineer.example.yaml .claude/engineer-agent/engineer.yaml
 
-# Create queue and state directories
-./scripts/install-cron.sh
+# Create queue and state directories (run from your project root)
+/path/to/engineer-agent/scripts/install-cron.sh .
 ```
 
 ## Configuration
 
-Edit `config/engineer.yaml` to match your setup:
+Edit `.claude/engineer-agent/engineer.yaml` in your project to match your setup:
 
 ```yaml
 github:
@@ -129,12 +130,12 @@ The digest includes items processed, approval rates, and breakdowns by type. App
 ### Queue Lifecycle
 
 ```
-Source detected → queue/incoming/ → skill drafts response → queue/drafts/
-                                                                  ↓
-                                              human reviews via /engineer review-queue
-                                                        ↓                    ↓
-                                              queue/completed/       queue/rejected/
-                                              (action posted)        (with reason)
+Source detected → .claude/engineer-agent/queue/incoming/ → skill drafts → queue/drafts/
+                                                                              ↓
+                                                        human reviews via /engineer review-queue
+                                                                  ↓                    ↓
+                                                        queue/completed/       queue/rejected/
+                                                        (action posted)        (with reason)
 ```
 
 Queue items are markdown files with YAML frontmatter. Filenames follow the pattern `{YYYYMMDD-HHmmss}-{type}-{short-id}.md`.
@@ -161,14 +162,14 @@ Skills are auto-invoked during polling and processing:
 Set up cron to poll automatically:
 
 ```bash
-# Install with default 15-minute interval
-./scripts/install-cron.sh
+# Install with default 15-minute interval (run from your project root)
+/path/to/engineer-agent/scripts/install-cron.sh .
 
 # Or specify a custom interval (in minutes)
-./scripts/install-cron.sh 30
+/path/to/engineer-agent/scripts/install-cron.sh . 30
 ```
 
-This installs a crontab entry that runs `scripts/cron-poll.sh`, which invokes Claude headlessly to poll all sources. Logs are written to `state/cron-poll.log`.
+This installs a crontab entry that runs `scripts/cron-poll.sh`, which invokes Claude headlessly to poll all sources. Logs are written to `.claude/engineer-agent/state/cron-poll.log`.
 
 ```bash
 # Verify cron is running
@@ -180,6 +181,7 @@ crontab -l | grep -v engineer-agent | crontab -
 
 ## Project Structure
 
+### Plugin (this repo)
 ```
 .claude-plugin/plugin.json     Plugin manifest
 commands/
@@ -203,11 +205,17 @@ scripts/
   install-cron.sh              Cron setup script
 config/
   engineer.example.yaml        Configuration template
-queue/                         File-based work queue (gitignored)
-  incoming/                    Newly detected items
-  drafts/                      Items with drafted responses
-  completed/                   Approved and posted
-  rejected/                    Rejected with reason
-state/                         Poll state tracking (gitignored)
-  last-poll.yaml               Dedup timestamps and seen IDs
+```
+
+### Project-local data (in your project)
+```
+<project>/.claude/engineer-agent/
+  engineer.yaml                User config (copied from template)
+  queue/
+    incoming/                  Newly detected items
+    drafts/                    Items with drafted responses
+    completed/                 Approved and posted
+    rejected/                  Rejected with reason
+  state/
+    last-poll.yaml             Dedup timestamps and seen IDs
 ```

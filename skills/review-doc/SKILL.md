@@ -20,7 +20,7 @@ Generate a thorough review of a design document with brief inline comments.
 
 ## Input
 
-A queue item file in `queue/incoming/` with type `doc-review`, containing the document content.
+A queue item file in `.claude/engineer-agent/queue/incoming/` with type `doc-review`, containing the document content.
 
 ## Steps
 
@@ -95,7 +95,7 @@ Update the queue item:
 - {anything important that's not covered}
 ```
 
-Update frontmatter `status` to `drafted` and move to `queue/drafts/`.
+Update frontmatter `status` to `drafted` and move to `.claude/engineer-agent/queue/drafts/`.
 
 ### 6. Report
 

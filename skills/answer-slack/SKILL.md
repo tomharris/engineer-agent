@@ -19,7 +19,7 @@ Generate a concise, helpful answer to a Slack question by researching the codeba
 
 ## Input
 
-A queue item file in `queue/incoming/` with type `slack-question`, containing the message text and thread context.
+A queue item file in `.claude/engineer-agent/queue/incoming/` with type `slack-question`, containing the message text and thread context.
 
 ## Steps
 
@@ -88,7 +88,7 @@ Update the queue item file:
 
 2. Update frontmatter `status` to `drafted`
 3. If confidence is low, update `priority` to `urgent`
-4. Move the file from `queue/incoming/` to `queue/drafts/`
+4. Move the file from `.claude/engineer-agent/queue/incoming/` to `.claude/engineer-agent/queue/drafts/`
 
 ### 5. Report
 

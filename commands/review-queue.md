@@ -17,11 +17,11 @@ Review pending draft items and approve, edit, or reject them.
 
 ### 1. Load Config
 
-Read `${CLAUDE_PLUGIN_ROOT}/config/engineer.yaml`. If missing, tell the user to copy `engineer.example.yaml` and stop.
+Read `.claude/engineer-agent/engineer.yaml`. If missing, tell the user to copy `engineer.example.yaml` and stop.
 
 ### 2. List Draft Items
 
-Use Glob to find all `.md` files in `${CLAUDE_PLUGIN_ROOT}/queue/drafts/` (excluding `.gitkeep`).
+Use Glob to find all `.md` files in `.claude/engineer-agent/queue/drafts/` (excluding `.gitkeep`).
 
 If a filter was provided in `$ARGUMENTS`, only show items matching that type in their YAML frontmatter `type` field.
 
@@ -62,18 +62,18 @@ Ask the user what to do:
 - For `slack-question` type: Call `mcp__claude_ai_Slack__slack_send_message` to post the reply in the thread.
 - For `ticket` type: Call `mcp__plugin_github_github__create_pull_request` to open a PR from the implementation branch.
 - For `doc-review` type: Call `mcp__slite__append-blocks` to post review comments on the document.
-- For `spec-refinement` type: No external action needed. Move to `queue/completed/`. Print: "Spec refinement complete. Run `/engineer create-design-doc {source_url}` to generate the design doc."
+- For `spec-refinement` type: No external action needed. Move to `.claude/engineer-agent/queue/completed/`. Print: "Spec refinement complete. Run `/engineer create-design-doc {source_url}` to generate the design doc."
 - For `design-doc` type: Call `mcp__slite__create-note` with title from frontmatter, parent from `config.slite.design_doc_parent`, and content from `## Draft Response`. Print: "Design doc created in Slite: {url}"
 
-After executing, update the file's frontmatter `status` to `completed` and move it from `queue/drafts/` to `queue/completed/` (write to new location, delete from old).
+After executing, update the file's frontmatter `status` to `completed` and move it from `.claude/engineer-agent/queue/drafts/` to `.claude/engineer-agent/queue/completed/` (write to new location, delete from old).
 
 **Edit** — Two options:
 1. **Inline**: Ask the user what to change. Apply their feedback to the `## Draft Response` section using Edit. Then re-display and ask for approval again.
 2. **Editor**: Tell the user the file path and ask them to edit it in their editor. When they confirm they're done, re-read the file and ask for approval.
 
-**Reject** — Ask for a brief reason. Add a `rejected_reason` field to the frontmatter. Update `status` to `rejected`. Move the file to `queue/rejected/`.
+**Reject** — Ask for a brief reason. Add a `rejected_reason` field to the frontmatter. Update `status` to `rejected`. Move the file to `.claude/engineer-agent/queue/rejected/`.
 
-**Skip** — Leave the file in `queue/drafts/` unchanged. Move to the next item.
+**Skip** — Leave the file in `.claude/engineer-agent/queue/drafts/` unchanged. Move to the next item.
 
 ### 7. Loop
 

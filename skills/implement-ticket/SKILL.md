@@ -18,7 +18,7 @@ Implement the code changes described in a Jira ticket using iterative developmen
 
 ## Input
 
-A queue item file in `queue/drafts/` with type `ticket` that has been approved by the human. The file contains the ticket details, acceptance criteria, and implementation plan.
+A queue item file in `.claude/engineer-agent/queue/drafts/` with type `ticket` that has been approved by the human. The file contains the ticket details, acceptance criteria, and implementation plan.
 
 ## Steps
 
@@ -107,7 +107,7 @@ Call `mcp__plugin_github_github__create_pull_request` with:
 
 ### 6. Update Queue Item
 
-Move the queue item to `queue/completed/` with `status: completed`.
+Move the queue item to `.claude/engineer-agent/queue/completed/` with `status: completed`.
 
 ## Edge Cases
 
