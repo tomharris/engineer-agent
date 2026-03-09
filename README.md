@@ -19,7 +19,7 @@ Everything goes through an approval queue — nothing is posted until you say so
 ## Prerequisites
 
 - [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) installed and authenticated
-- **GitHub MCP integration** — for PR reviews and code search (`mcp__plugin_github_github__*`)
+- **GitHub CLI (`gh`)** — for PR reviews, code operations, and GitHub API access. Install from [cli.github.com](https://cli.github.com) and run `gh auth login`
 - **Slack MCP integration** — for channel polling and message posting (`mcp__claude_ai_Slack__*`)
 - **Jira MCP integration** (optional) — for ticket polling and implementation (`mcp__atlassian__*`)
 - **Slite MCP integration** (optional) — for document reviews (`mcp__slite__*`)

@@ -10,12 +10,10 @@ Check configured GitHub repos for pull requests that need review and create queu
 
 ## Tools Needed
 
-- `mcp__plugin_github_github__list_pull_requests` — list PRs per repo
-- `mcp__plugin_github_github__pull_request_read` — read PR details
+- `Bash` — `gh` CLI commands for GitHub API access, file operations
 - `Read` — read config and state files
 - `Write` — create queue items
 - `Glob` — check for existing queue items
-- `Bash` — file operations
 
 ## Steps
 
@@ -35,10 +33,11 @@ If the state file doesn't exist, treat everything as new (use epoch as last_chec
 
 For each repo in `github.repos`:
 
-1. Call `mcp__plugin_github_github__list_pull_requests` with:
-   - `owner`: from config `github.owner`
-   - `repo`: the repo name
-   - `state`: "open"
+1. Run via Bash:
+   ```bash
+   gh pr list --repo {owner}/{repo} --state open --json number,title,author,url,labels,headRefName,baseRefName,changedFiles,reviewRequests,body --limit 100
+   ```
+   This returns JSON with PR details. The `reviewRequests` array contains objects with `login` fields to match against `review_requested_for`.
 
 2. Filter results:
    - Only PRs where review is requested from `github.review_requested_for`
@@ -83,7 +82,11 @@ Branch: {head_branch} → {base_branch}
 ### 5. Process Incoming Items
 
 After creating queue items, for each new item in `incoming/`, invoke the **review-pr** skill behavior:
-- Read the PR diff and details
+- Fetch the PR details and diff via Bash:
+  ```bash
+  gh pr view {number} --repo {owner}/{repo} --json title,body,author,files,commits,headRefName,baseRefName,url,number
+  gh pr diff {number} --repo {owner}/{repo}
+  ```
 - Generate a structured review
 - Write the review to the `## Draft Response` section
 - Move the file from `incoming/` to `drafts/`

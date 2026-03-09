@@ -11,10 +11,8 @@ Analyze a PM's feature spec from Slite and produce structured clarifying questio
 ## Tools Needed
 
 - `mcp__slite__get-note` — fetch spec content from Slite
-- `Read`, `Write` — read/write queue items
-- `Grep`, `Glob` — search codebase for referenced code
-- `mcp__plugin_github_github__get_file_contents` — read code referenced in the spec
-- `mcp__plugin_github_github__search_code` — find relevant implementations
+- `Read`, `Write` — read/write queue items and source code
+- `Grep`, `Glob` — search codebase for referenced code and find relevant implementations
 - `mcp__atlassian__searchJiraIssuesUsingJql` — find related/overlapping tickets
 - `mcp__atlassian__getJiraIssue` — read related ticket details
 
@@ -58,7 +56,7 @@ Read the queue item to get the full spec content from the `## Context` section.
 
 ### 3. Cross-Reference
 
-**Codebase** — Use GitHub MCP tools to verify any claims about current systems. Check if described interfaces or behaviors match actual code.
+**Codebase** — Use `Grep` and `Read` to verify any claims about current systems. Check if described interfaces or behaviors match actual code.
 
 **Jira** — Search for related or overlapping tickets. Note any duplicate work or dependencies.
 

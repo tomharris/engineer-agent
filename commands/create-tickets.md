@@ -3,7 +3,6 @@ description: "Break a Slite design doc into phased implementation tickets"
 argument-hint: "<slite-url-or-id>"
 allowed-tools: ["Bash", "Read", "Write", "Glob", "Grep", "AskUserQuestion",
   "mcp__slite__get-note", "mcp__slite__get-note-children",
-  "mcp__plugin_github_github__get_file_contents", "mcp__plugin_github_github__search_code",
   "mcp__atlassian__searchJiraIssuesUsingJql", "mcp__atlassian__getJiraIssue"]
 ---
 

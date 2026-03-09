@@ -11,10 +11,8 @@ Generate a phased ticket breakdown from an engineering design doc, with real fil
 ## Tools Needed
 
 - `mcp__slite__get-note` — fetch design doc from Slite
-- `Read`, `Write` — read/write queue items
-- `Grep`, `Glob` — explore codebase architecture
-- `mcp__plugin_github_github__get_file_contents` — read relevant source code
-- `mcp__plugin_github_github__search_code` — find implementations and patterns
+- `Read`, `Write` — read/write queue items and source code
+- `Grep`, `Glob` — explore codebase architecture, find implementations and patterns
 - `mcp__atlassian__searchJiraIssuesUsingJql` — find existing related tickets
 - `mcp__atlassian__getJiraIssue` — read ticket details
 

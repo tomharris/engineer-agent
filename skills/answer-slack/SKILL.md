@@ -11,9 +11,7 @@ Generate a concise, helpful answer to a Slack question by researching the codeba
 ## Tools Needed
 
 - `mcp__claude_ai_Slack__slack_read_thread` — read full thread context
-- `mcp__plugin_github_github__get_file_contents` — read code in repos
-- `mcp__plugin_github_github__search_code` — search for relevant code
-- `Read` — read queue items and config
+- `Read` — read queue items, config, and source code files
 - `Write` — write draft answer
 - `Grep`, `Glob` — search local codebase
 
@@ -36,8 +34,8 @@ Based on the question type:
 
 **Code/implementation questions:**
 - Read the config to identify which repos are in scope
-- Use `mcp__plugin_github_github__search_code` to find relevant code
-- Use `mcp__plugin_github_github__get_file_contents` to read specific files referenced
+- Use `Grep` to search for relevant code patterns in the local codebase
+- Use `Read` to read specific files referenced in the question
 - Check git history if the question is about intent or history ("why was this done?")
 
 **Status questions:**
