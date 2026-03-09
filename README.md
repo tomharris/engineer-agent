@@ -18,8 +18,8 @@ Everything goes through an approval queue — nothing is posted until you say so
 - [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) installed and authenticated
 - **GitHub MCP integration** — for PR reviews and code search (`mcp__plugin_github_github__*`)
 - **Slack MCP integration** — for channel polling and message posting (`mcp__claude_ai_Slack__*`)
-- **Jira** (optional) — requires `JIRA_EMAIL` and `JIRA_API_TOKEN` environment variables
-- **Slite** (optional) — requires `SLITE_API_TOKEN` environment variable
+- **Jira MCP integration** (optional) — for ticket polling and implementation (`mcp__atlassian__*`)
+- **Slite MCP integration** (optional) — for document reviews (`mcp__slite__*`)
 
 ## Installation
 
@@ -56,13 +56,11 @@ slack:
   ignore_bots: true
 
 jira:
-  base_url: "https://myorg.atlassian.net"
   project: "ENG"
   assignee: "me@example.com"
   statuses: ["To Do", "In Progress"]
 
 slite:
-  api_token_env: "SLITE_API_TOKEN"
   doc_labels: ["needs-review"]
 
 agent:
