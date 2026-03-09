@@ -8,7 +8,12 @@ engineer-agent — A Claude Code plugin that automates senior software engineer 
 
 ## Plugin Structure
 
-This repo IS the plugin. For development, run `claude --plugin-dir /path/to/engineer-agent`. For permanent install, use `/plugin marketplace add /path/to/engineer-agent` then `/plugin install engineer-agent`.
+This repo IS the plugin.
+
+- **Development**: `claude --plugin-dir /path/to/engineer-agent`
+- **Permanent install**:
+  1. `/plugin marketplace add tomharris/engineer-agent`
+  2. `/plugin install engineer-agent`
 
 ```
 .claude-plugin/plugin.json    — Plugin manifest

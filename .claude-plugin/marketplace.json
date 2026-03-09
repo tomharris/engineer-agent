@@ -1,0 +1,14 @@
+{
+  "name": "engineer-agent",
+  "description": "Marketplace for engineer-agent plugin",
+  "owner": { "name": "Tom" },
+  "plugins": [
+    {
+      "name": "engineer-agent",
+      "description": "Automates senior software engineer tasks with an approval-gated workflow",
+      "version": "1.0.0",
+      "source": "github",
+      "repo": "tomharris/engineer-agent"
+    }
+  ]
+}
