@@ -21,11 +21,11 @@ Create a standup message from recent queue activity and git history.
 
 ### 1. Load Config
 
-Read `${CLAUDE_PLUGIN_ROOT}/config/engineer.yaml`. Extract `github.owner`, `github.repos`, `github.review_requested_for`, and `agent.standup_channel`.
+Read `.claude/engineer-agent/engineer.yaml`. Extract `github.owner`, `github.repos`, `github.review_requested_for`, and `agent.standup_channel`.
 
 ### 2. Gather Yesterday's Work
 
-**Completed queue items:** Glob for files in `${CLAUDE_PLUGIN_ROOT}/queue/completed/` with timestamps from the previous business day. Read each file's frontmatter to extract type, title, and source.
+**Completed queue items:** Glob for files in `.claude/engineer-agent/queue/completed/` with timestamps from the previous business day. Read each file's frontmatter to extract type, title, and source.
 
 **Git commits:** For each repo in config, call `mcp__plugin_github_github__list_commits` filtering by the configured user and the previous day's date range.
 
@@ -37,7 +37,7 @@ Group by category:
 
 ### 3. Gather Today's Planned Work
 
-**Pending queue items:** Glob for files in `${CLAUDE_PLUGIN_ROOT}/queue/drafts/` and `${CLAUDE_PLUGIN_ROOT}/queue/incoming/`. These represent upcoming work.
+**Pending queue items:** Glob for files in `.claude/engineer-agent/queue/drafts/` and `.claude/engineer-agent/queue/incoming/`. These represent upcoming work.
 
 **In-progress tickets:** Look for ticket-type items that are in progress or recently created.
 
@@ -50,7 +50,7 @@ Check for:
 
 ### 5. Write the Draft
 
-Create a queue item in `${CLAUDE_PLUGIN_ROOT}/queue/drafts/`:
+Create a queue item in `.claude/engineer-agent/queue/drafts/`:
 
 **Filename:** `{YYYYMMDD-HHmmss}-standup.md`
 

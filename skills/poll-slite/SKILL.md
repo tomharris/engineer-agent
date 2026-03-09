@@ -21,11 +21,11 @@ Check Slite for documents tagged with review labels.
 
 ### 1. Load Config
 
-Read `${CLAUDE_PLUGIN_ROOT}/config/engineer.yaml`. Extract `slite.doc_labels`.
+Read `.claude/engineer-agent/engineer.yaml`. Extract `slite.doc_labels`.
 
 ### 2. Load Dedup State
 
-Read `${CLAUDE_PLUGIN_ROOT}/state/last-poll.yaml`. Note `slite.last_checked` and `slite.seen_docs`.
+Read `.claude/engineer-agent/state/last-poll.yaml`. Note `slite.last_checked` and `slite.seen_docs`.
 
 ### 3. Query Slite
 
@@ -41,7 +41,7 @@ For each matching document, call `mcp__slite__get-note` with the document ID to 
 
 ### 4. Create Queue Items
 
-For each new document, create a file in `${CLAUDE_PLUGIN_ROOT}/queue/incoming/`:
+For each new document, create a file in `.claude/engineer-agent/queue/incoming/`:
 
 **Filename:** `{YYYYMMDD-HHmmss}-doc-review-{doc_id_short}.md`
 

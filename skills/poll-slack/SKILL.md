@@ -21,11 +21,11 @@ Check configured Slack channels for messages matching keywords that may need a r
 
 ### 1. Load Config
 
-Read `${CLAUDE_PLUGIN_ROOT}/config/engineer.yaml`. Extract `slack.channels`, `slack.keywords`, and `slack.ignore_bots`.
+Read `.claude/engineer-agent/engineer.yaml`. Extract `slack.channels`, `slack.keywords`, and `slack.ignore_bots`.
 
 ### 2. Load Dedup State
 
-Read `${CLAUDE_PLUGIN_ROOT}/state/last-poll.yaml`. Note `slack.last_checked_ts` (a Slack message timestamp string).
+Read `.claude/engineer-agent/state/last-poll.yaml`. Note `slack.last_checked_ts` (a Slack message timestamp string).
 
 ### 3. Search for Matching Messages
 
@@ -53,7 +53,7 @@ Only create queue items for messages that genuinely need a response.
 
 ### 5. Create Queue Items
 
-For each relevant message, create a file in `${CLAUDE_PLUGIN_ROOT}/queue/incoming/`:
+For each relevant message, create a file in `.claude/engineer-agent/queue/incoming/`:
 
 **Filename:** `{YYYYMMDD-HHmmss}-slack-question-{channel_id}-{msg_ts}.md`
 
@@ -95,7 +95,7 @@ For each new item, invoke the **answer-slack** skill behavior to generate a draf
 
 ### 7. Update State
 
-Update `slack.last_checked_ts` in `${CLAUDE_PLUGIN_ROOT}/state/last-poll.yaml` to the highest message timestamp seen.
+Update `slack.last_checked_ts` in `.claude/engineer-agent/state/last-poll.yaml` to the highest message timestamp seen.
 
 ### 8. Report
 

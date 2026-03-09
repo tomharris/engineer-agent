@@ -19,7 +19,7 @@ Analyze a PM's feature spec from Slite and draft structured clarifying questions
 
 ### 1. Load Config
 
-Read `${CLAUDE_PLUGIN_ROOT}/config/engineer.yaml`. If missing, tell the user to copy `engineer.example.yaml` and stop.
+Read `.claude/engineer-agent/engineer.yaml`. If missing, tell the user to copy `engineer.example.yaml` and stop.
 
 ### 2. Parse Arguments
 
@@ -36,7 +36,7 @@ If the fetch fails, report the error and stop.
 
 ### 4. Create Queue Item
 
-Generate a timestamp and write a new file to `${CLAUDE_PLUGIN_ROOT}/queue/incoming/`:
+Generate a timestamp and write a new file to `.claude/engineer-agent/queue/incoming/`:
 
 Filename: `{YYYYMMDD-HHmmss}-spec-refinement-{doc_id_short}.md` (use first 8 chars of doc ID)
 

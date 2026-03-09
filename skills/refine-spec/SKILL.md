@@ -20,7 +20,7 @@ Analyze a PM's feature spec from Slite and produce structured clarifying questio
 
 ## Input
 
-A queue item file in `queue/incoming/` with type `spec-refinement`, containing the spec content in `## Context`.
+A queue item file in `.claude/engineer-agent/queue/incoming/` with type `spec-refinement`, containing the spec content in `## Context`.
 
 ## Steps
 
@@ -96,7 +96,7 @@ Update the queue item with the analysis:
 
 The `_Answer:_` fields are intentionally left blank — the human fills these in via the Edit action in review-queue after consulting with the PM. Multiple edit cycles are expected.
 
-Update frontmatter `status` to `drafted` and move to `queue/drafts/`.
+Update frontmatter `status` to `drafted` and move to `.claude/engineer-agent/queue/drafts/`.
 
 ### 5. Report
 

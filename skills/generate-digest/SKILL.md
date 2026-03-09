@@ -19,24 +19,24 @@ Create a comprehensive summary of all agent activity for the day.
 
 ### 1. Load Config
 
-Read `${CLAUDE_PLUGIN_ROOT}/config/engineer.yaml`. Extract `agent.digest_channel`.
+Read `.claude/engineer-agent/engineer.yaml`. Extract `agent.digest_channel`.
 
 ### 2. Gather All Activity
 
 Scan all queue directories for items from the current day (or since the last digest):
 
-**Completed items** (`queue/completed/`):
+**Completed items** (`.claude/engineer-agent/queue/completed/`):
 - Count by type (pr-review, slack-question, ticket, doc-review)
 - List each with title and source
 
-**Rejected items** (`queue/rejected/`):
+**Rejected items** (`.claude/engineer-agent/queue/rejected/`):
 - Count and list with rejection reasons
 
-**Pending items** (`queue/drafts/`):
+**Pending items** (`.claude/engineer-agent/queue/drafts/`):
 - Count by type
 - Note any aging items (older than 24h)
 
-**Incoming items** (`queue/incoming/`):
+**Incoming items** (`.claude/engineer-agent/queue/incoming/`):
 - Count any unprocessed items (shouldn't normally be any)
 
 ### 3. Calculate Metrics
@@ -49,7 +49,7 @@ Scan all queue directories for items from the current day (or since the last dig
 
 ### 4. Write the Draft
 
-Create a queue item in `${CLAUDE_PLUGIN_ROOT}/queue/drafts/`:
+Create a queue item in `.claude/engineer-agent/queue/drafts/`:
 
 **Filename:** `{YYYYMMDD-HHmmss}-digest.md`
 

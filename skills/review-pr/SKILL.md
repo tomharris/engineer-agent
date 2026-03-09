@@ -20,7 +20,7 @@ Generate a thorough code review for a pull request, structured with severity lev
 ## Input
 
 Either:
-- A queue item file path in `queue/incoming/` with type `pr-review`
+- A queue item file path in `.claude/engineer-agent/queue/incoming/` with type `pr-review`
 - Or a direct PR URL/reference (owner, repo, PR number)
 
 ## Steps
@@ -90,7 +90,7 @@ If working from a queue item, update the file:
 
 1. Add the `## Draft Response` section with the structured review
 2. Update frontmatter `status` from `incoming` to `drafted`
-3. Move the file from `queue/incoming/` to `queue/drafts/`
+3. Move the file from `.claude/engineer-agent/queue/incoming/` to `.claude/engineer-agent/queue/drafts/`
 
 The draft response format:
 

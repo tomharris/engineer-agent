@@ -11,16 +11,16 @@ Show the current status of the engineer-agent system.
 
 ### 1. Check Config
 
-Read the config file at `${CLAUDE_PLUGIN_ROOT}/config/engineer.yaml`.
+Read the config file at `.claude/engineer-agent/engineer.yaml`.
 
 If it does not exist, report:
-> Config not found. Copy `config/engineer.example.yaml` to `config/engineer.yaml` and fill in your values.
+> Config not found. Copy `config/engineer.example.yaml` from the plugin to `.claude/engineer-agent/engineer.yaml` in your project and fill in your values.
 
 If it exists, confirm: "Config loaded."
 
 ### 2. Queue Counts
 
-Count files (excluding .gitkeep) in each queue directory under `${CLAUDE_PLUGIN_ROOT}/queue/`:
+Count files (excluding .gitkeep) in each queue directory under `.claude/engineer-agent/queue/`:
 
 - `incoming/` — items detected but not yet processed
 - `drafts/` — items processed, awaiting human approval
@@ -40,7 +40,7 @@ Display as a summary table:
 
 ### 3. Last Poll Times
 
-Read `${CLAUDE_PLUGIN_ROOT}/state/last-poll.yaml` if it exists. Display the last poll time for each source (github, slack, jira, slite). If the file doesn't exist, report "No polls have run yet."
+Read `.claude/engineer-agent/state/last-poll.yaml` if it exists. Display the last poll time for each source (github, slack, jira, slite). If the file doesn't exist, report "No polls have run yet."
 
 ### 4. Summary
 

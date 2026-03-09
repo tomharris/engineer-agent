@@ -20,11 +20,11 @@ Check Jira for tickets assigned to the configured user that need implementation.
 
 ### 1. Load Config
 
-Read `${CLAUDE_PLUGIN_ROOT}/config/engineer.yaml`. Extract `jira.project`, `jira.assignee`, and `jira.statuses`.
+Read `.claude/engineer-agent/engineer.yaml`. Extract `jira.project`, `jira.assignee`, and `jira.statuses`.
 
 ### 2. Load Dedup State
 
-Read `${CLAUDE_PLUGIN_ROOT}/state/last-poll.yaml`. Note `jira.last_checked` and `jira.seen_tickets`.
+Read `.claude/engineer-agent/state/last-poll.yaml`. Note `jira.last_checked` and `jira.seen_tickets`.
 
 ### 3. Query Jira
 
@@ -48,7 +48,7 @@ For each ticket returned:
 
 ### 5. Create Queue Items
 
-For each new ticket, create a file in `${CLAUDE_PLUGIN_ROOT}/queue/incoming/`:
+For each new ticket, create a file in `.claude/engineer-agent/queue/incoming/`:
 
 **Filename:** `{YYYYMMDD-HHmmss}-ticket-{ticket_key}.md`
 

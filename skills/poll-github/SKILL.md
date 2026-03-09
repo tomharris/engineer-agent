@@ -21,13 +21,13 @@ Check configured GitHub repos for pull requests that need review and create queu
 
 ### 1. Load Config
 
-Read `${CLAUDE_PLUGIN_ROOT}/config/engineer.yaml`. Extract `github.owner`, `github.repos`, `github.review_requested_for`, and `github.ignore_labels`.
+Read `.claude/engineer-agent/engineer.yaml`. Extract `github.owner`, `github.repos`, `github.review_requested_for`, and `github.ignore_labels`.
 
 If config is missing, report the error and stop.
 
 ### 2. Load Dedup State
 
-Read `${CLAUDE_PLUGIN_ROOT}/state/last-poll.yaml` if it exists. Note the `github.last_checked` timestamp and `github.seen_prs` list.
+Read `.claude/engineer-agent/state/last-poll.yaml` if it exists. Note the `github.last_checked` timestamp and `github.seen_prs` list.
 
 If the state file doesn't exist, treat everything as new (use epoch as last_checked).
 
@@ -50,7 +50,7 @@ For each repo in `github.repos`:
 
 ### 4. Create Queue Items
 
-For each new PR found, create a file in `${CLAUDE_PLUGIN_ROOT}/queue/incoming/` with:
+For each new PR found, create a file in `.claude/engineer-agent/queue/incoming/` with:
 
 **Filename:** `{YYYYMMDD-HHmmss}-pr-review-{repo}-{number}.md`
 
@@ -91,11 +91,11 @@ After creating queue items, for each new item in `incoming/`, invoke the **revie
 
 ### 6. Update State
 
-Update `${CLAUDE_PLUGIN_ROOT}/state/last-poll.yaml` with:
+Update `.claude/engineer-agent/state/last-poll.yaml` with:
 - `github.last_checked`: current ISO timestamp
 - `github.seen_prs`: append newly found PR source_ids
 
-Create the `state/` directory and file if they don't exist.
+Create the `.claude/engineer-agent/state/` directory and file if they don't exist.
 
 ### 7. Report
 
