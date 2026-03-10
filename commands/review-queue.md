@@ -1,7 +1,7 @@
 ---
 description: "Review and approve/reject queued engineer-agent work items"
 argument-hint: "[filter: pr|slack|ticket|ticket-plan|doc|spec|design] [--all]"
-allowed-tools: ["Bash", "Read", "Write", "Edit", "Glob", "Grep", "Agent", "AskUserQuestion", "mcp__plugin_github_github__pull_request_review_write", "mcp__plugin_github_github__create_pull_request", "mcp__plugin_github_github__add_issue_comment", "mcp__claude_ai_Slack__slack_send_message", "mcp__slite__append-blocks", "mcp__slite__create-note"]
+allowed-tools: ["Bash", "Read", "Write", "Edit", "Glob", "Grep", "Agent", "AskUserQuestion", "mcp__claude_ai_Slack__slack_send_message", "mcp__slite__append-blocks", "mcp__slite__create-note"]
 ---
 
 # Engineer Agent: Review Queue
@@ -17,7 +17,7 @@ Review pending draft items and approve, edit, or reject them.
 
 ### 1. Load Config
 
-Read `.claude/engineer-agent/engineer.yaml`. If missing, tell the user to copy `engineer.example.yaml` and stop.
+Read `.claude/engineer-agent/engineer.yaml`. If missing, tell the user to copy `engineer.example.yaml` and stop. Extract `agent.branch_prefix` (default: `engineer-agent`).
 
 ### 2. List Draft Items
 
@@ -58,9 +58,16 @@ Read the selected file completely and display:
 Ask the user what to do:
 
 **Approve** — Execute the action:
-- For `pr-review` type: Call `mcp__plugin_github_github__pull_request_review_write` to submit the review on the PR.
+- For `pr-review` type: Submit the review via Bash:
+  ```bash
+  gh pr review {pr_number} --repo {repo} --{approve|comment|request-changes} --body "{review_body}"
+  ```
+  Use `--approve`, `--comment`, or `--request-changes` based on the draft's **Recommendation** field.
 - For `slack-question` type: Call `mcp__claude_ai_Slack__slack_send_message` to post the reply in the thread.
-- For `ticket` type: Call `mcp__plugin_github_github__create_pull_request` to open a PR from the implementation branch.
+- For `ticket` type: Create a draft PR via Bash:
+  ```bash
+  gh pr create --repo {owner}/{repo} --title "{ticket_key}: {title}" --body "{body}" --head "{branch_prefix}/{ticket_key}" --base main --draft
+  ```
 - For `doc-review` type: Call `mcp__slite__append-blocks` to post review comments on the document.
 - For `spec-refinement` type: No external action needed. Move to `.claude/engineer-agent/queue/completed/`. Print: "Spec refinement complete. Run `/engineer create-design-doc {source_url}` to generate the design doc."
 - For `design-doc` type: Call `mcp__slite__create-note` with title from frontmatter, parent from `config.slite.design_doc_parent`, and content from `## Draft Response`. Print: "Design doc created in Slite: {url}"

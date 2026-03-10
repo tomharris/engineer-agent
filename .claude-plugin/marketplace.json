@@ -1,14 +1,19 @@
 {
   "name": "engineer-agent",
   "description": "Marketplace for engineer-agent plugin",
-  "owner": { "name": "Tom" },
+  "owner": {
+    "name": "Tom Harris",
+    "email": "thomas.e.harris@gmail.com"
+  },
   "plugins": [
     {
       "name": "engineer-agent",
       "description": "Automates senior software engineer tasks with an approval-gated workflow",
       "version": "1.0.0",
-      "source": "github",
-      "repo": "tomharris/engineer-agent"
+      "source": {
+        "source": "github",
+        "repo": "tomharris/engineer-agent"
+      }
     }
   ]
 }

@@ -13,9 +13,8 @@ Create a standup message from recent queue activity and git history.
 - `Read` — read config, queue items
 - `Glob` — find recent queue items
 - `Grep` — search queue items by date
-- `Bash` — git log across repos
+- `Bash` — `git log` for local repos, `gh api` for remote repos
 - `Write` — write draft standup
-- `mcp__plugin_github_github__list_commits` — recent commits in configured repos
 
 ## Steps
 
@@ -27,7 +26,14 @@ Read `.claude/engineer-agent/engineer.yaml`. Extract `github.owner`, `github.rep
 
 **Completed queue items:** Glob for files in `.claude/engineer-agent/queue/completed/` with timestamps from the previous business day. Read each file's frontmatter to extract type, title, and source.
 
-**Git commits:** For each repo in config, call `mcp__plugin_github_github__list_commits` filtering by the configured user and the previous day's date range.
+**Git commits:** For each repo in config, get recent commits via Bash. For local repos:
+```bash
+git log --since="{yesterday}" --author="{review_requested_for}" --oneline
+```
+For remote repos:
+```bash
+gh api "repos/{owner}/{repo}/commits?author={review_requested_for}&since={yesterday_iso}" --jq '.[].commit.message'
+```
 
 Group by category:
 - PRs reviewed

@@ -12,10 +12,8 @@ Generate a comprehensive engineering design doc from a PM's feature spec, incorp
 
 - `mcp__slite__get-note` — fetch spec and optional template from Slite
 - `mcp__slite__create-note` — create the design doc on approval
-- `Read`, `Write` — read/write queue items
-- `Grep`, `Glob` — explore codebase architecture
-- `mcp__plugin_github_github__get_file_contents` — read relevant source code
-- `mcp__plugin_github_github__search_code` — find implementations and patterns
+- `Read`, `Write` — read/write queue items and source code
+- `Grep`, `Glob` — explore codebase architecture, find implementations and patterns
 - `mcp__atlassian__searchJiraIssuesUsingJql` — find dependency tickets
 - `mcp__atlassian__getJiraIssue` — read ticket details
 

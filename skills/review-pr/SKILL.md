@@ -10,10 +10,8 @@ Generate a thorough code review for a pull request, structured with severity lev
 
 ## Tools Needed
 
-- `mcp__plugin_github_github__pull_request_read` — read PR diff and details
-- `mcp__plugin_github_github__get_file_contents` — read files in the repo for context
-- `mcp__plugin_github_github__list_commits` — understand commit history
-- `Read` — read queue items and config
+- `Bash` — `gh pr view`, `gh pr diff`, and `gh api` for GitHub access
+- `Read` — read queue items, config, and local repo files
 - `Write` — write draft review
 - `Grep`, `Glob` — search codebase for patterns
 
@@ -29,15 +27,24 @@ Either:
 
 If working from a queue item, read the file to get `repo` and `pr_number` from frontmatter.
 
-Call `mcp__plugin_github_github__pull_request_read` with the owner, repo, and PR number to get:
-- Full diff
-- PR description
-- Files changed list
-- Commit messages
+Fetch PR details and diff via Bash:
+```bash
+gh pr view {pr_number} --repo {repo} --json title,body,author,files,commits,headRefName,baseRefName,url,number
+gh pr diff {pr_number} --repo {repo}
+```
+
+This gives you:
+- Full diff (from `gh pr diff`)
+- PR description, files changed list, and commit messages (from `gh pr view --json`)
 
 ### 2. Understand Team Conventions
 
-Try to read the target repo's `CLAUDE.md` via `mcp__plugin_github_github__get_file_contents` (owner, repo, path: "CLAUDE.md"). This contains:
+Try to read the target repo's `CLAUDE.md`. If the PR is in the current repo, use `Read` to read `CLAUDE.md` directly. For remote repos, fetch via Bash:
+```bash
+gh api repos/{owner}/{repo}/contents/CLAUDE.md --jq '.content' | base64 -d
+```
+
+This file contains:
 - Architecture guidelines
 - Past team decisions
 - Code style conventions

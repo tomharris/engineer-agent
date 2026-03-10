@@ -10,11 +10,9 @@ Implement the code changes described in a Jira ticket using iterative developmen
 
 ## Tools Needed
 
-- `Bash` — git operations, run tests, Ralph Loop invocation
-- `Read`, `Write`, `Edit` — code changes
+- `Bash` — git operations, run tests, Ralph Loop invocation, `gh pr create`
+- `Read`, `Write`, `Edit` — code changes and reading repo files
 - `Glob`, `Grep` — codebase navigation
-- `mcp__plugin_github_github__get_file_contents` — read repo files
-- `mcp__plugin_github_github__create_pull_request` — open PR on approval
 
 ## Input
 
@@ -98,14 +96,10 @@ When Ralph Loop finishes (either by fulfilling the promise or hitting max iterat
 
 When the human approves the implementation result via `/engineer review-queue`:
 
-Call `mcp__plugin_github_github__create_pull_request` with:
-- `owner`: from config
-- `repo`: target repo
-- `title`: "{ticket_key}: {title}"
-- `body`: Include the ticket link, changes summary, and test results
-- `head`: `{branch_prefix}/{ticket_key}`
-- `base`: `main` (or the repo's default branch)
-- `draft`: true (open as draft PR for further review)
+Create the PR via Bash:
+```bash
+gh pr create --repo {owner}/{repo} --title "{ticket_key}: {title}" --body "{body with ticket link, changes summary, and test results}" --head "{branch_prefix}/{ticket_key}" --base main --draft
+```
 
 ### 6. Update Queue Item
 
