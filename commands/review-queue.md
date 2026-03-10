@@ -17,7 +17,7 @@ Review pending draft items and approve, edit, or reject them.
 
 ### 1. Load Config
 
-Read `.claude/engineer-agent/engineer.yaml`. If missing, tell the user to copy `engineer.example.yaml` and stop.
+Read `.claude/engineer-agent/engineer.yaml`. If missing, tell the user to copy `engineer.example.yaml` and stop. Extract `agent.branch_prefix` (default: `engineer-agent`).
 
 ### 2. List Draft Items
 
@@ -66,7 +66,7 @@ Ask the user what to do:
 - For `slack-question` type: Call `mcp__claude_ai_Slack__slack_send_message` to post the reply in the thread.
 - For `ticket` type: Create a draft PR via Bash:
   ```bash
-  gh pr create --repo {owner}/{repo} --title "{ticket_key}: {title}" --body "{body}" --head "engineer-agent/{ticket_key}" --base main --draft
+  gh pr create --repo {owner}/{repo} --title "{ticket_key}: {title}" --body "{body}" --head "{branch_prefix}/{ticket_key}" --base main --draft
   ```
 - For `doc-review` type: Call `mcp__slite__append-blocks` to post review comments on the document.
 - For `spec-refinement` type: No external action needed. Move to `.claude/engineer-agent/queue/completed/`. Print: "Spec refinement complete. Run `/engineer create-design-doc {source_url}` to generate the design doc."

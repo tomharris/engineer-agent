@@ -28,12 +28,14 @@ Read the queue item to extract:
 - Acceptance criteria from the context section
 - Implementation plan from the draft response
 
+Also read `.claude/engineer-agent/engineer.yaml` and extract `agent.branch_prefix` (default: `engineer-agent`).
+
 ### 2. Set Up Branch
 
 Navigate to the target repo's working directory. Create a new branch:
 
 ```bash
-git checkout -b engineer-agent/{ticket_key}
+git checkout -b {branch_prefix}/{ticket_key}
 ```
 
 ### 3. Start Ralph Loop
@@ -77,7 +79,7 @@ When Ralph Loop finishes (either by fulfilling the promise or hitting max iterat
 ## Implementation Result
 
 **Status:** {complete | partial}
-**Branch:** engineer-agent/{ticket_key}
+**Branch:** {branch_prefix}/{ticket_key}
 **Iterations used:** {N} of 10
 
 ### Changes Made
@@ -96,7 +98,7 @@ When the human approves the implementation result via `/engineer review-queue`:
 
 Create the PR via Bash:
 ```bash
-gh pr create --repo {owner}/{repo} --title "{ticket_key}: {title}" --body "{body with ticket link, changes summary, and test results}" --head "engineer-agent/{ticket_key}" --base main --draft
+gh pr create --repo {owner}/{repo} --title "{ticket_key}: {title}" --body "{body with ticket link, changes summary, and test results}" --head "{branch_prefix}/{ticket_key}" --base main --draft
 ```
 
 ### 6. Update Queue Item

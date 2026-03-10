@@ -23,6 +23,7 @@ slite:
   design_doc_template: ""         # Slite note ID of a template doc (optional, uses built-in default if empty)
 
 agent:
+  branch_prefix: "engineer-agent"
   max_pr_files: 50
   standup_channel: "C98765432"
   digest_channel: "C98765432"
