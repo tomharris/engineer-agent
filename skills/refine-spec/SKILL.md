@@ -18,13 +18,15 @@ Analyze a PM's feature spec from Slite and produce structured clarifying questio
 
 ## Input
 
-A queue item file in `.claude/engineer-agent/queue/incoming/` with type `spec-refinement`, containing the spec content in `## Context`.
+A queue item file in `~/.claude/engineer-agent/queue/incoming/` with type `spec-refinement`, containing the spec content in `## Context`.
 
 ## Steps
 
 ### 1. Read the Spec
 
-Read the queue item to get the full spec content from the `## Context` section.
+Read the queue item to get the full spec content from the `## Context` section. Extract the `project` field from frontmatter.
+
+Read `~/.claude/engineer-agent/engineer.yaml` to find the project config at `projects.<project>` for codebase path and Jira settings.
 
 ### 2. Analyze Across Five Dimensions
 
@@ -56,9 +58,9 @@ Read the queue item to get the full spec content from the `## Context` section.
 
 ### 3. Cross-Reference
 
-**Codebase** — Use `Grep` and `Read` to verify any claims about current systems. Check if described interfaces or behaviors match actual code.
+**Codebase** — Use the project path from config to search with `Grep` and `Read` to verify any claims about current systems. Check if described interfaces or behaviors match actual code.
 
-**Jira** — Search for related or overlapping tickets. Note any duplicate work or dependencies.
+**Jira** — If `projects.<project>.jira` is configured, search for related or overlapping tickets. Note any duplicate work or dependencies.
 
 ### 4. Write the Draft
 
@@ -94,7 +96,7 @@ Update the queue item with the analysis:
 
 The `_Answer:_` fields are intentionally left blank — the human fills these in via the Edit action in review-queue after consulting with the PM. Multiple edit cycles are expected.
 
-Update frontmatter `status` to `drafted` and move to `.claude/engineer-agent/queue/drafts/`.
+Update frontmatter `status` to `drafted` and move to `~/.claude/engineer-agent/queue/drafts/`.
 
 ### 5. Report
 

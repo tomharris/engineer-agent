@@ -16,7 +16,7 @@ Implement the code changes described in a Jira ticket using iterative developmen
 
 ## Input
 
-A queue item file in `.claude/engineer-agent/queue/drafts/` with type `ticket` that has been approved by the human. The file contains the ticket details, acceptance criteria, and implementation plan.
+A queue item file in `~/.claude/engineer-agent/queue/drafts/` with type `ticket` that has been approved by the human. The file contains the ticket details, acceptance criteria, and implementation plan.
 
 ## Steps
 
@@ -24,17 +24,22 @@ A queue item file in `.claude/engineer-agent/queue/drafts/` with type `ticket` t
 
 Read the queue item to extract:
 - `ticket_key` from frontmatter
+- `project` from frontmatter
 - Target repo from the implementation plan
 - Acceptance criteria from the context section
 - Implementation plan from the draft response
 
-Also read `.claude/engineer-agent/engineer.yaml` and extract `agent.branch_prefix` (default: `engineer-agent`).
+Read `~/.claude/engineer-agent/engineer.yaml` and extract:
+- `agent.branch_prefix` (default: `engineer-agent`)
+- `projects.<project>.path` — the absolute path to the project directory
+- `projects.<project>.github.owner` and repos for PR creation
 
 ### 2. Set Up Branch
 
-Navigate to the target repo's working directory. Create a new branch:
+Navigate to the project's working directory using `projects.<project>.path` from config:
 
 ```bash
+cd {projects.<project>.path}
 git checkout -b {branch_prefix}/{ticket_key}
 ```
 
@@ -80,6 +85,7 @@ When Ralph Loop finishes (either by fulfilling the promise or hitting max iterat
 
 **Status:** {complete | partial}
 **Branch:** {branch_prefix}/{ticket_key}
+**Project:** {project}
 **Iterations used:** {N} of 10
 
 ### Changes Made
@@ -96,14 +102,14 @@ When Ralph Loop finishes (either by fulfilling the promise or hitting max iterat
 
 When the human approves the implementation result via `/engineer review-queue`:
 
-Create the PR via Bash:
+Look up `projects.<project>.github.owner` and the repo from config. Create the PR via Bash:
 ```bash
 gh pr create --repo {owner}/{repo} --title "{ticket_key}: {title}" --body "{body with ticket link, changes summary, and test results}" --head "{branch_prefix}/{ticket_key}" --base main --draft
 ```
 
 ### 6. Update Queue Item
 
-Move the queue item to `.claude/engineer-agent/queue/completed/` with `status: completed`.
+Move the queue item to `~/.claude/engineer-agent/queue/completed/` with `status: completed`.
 
 ## Edge Cases
 

@@ -18,13 +18,15 @@ Generate a phased ticket breakdown from an engineering design doc, with real fil
 
 ## Input
 
-A queue item file in `.claude/engineer-agent/queue/incoming/` with type `ticket-plan`, containing the design doc content in `## Context`. The frontmatter includes `design_doc_id` linking to the source design doc and optionally `jira_project` for the target project.
+A queue item file in `~/.claude/engineer-agent/queue/incoming/` with type `ticket-plan`, containing the design doc content in `## Context`. The frontmatter includes `design_doc_id` linking to the source design doc, `project` identifying the project slug, and optionally `jira_project` for the target project.
 
 ## Steps
 
 ### 1. Gather Context
 
-Read the queue item's `## Context` section for the design doc content.
+Read the queue item's `## Context` section for the design doc content. Extract the `project` field from frontmatter.
+
+Read `~/.claude/engineer-agent/engineer.yaml` to find the project config at `projects.<project>` for codebase path and Jira settings.
 
 If the context includes a "Queue Design Doc Context" subsection, use it as enriched context — it may contain additional design detail from the queue's design-doc draft.
 
@@ -32,7 +34,7 @@ If the context includes an "Existing Related Tickets" subsection, note these to 
 
 ### 2. Research the Codebase
 
-Before generating tickets, understand the current architecture:
+Before generating tickets, understand the current architecture using the project path from config:
 - Use Glob to find relevant directories, file patterns, and project structure
 - Use Grep to search for existing implementations, patterns, and conventions
 - Identify test file locations and testing patterns in use
@@ -43,7 +45,7 @@ This research is critical — every ticket must reference **actual file paths** 
 
 ### 3. Check Jira for Related Tickets
 
-If `jira_project` is set in the frontmatter, search Jira for existing tickets that overlap with the planned work. Note any that should be referenced as dependencies or that indicate work already in progress.
+If `jira_project` is set in the frontmatter or `projects.<project>.jira.project` is configured, search Jira for existing tickets that overlap with the planned work. Note any that should be referenced as dependencies or that indicate work already in progress.
 
 ### 4. Generate Ticket Breakdown
 
@@ -66,7 +68,8 @@ Write the phased ticket plan in the `## Draft Response` section using the templa
 ### Ticket Plan: {title}
 
 **Design Doc:** {url}
-**Project:** {jira_project}
+**Project:** {slug}
+**Jira Project:** {jira_project}
 **Total Tickets:** {N}
 **Phases:** {M}
 
@@ -128,7 +131,7 @@ Fill in every section based on the design doc and codebase research. If no exist
 
 ### 5. Finalize
 
-Update the queue item's frontmatter `status` to `drafted` and move it to `.claude/engineer-agent/queue/drafts/`.
+Update the queue item's frontmatter `status` to `drafted` and move it to `~/.claude/engineer-agent/queue/drafts/`.
 
 ### 6. Report
 

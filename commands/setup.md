@@ -1,20 +1,20 @@
 ---
-description: "Set up engineer-agent in the current project"
+description: "Set up engineer-agent at the user level"
 allowed-tools: ["Bash", "Read", "Write", "Glob"]
 ---
 
 # Engineer Agent Setup
 
-Initialize engineer-agent in the current project: copy config, create directories, and install cron polling.
+Initialize engineer-agent at the user level: create config, directories, install cron, and register the current project.
 
 ## Steps
 
 ### 1. Check for Existing Setup
 
-Read `.claude/engineer-agent/engineer.yaml` in the current project.
+Read `~/.claude/engineer-agent/engineer.yaml`.
 
 If it exists, report:
-> Engineer-agent is already set up in this project. Run `/engineer status` to check health.
+> Engineer-agent is already set up. Run `/engineer add-project` to register another project, or `/engineer status` to check health.
 
 Stop here — do not continue to further steps.
 
@@ -37,43 +37,57 @@ If neither strategy works, ask the user: "Could not locate the engineer-agent pl
 
 Store the resolved path as `PLUGIN_ROOT` for subsequent steps.
 
-### 3. Copy Config Template
+### 3. Auto-Detect Current Project
+
+Detect the current project's details for the first project entry:
+
+1. Run `pwd` to get the absolute project path
+2. Run `basename $(pwd)` to derive a default slug
+3. Run `git remote get-url origin 2>/dev/null` to detect the GitHub remote
+4. Parse the remote URL to extract `owner` and `repo` name
+5. Ask the user to confirm or customize the project slug
+
+### 4. Copy and Customize Config Template
 
 Read `{PLUGIN_ROOT}/config/engineer.example.yaml`.
 
-Create the directory `.claude/engineer-agent/` if it doesn't exist (use `mkdir -p` via Bash).
+Create `~/.claude/engineer-agent/` if it doesn't exist (use `mkdir -p` via Bash).
 
-Write the template contents to `.claude/engineer-agent/engineer.yaml` in the current project.
+Write the template contents to `~/.claude/engineer-agent/engineer.yaml`, replacing the example project entry with the auto-detected project details:
+- Replace the example slug key with the detected slug
+- Replace `path` with the current directory
+- Replace `owner` and `repos` with detected GitHub values
+- Leave other integration fields as placeholder values for the user to fill in
 
-### 4. Run install-cron.sh
+### 5. Run install-cron.sh
 
 Execute via Bash:
 
 ```bash
-bash {PLUGIN_ROOT}/scripts/install-cron.sh {PROJECT_DIR}
+bash {PLUGIN_ROOT}/scripts/install-cron.sh
 ```
-
-Where `{PROJECT_DIR}` is the current working directory (use `pwd` to resolve it).
 
 This script handles:
 - Creating `queue/{incoming,drafts,completed,rejected}` directories
 - Creating `state/` directory
-- Initializing `state/last-poll.yaml`
+- Initializing `state/last-poll.yaml` with empty projects map
 - Installing crontab entry (default 15-minute interval)
 
-### 5. Print Summary
+### 6. Print Summary
 
 Display this summary:
 
 ```
 Engineer-agent setup complete!
 
-  Config:  .claude/engineer-agent/engineer.yaml
-  Queue:   .claude/engineer-agent/queue/{incoming,drafts,completed,rejected}
-  State:   .claude/engineer-agent/state/last-poll.yaml
+  Config:  ~/.claude/engineer-agent/engineer.yaml
+  Queue:   ~/.claude/engineer-agent/queue/{incoming,drafts,completed,rejected}
+  State:   ~/.claude/engineer-agent/state/last-poll.yaml
   Cron:    Polling every 15 minutes
+  Project: {slug} ({path})
 
 Next steps:
-  1. Edit .claude/engineer-agent/engineer.yaml with your GitHub org, repos, Slack channels, Jira project, etc.
-  2. Run /engineer status to verify everything is working.
+  1. Edit ~/.claude/engineer-agent/engineer.yaml with your Slack channels, Jira project, etc.
+  2. Run /engineer add-project from other project directories to register them.
+  3. Run /engineer status to verify everything is working.
 ```

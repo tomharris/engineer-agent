@@ -6,7 +6,7 @@ version: 1.0.0
 
 # Poll Slite for Docs Needing Review
 
-Check Slite for documents tagged with review labels.
+Check Slite for documents tagged with review labels. Iterates over all projects that have Slite configured.
 
 ## Tools Needed
 
@@ -21,27 +21,35 @@ Check Slite for documents tagged with review labels.
 
 ### 1. Load Config
 
-Read `.claude/engineer-agent/engineer.yaml`. Extract `slite.doc_labels`.
+Read `~/.claude/engineer-agent/engineer.yaml`. Extract the `projects` map.
 
 ### 2. Load Dedup State
 
-Read `.claude/engineer-agent/state/last-poll.yaml`. Note `slite.last_checked` and `slite.seen_docs`.
+Read `~/.claude/engineer-agent/state/last-poll.yaml`. This contains per-project state under `projects.<slug>`.
 
-### 3. Query Slite
+### 3. Iterate Over Projects
+
+For each project slug in the `projects` config map that has a `slite` section configured:
+
+Extract `projects.<slug>.slite.doc_labels`.
+
+Load dedup state from `projects.<slug>.slite` in last-poll.yaml (use epoch defaults if missing).
+
+#### 3a. Query Slite
 
 Call `mcp__slite__search-notes` to search for documents.
 
 Filter results for documents that:
 - Have labels matching `slite.doc_labels` (e.g., "needs-review")
-- Were updated after `slite.last_checked`
-- Are not already in `slite.seen_docs`
+- Were updated after `projects.<slug>.slite.last_checked`
+- Are not already in `projects.<slug>.slite.seen_docs`
 - Don't already exist in any queue directory
 
 For each matching document, call `mcp__slite__get-note` with the document ID to fetch the full content.
 
-### 4. Create Queue Items
+#### 3b. Create Queue Items
 
-For each new document, create a file in `.claude/engineer-agent/queue/incoming/`:
+For each new document, create a file in `~/.claude/engineer-agent/queue/incoming/`:
 
 **Filename:** `{YYYYMMDD-HHmmss}-doc-review-{doc_id_short}.md`
 
@@ -56,6 +64,7 @@ title: "{doc_title}"
 priority: normal
 created_at: "{current_iso_timestamp}"
 status: incoming
+project: "{slug}"
 doc_id: "{doc_id}"
 ---
 
@@ -63,6 +72,7 @@ doc_id: "{doc_id}"
 
 **Document:** {doc_title}
 **URL:** {doc_url}
+**Project:** {slug}
 **Last updated:** {updated_at}
 **Author:** {author_name}
 
@@ -70,14 +80,14 @@ doc_id: "{doc_id}"
 {full document text from mcp__slite__get-note}
 ```
 
-### 5. Process Incoming Items
+#### 3c. Process Incoming Items
 
 For each new item, invoke the **review-doc** skill behavior to generate review comments and move to `drafts/`.
 
-### 6. Update State
+#### 3d. Update State
 
-Update `slite.last_checked` and append new doc IDs to `slite.seen_docs` in `state/last-poll.yaml`.
+Update `projects.<slug>.slite.last_checked` and append new doc IDs to `projects.<slug>.slite.seen_docs` in `~/.claude/engineer-agent/state/last-poll.yaml`.
 
-### 7. Report
+### 4. Report
 
-Report: "Found N new Slite docs for review."
+Report: "Found N new Slite docs for review across M projects."

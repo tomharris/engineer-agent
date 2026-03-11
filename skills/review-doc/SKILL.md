@@ -18,13 +18,15 @@ Generate a thorough review of a design document with brief inline comments.
 
 ## Input
 
-A queue item file in `.claude/engineer-agent/queue/incoming/` with type `doc-review`, containing the document content.
+A queue item file in `~/.claude/engineer-agent/queue/incoming/` with type `doc-review`, containing the document content.
 
 ## Steps
 
 ### 1. Read the Document
 
-Read the queue item to get the full document content from the `## Context` section.
+Read the queue item to get the full document content from the `## Context` section. Extract the `project` field from frontmatter.
+
+Read `~/.claude/engineer-agent/engineer.yaml` to find the project's path at `projects.<project>.path` for codebase cross-referencing.
 
 ### 2. Understand the Scope
 
@@ -35,7 +37,7 @@ Identify:
 
 ### 3. Cross-Reference with Code
 
-For any code or systems referenced in the document:
+For any code or systems referenced in the document, use the project path from config to:
 - Check if the described current state matches actual code
 - Verify claimed behaviors by reading relevant implementations
 - Note any discrepancies between the doc and reality
@@ -93,7 +95,7 @@ Update the queue item:
 - {anything important that's not covered}
 ```
 
-Update frontmatter `status` to `drafted` and move to `.claude/engineer-agent/queue/drafts/`.
+Update frontmatter `status` to `drafted` and move to `~/.claude/engineer-agent/queue/drafts/`.
 
 ### 6. Report
 
