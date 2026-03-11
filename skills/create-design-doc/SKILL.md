@@ -19,26 +19,28 @@ Generate a comprehensive engineering design doc from a PM's feature spec, incorp
 
 ## Input
 
-A queue item file in `.claude/engineer-agent/queue/incoming/` with type `design-doc`, containing the spec content in `## Context`. The frontmatter may include `spec_refinement_id` linking to a completed spec-refinement for additional Q&A context.
+A queue item file in `~/.claude/engineer-agent/queue/incoming/` with type `design-doc`, containing the spec content in `## Context`. The frontmatter may include `spec_refinement_id` linking to a completed spec-refinement for additional Q&A context.
 
 ## Steps
 
 ### 1. Gather Context
 
-Read the queue item's `## Context` section for the spec content.
+Read the queue item's `## Context` section for the spec content. Extract the `project` field from frontmatter.
 
-If `spec_refinement_id` is present in the frontmatter, search `.claude/engineer-agent/queue/completed/` for a matching spec-refinement item (by `source_id`). Extract the Q&A from its `## Draft Response` — the filled-in `_Answer:_` fields provide critical context from PM conversations.
+Read `~/.claude/engineer-agent/engineer.yaml` to find the project config at `projects.<project>` for codebase path and Slite settings.
+
+If `spec_refinement_id` is present in the frontmatter, search `~/.claude/engineer-agent/queue/completed/` for a matching spec-refinement item (by `source_id`). Extract the Q&A from its `## Draft Response` — the filled-in `_Answer:_` fields provide critical context from PM conversations.
 
 ### 2. Determine Template
 
 Check the queue item frontmatter or config for a template:
 
-- If a `design_doc_template` Slite doc ID is available, fetch it via `mcp__slite__get-note` and use its heading structure as the template
+- If `projects.<project>.slite.design_doc_template` is available and non-empty, fetch it via `mcp__slite__get-note` and use its heading structure as the template
 - If empty, use the built-in default template (see below)
 
 ### 3. Research the Codebase
 
-Before writing, understand the current architecture:
+Before writing, understand the current architecture using the project path from config:
 - Search for code related to the systems mentioned in the spec
 - Identify existing patterns, abstractions, and conventions
 - Note relevant data models and API contracts
@@ -122,7 +124,7 @@ Using either the fetched template structure or the built-in default, generate th
 
 Fill in every section based on the spec, refinement Q&A, and codebase research. If a section genuinely doesn't apply, include it with "N/A — {brief reason}".
 
-Update frontmatter `status` to `drafted` and move to `.claude/engineer-agent/queue/drafts/`.
+Update frontmatter `status` to `drafted` and move to `~/.claude/engineer-agent/queue/drafts/`.
 
 ### 5. Report
 

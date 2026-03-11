@@ -6,7 +6,7 @@ version: 1.0.0
 
 # Generate Daily Digest
 
-Create a comprehensive summary of all agent activity for the day.
+Create a comprehensive summary of all agent activity for the day, grouped by project.
 
 ## Tools Needed
 
@@ -19,24 +19,24 @@ Create a comprehensive summary of all agent activity for the day.
 
 ### 1. Load Config
 
-Read `.claude/engineer-agent/engineer.yaml`. Extract `agent.digest_channel`.
+Read `~/.claude/engineer-agent/engineer.yaml`. Extract the `projects` map and `agent.digest_channel`.
 
 ### 2. Gather All Activity
 
 Scan all queue directories for items from the current day (or since the last digest):
 
-**Completed items** (`.claude/engineer-agent/queue/completed/`):
-- Count by type (pr-review, slack-question, ticket, doc-review)
-- List each with title and source
+**Completed items** (`~/.claude/engineer-agent/queue/completed/`):
+- Count by type and by project (pr-review, slack-question, ticket, doc-review)
+- List each with title, source, and project
 
-**Rejected items** (`.claude/engineer-agent/queue/rejected/`):
-- Count and list with rejection reasons
+**Rejected items** (`~/.claude/engineer-agent/queue/rejected/`):
+- Count and list with rejection reasons and project
 
-**Pending items** (`.claude/engineer-agent/queue/drafts/`):
-- Count by type
+**Pending items** (`~/.claude/engineer-agent/queue/drafts/`):
+- Count by type and project
 - Note any aging items (older than 24h)
 
-**Incoming items** (`.claude/engineer-agent/queue/incoming/`):
+**Incoming items** (`~/.claude/engineer-agent/queue/incoming/`):
 - Count any unprocessed items (shouldn't normally be any)
 
 ### 3. Calculate Metrics
@@ -44,12 +44,13 @@ Scan all queue directories for items from the current day (or since the last dig
 - Total items processed today
 - Approval rate (completed / (completed + rejected))
 - Items by type breakdown
+- Items by project breakdown
 - Average time from detection to approval (if timestamps allow)
 - Any items still pending from previous days
 
 ### 4. Write the Draft
 
-Create a queue item in `.claude/engineer-agent/queue/drafts/`:
+Create a queue item in `~/.claude/engineer-agent/queue/drafts/`:
 
 **Filename:** `{YYYYMMDD-HHmmss}-digest.md`
 
@@ -68,7 +69,7 @@ target_channel: "{digest_channel}"
 
 ## Context
 
-Auto-generated daily digest from engineer-agent activity.
+Auto-generated daily digest from engineer-agent activity across all projects.
 
 ## Draft Response
 
@@ -76,19 +77,17 @@ Auto-generated daily digest from engineer-agent activity.
 
 **Engineer Agent Daily Digest — {YYYY-MM-DD}**
 
-**Summary:** Processed {N} items today ({X} approved, {Y} rejected, {Z} pending).
+**Summary:** Processed {N} items today ({X} approved, {Y} rejected, {Z} pending) across {M} projects.
 
-**PR Reviews:** {N}
-{bullet list of reviewed PRs with recommendations}
+**By Project:**
 
-**Slack Q&A:** {N}
-{bullet list of answered questions}
+__{project-slug-1}:__
+- PR Reviews: {N} — {bullet list}
+- Slack Q&A: {N} — {bullet list}
 
-**Tickets:** {N}
-{bullet list of tickets worked on with status}
-
-**Doc Reviews:** {N}
-{bullet list of reviewed docs}
+__{project-slug-2}:__
+- Tickets: {N} — {bullet list}
+- Doc Reviews: {N} — {bullet list}
 
 **Pending:** {N} items awaiting review
 {list if any, especially aging items}
@@ -96,4 +95,4 @@ Auto-generated daily digest from engineer-agent activity.
 
 ### 5. Report
 
-Report: "Daily digest generated. Run `/engineer review-queue` to review and post."
+Report: "Daily digest generated covering {M} projects. Run `/engineer review-queue` to review and post."

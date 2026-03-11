@@ -20,29 +20,35 @@ This repo IS the plugin.
 commands/                      — Slash commands (/engineer <command>)
 skills/                        — Auto-invoked skills by task type
 scripts/                       — Cron and setup scripts
-config/engineer.example.yaml   — Config template (copy to project)
+config/engineer.example.yaml   — Config template
 ```
 
-Runtime data lives in each project at `.claude/engineer-agent/`:
+Runtime data lives at the user level in `~/.claude/engineer-agent/`:
 ```
-<project>/.claude/engineer-agent/
-├── engineer.yaml              — User config (copied from config/engineer.example.yaml)
+~/.claude/engineer-agent/
+├── engineer.yaml              — User config (one file for all projects)
 ├── queue/
 │   ├── incoming/              — Newly detected items
 │   ├── drafts/                — Items with drafted responses
 │   ├── completed/             — Approved and posted
 │   └── rejected/              — Rejected with reason
 └── state/
-    └── last-poll.yaml         — Dedup timestamps and seen IDs
+    └── last-poll.yaml         — Dedup timestamps and seen IDs (per project)
 ```
 
 ## Config Loading Pattern
 
-Every skill and command that needs config should start by reading `.claude/engineer-agent/engineer.yaml`. If missing, tell the user to copy `engineer.example.yaml` from the plugin and stop.
+Every skill and command that needs config should start by reading `~/.claude/engineer-agent/engineer.yaml`. If missing, tell the user to run `/engineer setup` and stop.
+
+The config has two top-level sections:
+- `agent` — global settings (branch_prefix, max_pr_files, channels, cron interval)
+- `projects` — a map of project slugs to per-project integration config
+
+To find config for a specific project, look up `projects.<slug>`. Each project entry has `path`, `github`, `slack`, `jira`, and `slite` subsections.
 
 ## Queue File Format
 
-Files move through: `.claude/engineer-agent/queue/incoming/` → `queue/drafts/` → `queue/completed/` or `queue/rejected/`
+Files move through: `~/.claude/engineer-agent/queue/incoming/` → `queue/drafts/` → `queue/completed/` or `queue/rejected/`
 
 Filename: `{YYYYMMDD-HHmmss}-{type}-{short-id}.md`
 
@@ -55,6 +61,7 @@ YAML frontmatter fields:
 - `priority`: urgent | normal | low
 - `created_at`: ISO 8601 timestamp
 - `status`: incoming | drafted | completed | rejected
+- `project`: Project slug matching a key in the `projects` config map
 
 Body sections:
 - `## Context` — metadata about the work item

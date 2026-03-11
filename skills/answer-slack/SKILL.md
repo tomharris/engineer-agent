@@ -17,24 +17,25 @@ Generate a concise, helpful answer to a Slack question by researching the codeba
 
 ## Input
 
-A queue item file in `.claude/engineer-agent/queue/incoming/` with type `slack-question`, containing the message text and thread context.
+A queue item file in `~/.claude/engineer-agent/queue/incoming/` with type `slack-question`, containing the message text and thread context.
 
 ## Steps
 
 ### 1. Understand the Question
 
-Read the queue item file. Analyze:
+Read the queue item file. Extract the `project` field from frontmatter. Analyze:
 - What specifically is being asked?
 - Is this about code implementation, architecture, status, or something else?
 - Is there enough context to give a good answer?
 
 ### 2. Research
 
+Read `~/.claude/engineer-agent/engineer.yaml` to find the project's path at `projects.<project>.path`.
+
 Based on the question type:
 
 **Code/implementation questions:**
-- Read the config to identify which repos are in scope
-- Use `Grep` to search for relevant code patterns in the local codebase
+- Use `Grep` to search for relevant code patterns in the project's local codebase (at the project path)
 - Use `Read` to read specific files referenced in the question
 - Check git history if the question is about intent or history ("why was this done?")
 
@@ -43,7 +44,7 @@ Based on the question type:
 - Look at Jira ticket status if referenced
 
 **Architecture questions:**
-- Read the target repo's CLAUDE.md for documented decisions
+- Read the target project's CLAUDE.md for documented decisions
 - Find relevant code patterns in the codebase
 
 ### 3. Draft the Answer
@@ -86,7 +87,7 @@ Update the queue item file:
 
 2. Update frontmatter `status` to `drafted`
 3. If confidence is low, update `priority` to `urgent`
-4. Move the file from `.claude/engineer-agent/queue/incoming/` to `.claude/engineer-agent/queue/drafts/`
+4. Move the file from `~/.claude/engineer-agent/queue/incoming/` to `~/.claude/engineer-agent/queue/drafts/`
 
 ### 5. Report
 

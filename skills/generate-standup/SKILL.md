@@ -6,7 +6,7 @@ version: 1.0.0
 
 # Generate Standup Update
 
-Create a standup message from recent queue activity and git history.
+Create a standup message from recent queue activity and git history across all projects.
 
 ## Tools Needed
 
@@ -20,22 +20,26 @@ Create a standup message from recent queue activity and git history.
 
 ### 1. Load Config
 
-Read `.claude/engineer-agent/engineer.yaml`. Extract `github.owner`, `github.repos`, `github.review_requested_for`, and `agent.standup_channel`.
+Read `~/.claude/engineer-agent/engineer.yaml`. Extract the `projects` map and `agent.standup_channel`.
 
 ### 2. Gather Yesterday's Work
 
-**Completed queue items:** Glob for files in `.claude/engineer-agent/queue/completed/` with timestamps from the previous business day. Read each file's frontmatter to extract type, title, and source.
+**Completed queue items:** Glob for files in `~/.claude/engineer-agent/queue/completed/` with timestamps from the previous business day. Read each file's frontmatter to extract type, title, source, and project.
 
-**Git commits:** For each repo in config, get recent commits via Bash. For local repos:
+**Git commits per project:** For each project in the `projects` config map:
+
+Extract `projects.<slug>.path`, `projects.<slug>.github.owner`, `projects.<slug>.github.repos`, and `projects.<slug>.github.review_requested_for`.
+
+For local repos (where `path` exists and is accessible):
 ```bash
-git log --since="{yesterday}" --author="{review_requested_for}" --oneline
+cd {path} && git log --since="{yesterday}" --author="{review_requested_for}" --oneline
 ```
 For remote repos:
 ```bash
 gh api "repos/{owner}/{repo}/commits?author={review_requested_for}&since={yesterday_iso}" --jq '.[].commit.message'
 ```
 
-Group by category:
+Group by project, then by category:
 - PRs reviewed
 - Slack questions answered
 - Tickets implemented
@@ -43,7 +47,7 @@ Group by category:
 
 ### 3. Gather Today's Planned Work
 
-**Pending queue items:** Glob for files in `.claude/engineer-agent/queue/drafts/` and `.claude/engineer-agent/queue/incoming/`. These represent upcoming work.
+**Pending queue items:** Glob for files in `~/.claude/engineer-agent/queue/drafts/` and `~/.claude/engineer-agent/queue/incoming/`. These represent upcoming work. Note the `project` field for each.
 
 **In-progress tickets:** Look for ticket-type items that are in progress or recently created.
 
@@ -56,7 +60,7 @@ Check for:
 
 ### 5. Write the Draft
 
-Create a queue item in `.claude/engineer-agent/queue/drafts/`:
+Create a queue item in `~/.claude/engineer-agent/queue/drafts/`:
 
 **Filename:** `{YYYYMMDD-HHmmss}-standup.md`
 
@@ -75,21 +79,28 @@ target_channel: "{standup_channel}"
 
 ## Context
 
-Auto-generated standup from engineer-agent activity.
+Auto-generated standup from engineer-agent activity across all projects.
 
 ## Draft Response
 
 ### Proposed Standup Message
 
 **Yesterday:**
-- {bullet point per completed item, grouped by type}
+
+__{project-slug-1}:__
+- {bullet point per completed item}
 - Reviewed PR #{N}: {title} in {repo}
 - Answered question from @{user} in #{channel}
+
+__{project-slug-2}:__
 - Implemented {ticket_key}: {title}
 
 **Today:**
-- {bullet point per planned item}
+
+__{project-slug-1}:__
 - Review {N} pending PR(s)
+
+__{project-slug-2}:__
 - {ticket_key}: continue implementation
 
 **Blockers:**
@@ -100,4 +111,4 @@ Keep each bullet point to one short line. This is a standup, not a report.
 
 ### 6. Report
 
-Report: "Standup draft generated. Run `/engineer review-queue` to review and post."
+Report: "Standup draft generated covering {N} projects. Run `/engineer review-queue` to review and post."

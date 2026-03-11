@@ -11,16 +11,16 @@ Show the current status of the engineer-agent system.
 
 ### 1. Check Config
 
-Read the config file at `.claude/engineer-agent/engineer.yaml`.
+Read the config file at `~/.claude/engineer-agent/engineer.yaml`.
 
 If it does not exist, report:
-> Config not found. Copy `config/engineer.example.yaml` from the plugin to `.claude/engineer-agent/engineer.yaml` in your project and fill in your values.
+> Config not found. Run `/engineer setup` to initialize engineer-agent.
 
-If it exists, confirm: "Config loaded."
+If it exists, confirm: "Config loaded." List the registered project slugs from the `projects` map.
 
 ### 2. Queue Counts
 
-Count files (excluding .gitkeep) in each queue directory under `.claude/engineer-agent/queue/`:
+Count files (excluding .gitkeep) in each queue directory under `~/.claude/engineer-agent/queue/`:
 
 - `incoming/` — items detected but not yet processed
 - `drafts/` — items processed, awaiting human approval
@@ -40,8 +40,17 @@ Display as a summary table:
 
 ### 3. Last Poll Times
 
-Read `.claude/engineer-agent/state/last-poll.yaml` if it exists. Display the last poll time for each source (github, slack, jira, slite). If the file doesn't exist, report "No polls have run yet."
+Read `~/.claude/engineer-agent/state/last-poll.yaml` if it exists. Display the last poll time for each project and each source within that project:
+
+```
+| Project  | GitHub             | Slack              | Jira               | Slite              |
+|----------|--------------------|--------------------|--------------------|--------------------|
+| my-api   | 2h ago             | 2h ago             | 2h ago             | 2h ago             |
+| my-app   | 45m ago            | not configured     | 45m ago            | not configured     |
+```
+
+If the file doesn't exist, report "No polls have run yet."
 
 ### 4. Summary
 
-Give a one-line summary: "N items awaiting review. Run `/engineer review-queue` to review drafts."
+Give a one-line summary: "N items awaiting review across M projects. Run `/engineer review-queue` to review drafts."

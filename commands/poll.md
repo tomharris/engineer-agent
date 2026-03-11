@@ -1,6 +1,6 @@
 ---
 description: "Poll configured sources for new work items"
-argument-hint: "[github|slack|jira|slite|all]"
+argument-hint: "[github|slack|jira|slite|all] [--project <slug>]"
 allowed-tools: ["Bash", "Read", "Write", "Glob", "Grep", "Agent", "mcp__claude_ai_Slack__slack_read_channel", "mcp__claude_ai_Slack__slack_read_thread", "mcp__claude_ai_Slack__slack_search_public_and_private", "mcp__atlassian__searchJiraIssuesUsingJql", "mcp__atlassian__getJiraIssue", "mcp__slite__search-notes", "mcp__slite__get-note", "mcp__slite__get-note-children", "mcp__slite__append-blocks"]
 ---
 
@@ -10,46 +10,57 @@ Manually trigger a poll of configured sources for new work items.
 
 ## Arguments
 
-`$ARGUMENTS` specifies which source to poll. Options:
+`$ARGUMENTS` specifies which source to poll and optionally which project. Options:
 - `github` — poll GitHub only
 - `slack` — poll Slack only
 - `jira` — poll Jira only
 - `slite` — poll Slite only
 - `all` or empty — poll all configured sources
+- `--project <slug>` — poll only the specified project (default: all projects)
 
 ## Steps
 
 ### 1. Load Config
 
-Read `.claude/engineer-agent/engineer.yaml`. If missing, tell the user to copy `engineer.example.yaml` and stop.
+Read `~/.claude/engineer-agent/engineer.yaml`. If missing, tell the user to run `/engineer setup` and stop.
 
-### 2. Determine Sources
+### 2. Determine Scope
 
-Parse `$ARGUMENTS` to determine which sources to poll. Default to `all` if no argument provided.
+Parse `$ARGUMENTS` to determine which sources to poll and which projects to include.
 
-For each selected source, check if the relevant config section exists and has values. Skip sources with empty or missing config and report which were skipped.
+If `--project <slug>` is specified, only poll that project. Otherwise, iterate over all projects in the `projects` config map.
 
-### 3. Poll Each Source
+Default to `all` sources if no source argument provided.
 
-Run the appropriate poll skill behavior for each selected source:
+### 3. Poll Each Project and Source
 
+For each project in scope, for each selected source:
+
+Check if the project has that integration configured (e.g., `projects.<slug>.github` exists and has values). Skip sources with empty or missing config and report which were skipped.
+
+Run the appropriate poll skill behavior:
 - **github**: Follow the `poll-github` skill steps — list PRs, filter, create queue items, generate review drafts.
 - **slack**: Follow the `poll-slack` skill steps — read channels, find questions matching keywords, create queue items, generate answer drafts.
 - **jira**: Follow the `poll-jira` skill steps — query assigned tickets, create queue items.
 - **slite**: Follow the `poll-slite` skill steps — check for docs tagged for review, create queue items.
 
+Each queue item must include `project: "<slug>"` in its frontmatter.
+
 ### 4. Report Results
 
-Summarize what was found across all polled sources:
+Summarize what was found across all polled projects and sources:
 
 ```
 Poll complete:
+
+my-api:
 - GitHub: Found N new PRs
 - Slack: Found N new questions
+
+my-app:
 - Jira: Found N new tickets
-- Slite: Found N new docs for review
 
 Total: N new items queued. Run `/engineer review-queue` to review drafts.
 ```
 
-Only include sources that were actually polled.
+Only include projects and sources that were actually polled.

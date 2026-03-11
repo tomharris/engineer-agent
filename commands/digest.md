@@ -16,11 +16,11 @@ Generate a digest of all engineer-agent activity.
 
 ### 1. Load Config
 
-Read `.claude/engineer-agent/engineer.yaml`. If missing, tell the user to copy `engineer.example.yaml` and stop.
+Read `~/.claude/engineer-agent/engineer.yaml`. If missing, tell the user to run `/engineer setup` and stop.
 
 ### 2. Generate Digest
 
-Follow the `generate-digest` skill behavior to scan queue directories and create a digest draft.
+Follow the `generate-digest` skill behavior to scan queue directories and create a digest draft. The digest covers all projects.
 
 If `--days N` was specified, scan items from the last N days instead of just today.
 

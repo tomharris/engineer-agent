@@ -6,7 +6,7 @@ version: 1.0.0
 
 # Poll GitHub for New PRs
 
-Check configured GitHub repos for pull requests that need review and create queue items for each.
+Check configured GitHub repos for pull requests that need review and create queue items for each. Iterates over all projects that have GitHub configured.
 
 ## Tools Needed
 
@@ -19,19 +19,27 @@ Check configured GitHub repos for pull requests that need review and create queu
 
 ### 1. Load Config
 
-Read `.claude/engineer-agent/engineer.yaml`. Extract `github.owner`, `github.repos`, `github.review_requested_for`, and `github.ignore_labels`.
+Read `~/.claude/engineer-agent/engineer.yaml`. Extract the `projects` map and `agent` settings.
 
 If config is missing, report the error and stop.
 
 ### 2. Load Dedup State
 
-Read `.claude/engineer-agent/state/last-poll.yaml` if it exists. Note the `github.last_checked` timestamp and `github.seen_prs` list.
+Read `~/.claude/engineer-agent/state/last-poll.yaml` if it exists. This contains per-project state under `projects.<slug>`.
 
 If the state file doesn't exist, treat everything as new (use epoch as last_checked).
 
-### 3. Poll Each Repo
+### 3. Iterate Over Projects
 
-For each repo in `github.repos`:
+For each project slug in the `projects` config map that has a `github` section configured:
+
+Extract `projects.<slug>.github.owner`, `projects.<slug>.github.repos`, `projects.<slug>.github.review_requested_for`, and `projects.<slug>.github.ignore_labels`.
+
+Load dedup state from `projects.<slug>.github` in last-poll.yaml (use epoch defaults if missing).
+
+#### 3a. Poll Each Repo
+
+For each repo in `projects.<slug>.github.repos`:
 
 1. Run via Bash:
    ```bash
@@ -40,16 +48,16 @@ For each repo in `github.repos`:
    This returns JSON with PR details. The `reviewRequests` array contains objects with `login` fields to match against `review_requested_for`.
 
 2. Filter results:
-   - Only PRs where review is requested from `github.review_requested_for`
-   - Exclude PRs with any label in `github.ignore_labels`
+   - Only PRs where review is requested from `review_requested_for`
+   - Exclude PRs with any label in `ignore_labels`
    - Exclude PRs whose `source_id` (`{owner}/{repo}#{number}`) already exists in any queue file (check with Glob across all queue subdirectories for files containing that source_id)
-   - Exclude PRs already in `github.seen_prs`
+   - Exclude PRs already in `projects.<slug>.github.seen_prs`
 
 3. For PRs with more than `agent.max_pr_files` changed files (default 50), skip and log a warning.
 
-### 4. Create Queue Items
+#### 3b. Create Queue Items
 
-For each new PR found, create a file in `.claude/engineer-agent/queue/incoming/` with:
+For each new PR found, create a file in `~/.claude/engineer-agent/queue/incoming/` with:
 
 **Filename:** `{YYYYMMDD-HHmmss}-pr-review-{repo}-{number}.md`
 
@@ -64,6 +72,7 @@ title: "{pr_title}"
 priority: normal
 created_at: "{current_iso_timestamp}"
 status: incoming
+project: "{slug}"
 pr_author: "{pr_author}"
 repo: "{owner}/{repo}"
 pr_number: {number}
@@ -79,7 +88,7 @@ Branch: {head_branch} → {base_branch}
 {pr_body}
 ```
 
-### 5. Process Incoming Items
+#### 3c. Process Incoming Items
 
 After creating queue items, for each new item in `incoming/`, invoke the **review-pr** skill behavior:
 - Fetch the PR details and diff via Bash:
@@ -92,14 +101,12 @@ After creating queue items, for each new item in `incoming/`, invoke the **revie
 - Move the file from `incoming/` to `drafts/`
 - Update the frontmatter `status` to `drafted`
 
-### 6. Update State
+#### 3d. Update State
 
-Update `.claude/engineer-agent/state/last-poll.yaml` with:
-- `github.last_checked`: current ISO timestamp
-- `github.seen_prs`: append newly found PR source_ids
+Update `~/.claude/engineer-agent/state/last-poll.yaml` under `projects.<slug>.github` with:
+- `last_checked`: current ISO timestamp
+- `seen_prs`: append newly found PR source_ids
 
-Create the `.claude/engineer-agent/state/` directory and file if they don't exist.
+### 4. Report
 
-### 7. Report
-
-Report how many new PRs were found and queued: "Found N new PRs for review. Run `/engineer review-queue` to review drafts."
+Report how many new PRs were found per project: "Found N new PRs for review across M projects. Run `/engineer review-queue` to review drafts."

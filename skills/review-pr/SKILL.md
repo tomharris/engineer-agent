@@ -18,14 +18,16 @@ Generate a thorough code review for a pull request, structured with severity lev
 ## Input
 
 Either:
-- A queue item file path in `.claude/engineer-agent/queue/incoming/` with type `pr-review`
+- A queue item file path in `~/.claude/engineer-agent/queue/incoming/` with type `pr-review`
 - Or a direct PR URL/reference (owner, repo, PR number)
 
 ## Steps
 
 ### 1. Load PR Details
 
-If working from a queue item, read the file to get `repo` and `pr_number` from frontmatter.
+If working from a queue item, read the file to get `repo`, `pr_number`, and `project` from frontmatter.
+
+Read `~/.claude/engineer-agent/engineer.yaml` to access project config at `projects.<project>` if needed.
 
 Fetch PR details and diff via Bash:
 ```bash
@@ -39,7 +41,7 @@ This gives you:
 
 ### 2. Understand Team Conventions
 
-Try to read the target repo's `CLAUDE.md`. If the PR is in the current repo, use `Read` to read `CLAUDE.md` directly. For remote repos, fetch via Bash:
+Try to read the target repo's `CLAUDE.md`. If the project has a `path` in config (`projects.<project>.path`), use `Read` to read `{path}/CLAUDE.md` directly. For remote repos, fetch via Bash:
 ```bash
 gh api repos/{owner}/{repo}/contents/CLAUDE.md --jq '.content' | base64 -d
 ```
@@ -97,7 +99,7 @@ If working from a queue item, update the file:
 
 1. Add the `## Draft Response` section with the structured review
 2. Update frontmatter `status` from `incoming` to `drafted`
-3. Move the file from `.claude/engineer-agent/queue/incoming/` to `.claude/engineer-agent/queue/drafts/`
+3. Move the file from `~/.claude/engineer-agent/queue/incoming/` to `~/.claude/engineer-agent/queue/drafts/`
 
 The draft response format:
 

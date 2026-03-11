@@ -6,7 +6,7 @@ version: 1.0.0
 
 # Poll Jira for Assigned Tickets
 
-Check Jira for tickets assigned to the configured user that need implementation.
+Check Jira for tickets assigned to the configured user that need implementation. Iterates over all projects that have Jira configured.
 
 ## Tools Needed
 
@@ -20,13 +20,21 @@ Check Jira for tickets assigned to the configured user that need implementation.
 
 ### 1. Load Config
 
-Read `.claude/engineer-agent/engineer.yaml`. Extract `jira.project`, `jira.assignee`, `jira.statuses`, and `agent.branch_prefix` (default: `engineer-agent`).
+Read `~/.claude/engineer-agent/engineer.yaml`. Extract the `projects` map and `agent.branch_prefix` (default: `engineer-agent`).
 
 ### 2. Load Dedup State
 
-Read `.claude/engineer-agent/state/last-poll.yaml`. Note `jira.last_checked` and `jira.seen_tickets`.
+Read `~/.claude/engineer-agent/state/last-poll.yaml`. This contains per-project state under `projects.<slug>`.
 
-### 3. Query Jira
+### 3. Iterate Over Projects
+
+For each project slug in the `projects` config map that has a `jira` section configured:
+
+Extract `projects.<slug>.jira.project`, `projects.<slug>.jira.assignee`, and `projects.<slug>.jira.statuses`.
+
+Load dedup state from `projects.<slug>.jira` in last-poll.yaml (use epoch defaults if missing).
+
+#### 3a. Query Jira
 
 Build a JQL query:
 ```
@@ -39,16 +47,16 @@ For each ticket that needs detailed information (description, comments), call `m
 - summary, description, status, priority, labels
 - recent comments
 
-### 4. Filter Results
+#### 3b. Filter Results
 
 For each ticket returned:
-- Exclude tickets whose key (e.g., "ENG-456") is already in `jira.seen_tickets`
+- Exclude tickets whose key (e.g., "ENG-456") is already in `projects.<slug>.jira.seen_tickets`
 - Exclude tickets whose `source_id` already exists in any queue file
 - Include tickets that were previously seen but have new comments or status changes (re-queue for updated context)
 
-### 5. Create Queue Items
+#### 3c. Create Queue Items
 
-For each new ticket, create a file in `.claude/engineer-agent/queue/incoming/`:
+For each new ticket, create a file in `~/.claude/engineer-agent/queue/incoming/`:
 
 **Filename:** `{YYYYMMDD-HHmmss}-ticket-{ticket_key}.md`
 
@@ -63,6 +71,7 @@ title: "{ticket_summary}"
 priority: "{map_jira_priority}"
 created_at: "{current_iso_timestamp}"
 status: incoming
+project: "{slug}"
 ticket_key: "{ticket_key}"
 jira_status: "{ticket_status}"
 ---
@@ -72,6 +81,7 @@ jira_status: "{ticket_status}"
 **Ticket:** {ticket_key} — {ticket_summary}
 **Status:** {ticket_status}
 **Priority:** {ticket_priority}
+**Project:** {slug}
 
 ### Description
 {ticket_description}
@@ -85,12 +95,12 @@ jira_status: "{ticket_status}"
 
 Map Jira priorities: Highest/High → `urgent`, Medium → `normal`, Low/Lowest → `low`.
 
-### 6. Process Incoming Items
+#### 3d. Process Incoming Items
 
 For ticket items, the processing is different from PR reviews. Instead of generating a full draft immediately, create an **implementation plan** draft:
 
 1. Read the ticket details
-2. Identify which repo this ticket likely applies to (from labels, description, or config)
+2. Identify which repo this ticket likely applies to (from labels, description, or the project's config)
 3. Draft a brief implementation plan (which files to change, approach)
 4. Move to `drafts/` with status `drafted`
 
@@ -117,10 +127,10 @@ This ticket will be implemented using Ralph Loop with:
 Approving this item will start a Ralph Loop session to implement the changes, then open a draft PR.
 ```
 
-### 7. Update State
+#### 3e. Update State
 
-Update `jira.last_checked` and append new ticket keys to `jira.seen_tickets` in `state/last-poll.yaml`.
+Update `projects.<slug>.jira.last_checked` and append new ticket keys to `projects.<slug>.jira.seen_tickets` in `~/.claude/engineer-agent/state/last-poll.yaml`.
 
-### 8. Report
+### 4. Report
 
-Report: "Found N new Jira tickets."
+Report: "Found N new Jira tickets across M projects."

@@ -1,26 +1,6 @@
 # Engineer Agent Configuration
-# Copy this file to config/engineer.yaml and fill in your values.
-
-github:
-  owner: "myorg"
-  repos: ["repo-a", "repo-b"]
-  review_requested_for: "my-username"
-  ignore_labels: ["wip", "draft"]
-
-slack:
-  channels: ["C12345678"]
-  keywords: ["@myname"]
-  ignore_bots: true
-
-jira:
-  project: "ENG"
-  assignee: "me@example.com"
-  statuses: ["To Do", "In Progress"]
-
-slite:
-  doc_labels: ["needs-review"]
-  design_doc_parent: ""           # Slite note ID or channel where design docs are created
-  design_doc_template: ""         # Slite note ID of a template doc (optional, uses built-in default if empty)
+# Location: ~/.claude/engineer-agent/engineer.yaml
+# Run /engineer setup to create this file automatically.
 
 agent:
   branch_prefix: "engineer-agent"
@@ -28,3 +8,26 @@ agent:
   standup_channel: "C98765432"
   digest_channel: "C98765432"
   cron_interval_minutes: 15
+
+# Each project is registered under a short slug.
+# Run /engineer add-project from a project directory to add entries here.
+projects:
+  my-api:                                # short slug — used in queue items and state
+    path: "/home/you/Projects/my-api"    # absolute path to the project root
+    github:
+      owner: "myorg"
+      repos: ["my-api"]
+      review_requested_for: "my-username"
+      ignore_labels: ["wip", "draft"]
+    slack:
+      channels: ["C12345678"]
+      keywords: ["@myname"]
+      ignore_bots: true
+    jira:
+      project: "ENG"
+      assignee: "me@example.com"
+      statuses: ["To Do", "In Progress"]
+    slite:
+      doc_labels: ["needs-review"]
+      design_doc_parent: ""              # Slite note ID or channel where design docs are created
+      design_doc_template: ""            # Slite note ID of a template doc (optional, uses built-in default if empty)
