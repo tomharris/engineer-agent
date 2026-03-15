@@ -1,12 +1,12 @@
 # engineer-agent
 
-A Claude Code plugin that automates senior software engineer tasks with an approval-gated workflow. The agent polls GitHub, Slack, Jira, and Slite for work, drafts responses, and queues everything for human review before posting externally.
+A Claude Code plugin that automates senior software engineer tasks with an approval-gated workflow. The agent polls GitHub, Slack, ticket trackers (Jira or GitHub Issues), and Slite for work, drafts responses, and queues everything for human review before posting externally.
 
 ## Features
 
 - **PR Reviews** — Structured code reviews with severity levels (critical/important/suggestion)
 - **Slack Q&A** — Drafts answers to questions in configured channels
-- **Ticket Implementation** — Implements Jira tickets on feature branches, opens draft PRs
+- **Ticket Implementation** — Implements tickets (Jira or GitHub Issues) on feature branches, opens draft PRs
 - **Doc Reviews** — Reviews Slite design documents with inline comments
 - **Spec Refinement** — Analyzes PM feature specs and drafts clarifying questions
 - **Ticket Refinement** — Analyzes existing tickets for scope clarity, feasibility, testability, and Fibonacci sizing
@@ -22,7 +22,7 @@ Everything goes through an approval queue — nothing is posted until you say so
 - [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) installed and authenticated
 - **GitHub CLI (`gh`)** — for PR reviews, code operations, and GitHub API access. Install from [cli.github.com](https://cli.github.com) and run `gh auth login`
 - **Slack MCP integration** — for channel polling and message posting (`mcp__claude_ai_Slack__*`)
-- **Jira MCP integration** (optional) — for ticket polling and implementation (`mcp__atlassian__*`)
+- **Jira MCP integration** (optional) — for ticket polling and implementation when using Jira as tracker (`mcp__atlassian__*`). Either Jira or GitHub Issues per project — GitHub Issues uses the `gh` CLI (already a prerequisite)
 - **Slite MCP integration** (optional) — for document reviews (`mcp__slite__*`)
 
 ## Installation
@@ -65,8 +65,10 @@ agent:
   cron_interval_minutes: 15
 
 projects:
+  # Example: project using Jira
   my-api:
     path: "/home/you/Projects/my-api"
+    tracker: "jira"                      # "jira" | "github-issues" | "none"
     github:
       owner: "myorg"
       repos: ["my-api"]
@@ -83,13 +85,18 @@ projects:
     slite:
       doc_labels: ["needs-review"]
 
+  # Example: project using GitHub Issues
   my-frontend:
     path: "/home/you/Projects/my-frontend"
+    tracker: "github-issues"
     github:
       owner: "myorg"
       repos: ["my-frontend"]
       review_requested_for: "my-username"
       ignore_labels: ["wip"]
+      issues:
+        assignee: "my-username"
+        labels: []                       # optional: filter to specific labels
 ```
 
 Only configure the integrations you use per project — the agent skips unconfigured integrations.
@@ -119,7 +126,8 @@ Fetch new work items from configured sources.
 
 ```
 /engineer poll                     # Poll all sources, all projects
-/engineer poll github              # Poll GitHub only, all projects
+/engineer poll github              # Poll GitHub PRs only, all projects
+/engineer poll github-issues       # Poll GitHub Issues only, all projects
 /engineer poll --project my-api    # Poll all sources, one project
 /engineer poll slack --project my-api  # Poll Slack, one project
 ```
@@ -229,11 +237,12 @@ Skills are auto-invoked during polling and processing:
 |-------|---------|-------------|
 | `poll-github` | `/engineer poll` | Finds PRs requesting your review (all projects) |
 | `poll-slack` | `/engineer poll` | Finds unanswered questions matching keywords (all projects) |
-| `poll-jira` | `/engineer poll` | Finds assigned tickets in target statuses (all projects) |
+| `poll-jira` | `/engineer poll` | Finds assigned Jira tickets in target statuses (projects with tracker: jira) |
+| `poll-github-issues` | `/engineer poll` | Finds assigned GitHub issues (projects with tracker: github-issues) |
 | `poll-slite` | `/engineer poll` | Finds docs tagged for review (all projects) |
 | `review-pr` | New PR detected | Generates structured review with severity levels |
 | `answer-slack` | New question detected | Drafts answer with confidence level |
-| `implement-ticket` | Ticket approved | Implements on feature branch, runs tests |
+| `implement-ticket` | Ticket approved | Implements Jira or GitHub Issue on feature branch, runs tests |
 | `review-doc` | New doc detected | Reviews for accuracy, completeness, clarity |
 | `generate-standup` | On demand | Creates standup from yesterday's activity (all projects) |
 | `generate-digest` | `/engineer digest` | Summarizes daily activity with metrics (all projects) |
@@ -283,6 +292,7 @@ skills/
   poll-github/SKILL.md         GitHub polling
   poll-slack/SKILL.md          Slack polling
   poll-jira/SKILL.md           Jira polling
+  poll-github-issues/SKILL.md  GitHub Issues polling
   poll-slite/SKILL.md          Slite polling
   review-pr/SKILL.md           PR review generation
   answer-slack/SKILL.md        Slack answer drafting

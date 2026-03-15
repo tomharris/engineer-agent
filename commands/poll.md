@@ -1,6 +1,6 @@
 ---
 description: "Poll configured sources for new work items"
-argument-hint: "[github|slack|jira|slite|all] [--project <slug>]"
+argument-hint: "[github|slack|jira|github-issues|slite|all] [--project <slug>]"
 allowed-tools: ["Bash", "Read", "Write", "Glob", "Grep", "Agent", "mcp__claude_ai_Slack__slack_read_channel", "mcp__claude_ai_Slack__slack_read_thread", "mcp__claude_ai_Slack__slack_search_public_and_private", "mcp__atlassian__searchJiraIssuesUsingJql", "mcp__atlassian__getJiraIssue", "mcp__slite__search-notes", "mcp__slite__get-note", "mcp__slite__get-note-children", "mcp__slite__append-blocks"]
 ---
 
@@ -11,9 +11,10 @@ Manually trigger a poll of configured sources for new work items.
 ## Arguments
 
 `$ARGUMENTS` specifies which source to poll and optionally which project. Options:
-- `github` — poll GitHub only
+- `github` — poll GitHub PRs only
 - `slack` — poll Slack only
 - `jira` — poll Jira only
+- `github-issues` — poll GitHub Issues only
 - `slite` — poll Slite only
 - `all` or empty — poll all configured sources
 - `--project <slug>` — poll only the specified project (default: all projects)
@@ -41,7 +42,8 @@ Check if the project has that integration configured (e.g., `projects.<slug>.git
 Run the appropriate poll skill behavior:
 - **github**: Follow the `poll-github` skill steps — list PRs, filter, create queue items, generate review drafts.
 - **slack**: Follow the `poll-slack` skill steps — read channels, find questions matching keywords, create queue items, generate answer drafts.
-- **jira**: Follow the `poll-jira` skill steps — query assigned tickets, create queue items.
+- **jira**: Follow the `poll-jira` skill steps — query assigned tickets, create queue items. Only for projects where tracker resolves to `jira`.
+- **github-issues**: Follow the `poll-github-issues` skill steps — query assigned issues, create queue items. Only for projects where tracker resolves to `github-issues`.
 - **slite**: Follow the `poll-slite` skill steps — check for docs tagged for review, create queue items.
 
 Each queue item must include `project: "<slug>"` in its frontmatter.
