@@ -1,6 +1,6 @@
 ---
 description: "Review and approve/reject queued engineer-agent work items"
-argument-hint: "[filter: pr|slack|ticket|ticket-plan|doc|spec|design] [--all] [--project <slug>]"
+argument-hint: "[filter: pr|slack|ticket|ticket-plan|doc|spec|design|refinement] [--all] [--project <slug>]"
 allowed-tools: ["Bash", "Read", "Write", "Edit", "Glob", "Grep", "Agent", "AskUserQuestion", "mcp__claude_ai_Slack__slack_send_message", "mcp__slite__append-blocks", "mcp__slite__create-note"]
 ---
 
@@ -10,7 +10,7 @@ Review pending draft items and approve, edit, or reject them.
 
 ## Arguments
 
-- `$ARGUMENTS` may contain a filter: `pr`, `slack`, `ticket`, `ticket-plan`, `doc`, `spec`, or `design` to show only that type
+- `$ARGUMENTS` may contain a filter: `pr`, `slack`, `ticket`, `ticket-plan`, `doc`, `spec`, `design`, or `refinement` to show only that type
 - `$ARGUMENTS` may contain `--all` to show all items including completed/rejected
 - `$ARGUMENTS` may contain `--project <slug>` to show only items for a specific project
 
@@ -75,6 +75,7 @@ Ask the user what to do:
 - For `doc-review` type: Call `mcp__slite__append-blocks` to post review comments on the document.
 - For `spec-refinement` type: No external action needed. Move to `~/.claude/engineer-agent/queue/completed/`. Print: "Spec refinement complete. Run `/engineer create-design-doc {source_url}` to generate the design doc."
 - For `design-doc` type: Look up `projects.<project>.slite.design_doc_parent` from config. Call `mcp__slite__create-note` with title from frontmatter, parent from config, and content from `## Draft Response`. Print: "Design doc created in Slite: {url}"
+- For `ticket-refinement` type: No external action needed. Move to `~/.claude/engineer-agent/queue/completed/`. Print: "Ticket refinement complete for {ticket_key}. Estimated size: {estimated_size} points."
 - For `ticket-plan` type: No external action needed. Move to `~/.claude/engineer-agent/queue/completed/`. Print: "Ticket plan approved. Use as reference when creating tickets in your project tracker."
 
 After executing, update the file's frontmatter `status` to `completed` and move it from `~/.claude/engineer-agent/queue/drafts/` to `~/.claude/engineer-agent/queue/completed/` (write to new location, delete from old).
