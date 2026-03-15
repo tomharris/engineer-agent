@@ -29,7 +29,7 @@ If `--project <slug>` is specified, use that slug. Otherwise, try to infer the p
 ### 3. Parse Input
 
 Extract the artifact identifier from `$ARGUMENTS`:
-- **Slite URL** (e.g. `https://futuresinc.slite.com/api/s/note/...` or `https://futuresinc.slite.com/p/note/...`): extract the note ID from the path, fetch via `mcp__slite__get-note`
+- **Slite URL** (e.g. `https://example.slite.com/api/s/note/...` or `https://example.slite.com/p/note/...`): extract the note ID from the path, fetch via `mcp__slite__get-note`
 - **Bare Slite ID**: fetch via `mcp__slite__get-note`
 - **Jira key** (e.g. `ENG-123`): fetch via `mcp__atlassian__getJiraIssue`
 - **GitHub issue URL** (e.g. `https://github.com/org/repo/issues/42`): fetch via `gh issue view {number} --repo {owner}/{repo} --json title,body,labels`
