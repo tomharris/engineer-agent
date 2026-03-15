@@ -53,7 +53,7 @@ Files move through: `~/.claude/engineer-agent/queue/incoming/` → `queue/drafts
 Filename: `{YYYYMMDD-HHmmss}-{type}-{short-id}.md`
 
 YAML frontmatter fields:
-- `type`: pr-review | slack-question | ticket | doc-review | spec-refinement | design-doc | ticket-plan
+- `type`: pr-review | slack-question | ticket | doc-review | spec-refinement | design-doc | ticket-plan | ticket-refinement
 - `source`: github | slack | jira | slite
 - `source_url`: URL to the original item
 - `source_id`: Unique identifier (e.g. "org/repo#142")
