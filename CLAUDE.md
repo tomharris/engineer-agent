@@ -44,7 +44,7 @@ The config has two top-level sections:
 - `agent` — global settings (branch_prefix, max_pr_files, channels, cron interval)
 - `projects` — a map of project slugs to per-project integration config
 
-To find config for a specific project, look up `projects.<slug>`. Each project entry has `path`, `github`, `slack`, `jira`, and `slite` subsections.
+To find config for a specific project, look up `projects.<slug>`. Each project entry has `path`, `tracker`, `github`, `slack`, `jira`, and `slite` subsections. The `tracker` field (`"jira"` | `"github-issues"` | `"none"`) determines which ticket tracker a project uses. If absent, it's inferred: `jira` section present → `"jira"`, `github.issues` section present → `"github-issues"`, neither → `"none"`.
 
 ## Queue File Format
 
@@ -69,7 +69,7 @@ Body sections:
 
 ## Available Integrations
 
-- GitHub: `gh` CLI via Bash (requires `gh auth login`)
+- GitHub (PRs and Issues): `gh` CLI via Bash (requires `gh auth login`)
 - Slack: `mcp__claude_ai_Slack__*` tools
-- Jira: `mcp__atlassian__*` tools
+- Jira: `mcp__atlassian__*` tools (optional — either Jira or GitHub Issues per project)
 - Slite: `mcp__slite__*` tools

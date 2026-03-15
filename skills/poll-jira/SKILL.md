@@ -28,7 +28,11 @@ Read `~/.claude/engineer-agent/state/last-poll.yaml`. This contains per-project 
 
 ### 3. Iterate Over Projects
 
-For each project slug in the `projects` config map that has a `jira` section configured:
+For each project slug in the `projects` config map:
+
+- Skip projects where `tracker` is explicitly set to something other than `"jira"` (e.g., `"github-issues"` or `"none"`)
+- For projects without a `tracker` field, proceed only if a `jira` section exists (backward compat)
+- Skip projects that have no `jira` section configured
 
 Extract `projects.<slug>.jira.project`, `projects.<slug>.jira.assignee`, and `projects.<slug>.jira.statuses`.
 

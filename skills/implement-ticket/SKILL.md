@@ -1,12 +1,12 @@
 ---
 name: implement-ticket
-description: "Implement a Jira ticket by creating a branch, writing code using Ralph Loop, and preparing a PR. Use this skill when a ticket queue item is approved for implementation."
+description: "Implement a ticket (Jira or GitHub Issue) by creating a branch, writing code using Ralph Loop, and preparing a PR. Use this skill when a ticket queue item is approved for implementation."
 version: 1.0.0
 ---
 
 # Implement a Ticket
 
-Implement the code changes described in a Jira ticket using iterative development via Ralph Loop.
+Implement the code changes described in a ticket using iterative development via Ralph Loop.
 
 ## Tools Needed
 
@@ -36,11 +36,25 @@ Read `~/.claude/engineer-agent/engineer.yaml` and extract:
 
 ### 2. Set Up Branch
 
-Navigate to the project's working directory using `projects.<project>.path` from config:
+Navigate to the project's working directory using `projects.<project>.path` from config.
+
+Determine the tracker type for this project:
+- Read `projects.<project>.tracker` from config
+- If `tracker` is absent, infer: if `source` frontmatter is `github` → `github-issues`, if `jira` → `jira`
+
+Create the branch based on tracker type:
+
+**If tracker is `github-issues`:**
+- Extract issue number from `ticket_key` (strip the `#` prefix)
+- Derive a slug from the title: lowercase, replace non-alphanumeric characters with hyphens, truncate to 40 chars, strip trailing hyphens
+- Branch name: `{branch_prefix}/issue-{number}-{slug}`
+
+**If tracker is `jira`:**
+- Branch name: `{branch_prefix}/{ticket_key}`
 
 ```bash
 cd {projects.<project>.path}
-git checkout -b {branch_prefix}/{ticket_key}
+git checkout -b {branch_name}
 ```
 
 ### 3. Start Ralph Loop
@@ -102,7 +116,14 @@ When Ralph Loop finishes (either by fulfilling the promise or hitting max iterat
 
 When the human approves the implementation result via `/engineer review-queue`:
 
-Look up `projects.<project>.github.owner` and the repo from config. Create the PR via Bash:
+Look up `projects.<project>.github.owner` and the repo from config. Create the PR based on tracker type:
+
+**If tracker is `github-issues`:**
+```bash
+gh pr create --repo {owner}/{repo} --title "#{number}: {title}" --body "{body with 'Closes #{number}', changes summary, and test results}" --head "{branch_prefix}/issue-{number}-{slug}" --base main --draft
+```
+
+**If tracker is `jira`:**
 ```bash
 gh pr create --repo {owner}/{repo} --title "{ticket_key}: {title}" --body "{body with ticket link, changes summary, and test results}" --head "{branch_prefix}/{ticket_key}" --base main --draft
 ```

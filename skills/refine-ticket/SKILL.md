@@ -39,9 +39,18 @@ Using the project path from config:
 
 ### 3. Cross-Reference
 
-**Jira** — If `projects.<project>.jira` is configured, search for related, blocking, or duplicate tickets using JQL.
+Determine the tracker type for this project:
+- Read `projects.<project>.tracker` from config
+- If `tracker` is absent, infer: `jira` section present → `"jira"`, `github.issues` section present → `"github-issues"`, neither → `"none"`
 
-**GitHub** — If the source is GitHub, use `gh` to check for related issues or PRs in the repo.
+**If tracker is `jira`:** Search for related, blocking, or duplicate tickets using `mcp__atlassian__searchJiraIssuesUsingJql` with JQL.
+
+**If tracker is `github-issues`:** Search for related issues using `gh` CLI:
+```bash
+gh issue list --repo {owner}/{repo} --search "{keywords from ticket title}" --json number,title,url
+```
+
+**Additionally:** If the source is GitHub (regardless of tracker), use `gh` to check for related PRs in the repo.
 
 Note any dependencies, blockers, or overlapping work.
 

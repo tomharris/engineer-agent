@@ -33,7 +33,11 @@ Stop here.
 Ask the user to confirm or customize:
 - **Slug** (default: derived from directory name) — must be a simple identifier (letters, numbers, hyphens)
 - **GitHub owner/repos** (default: auto-detected from git remote)
-- Whether they want to configure Slack, Jira, and/or Slite integrations for this project
+- **Ticket tracker:** "What ticket tracker does this project use?" with options:
+  - **GitHub Issues** — prompt for `assignee` (default: GitHub username from `gh api user --jq .login`), optional `labels` filter. Write `tracker: github-issues` and `github.issues` sub-config.
+  - **Jira** — prompt for `project`, `assignee`, `statuses`. Write `tracker: jira` and `jira` section.
+  - **None / skip** — write `tracker: none`, skip ticket tracker config.
+- Whether they want to configure Slack and/or Slite integrations for this project
 
 For each integration the user wants to configure, ask for the required fields. For integrations they skip, omit that section from the project entry.
 
@@ -46,12 +50,18 @@ The new entry should follow this structure:
 ```yaml
   {slug}:
     path: "{absolute_path}"
+    tracker: "{github-issues|jira|none}"
     github:
       owner: "{owner}"
       repos: ["{repo}"]
       review_requested_for: "{username}"
       ignore_labels: ["wip", "draft"]
-    # Include slack/jira/slite sections only if the user configured them
+      # Include issues section only if tracker is github-issues
+      issues:
+        assignee: "{username}"
+        labels: []
+    # Include jira section only if tracker is jira
+    # Include slack/slite sections only if the user configured them
 ```
 
 ### 6. Initialize State Entry
@@ -69,12 +79,15 @@ projects:
     jira:
       last_checked: "1970-01-01T00:00:00Z"
       seen_tickets: []
+    github_issues:
+      last_checked: "1970-01-01T00:00:00Z"
+      seen_issues: []
     slite:
       last_checked: "1970-01-01T00:00:00Z"
       seen_docs: []
 ```
 
-Only include sections for integrations the user configured.
+Only include sections for integrations the user configured. Include `github_issues` if tracker is `github-issues`, `jira` if tracker is `jira`.
 
 ### 7. Print Summary
 
@@ -83,8 +96,8 @@ Project "{slug}" registered!
 
   Path:    {absolute_path}
   GitHub:  {owner}/{repo}
+  Tracker: {GitHub Issues | Jira | not configured}
   Slack:   {configured | not configured}
-  Jira:    {configured | not configured}
   Slite:   {configured | not configured}
 
 Run /engineer poll to start polling this project's sources.

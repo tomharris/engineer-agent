@@ -14,11 +14,15 @@ agent:
 projects:
   my-api:                                # short slug — used in queue items and state
     path: "/home/you/Projects/my-api"    # absolute path to the project root
+    tracker: "jira"                      # "jira" | "github-issues" | "none" (default: inferred from config sections)
     github:
       owner: "myorg"
       repos: ["my-api"]
       review_requested_for: "my-username"
       ignore_labels: ["wip", "draft"]
+      # issues:                          # only when tracker: github-issues
+      #   assignee: "my-username"
+      #   labels: []                     # optional: filter to issues with these labels
     slack:
       channels: ["C12345678"]
       keywords: ["@myname"]
@@ -31,3 +35,20 @@ projects:
       doc_labels: ["needs-review"]
       design_doc_parent: ""              # Slite note ID or channel where design docs are created
       design_doc_template: ""            # Slite note ID of a template doc (optional, uses built-in default if empty)
+
+  # Example: project using GitHub Issues instead of Jira
+  # my-app:
+  #   path: "/home/you/Projects/my-app"
+  #   tracker: "github-issues"
+  #   github:
+  #     owner: "myorg"
+  #     repos: ["my-app"]
+  #     review_requested_for: "my-username"
+  #     ignore_labels: ["wip", "draft"]
+  #     issues:
+  #       assignee: "my-username"
+  #       labels: []                     # optional: filter to issues with these labels
+  #   slack:
+  #     channels: ["C12345678"]
+  #     keywords: ["@myname"]
+  #     ignore_bots: true

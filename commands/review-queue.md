@@ -68,15 +68,23 @@ Ask the user what to do:
   ```
   Use `--approve`, `--comment`, or `--request-changes` based on the draft's **Recommendation** field.
 - For `slack-question` type: Call `mcp__claude_ai_Slack__slack_send_message` to post the reply in the thread.
-- For `ticket` type: Look up the project's path from `projects.<project>.path` in config. Create a draft PR via Bash:
-  ```bash
-  gh pr create --repo {owner}/{repo} --title "{ticket_key}: {title}" --body "{body}" --head "{branch_prefix}/{ticket_key}" --base main --draft
-  ```
+- For `ticket` type: Look up the project's config. Determine the tracker type (`projects.<project>.tracker`, or infer from `source` frontmatter: `github` → `github-issues`, `jira` → `jira`). Create a draft PR via Bash:
+  - **If tracker is `github-issues`:** Extract issue number from `ticket_key` (strip `#`), derive slug from title (lowercase, non-alphanumeric → hyphens, truncate 40 chars):
+    ```bash
+    gh pr create --repo {owner}/{repo} --title "#{number}: {title}" --body "{body with 'Closes #{number}'}" --head "{branch_prefix}/issue-{number}-{slug}" --base main --draft
+    ```
+  - **If tracker is `jira`:**
+    ```bash
+    gh pr create --repo {owner}/{repo} --title "{ticket_key}: {title}" --body "{body}" --head "{branch_prefix}/{ticket_key}" --base main --draft
+    ```
 - For `doc-review` type: Call `mcp__slite__append-blocks` to post review comments on the document.
 - For `spec-refinement` type: No external action needed. Move to `~/.claude/engineer-agent/queue/completed/`. Print: "Spec refinement complete. Run `/engineer create-design-doc {source_url}` to generate the design doc."
 - For `design-doc` type: Look up `projects.<project>.slite.design_doc_parent` from config. Call `mcp__slite__create-note` with title from frontmatter, parent from config, and content from `## Draft Response`. Print: "Design doc created in Slite: {url}"
 - For `ticket-refinement` type: No external action needed. Move to `~/.claude/engineer-agent/queue/completed/`. Print: "Ticket refinement complete for {ticket_key}. Estimated size: {estimated_size} points."
-- For `ticket-plan` type: No external action needed. Move to `~/.claude/engineer-agent/queue/completed/`. Print: "Ticket plan approved. Use as reference when creating tickets in your project tracker."
+- For `ticket-plan` type: Determine the tracker type for the item's project.
+  - **If tracker is `github-issues`:** Create GitHub Issues for each ticket in the plan via `gh issue create --repo {owner}/{repo} --title "{title}" --body "{body}" --label "{labels}"`. Report created issue URLs. Move to `~/.claude/engineer-agent/queue/completed/`.
+  - **If tracker is `jira`:** No automated creation. Move to `~/.claude/engineer-agent/queue/completed/`. Print: "Ticket plan approved. Use as reference when creating tickets in Jira."
+  - **If tracker is `none`:** Move to `~/.claude/engineer-agent/queue/completed/`. Print: "Ticket plan approved. Use as reference when creating tickets in your project tracker."
 
 After executing, update the file's frontmatter `status` to `completed` and move it from `~/.claude/engineer-agent/queue/drafts/` to `~/.claude/engineer-agent/queue/completed/` (write to new location, delete from old).
 

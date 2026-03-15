@@ -1,6 +1,6 @@
 ---
 name: create-tickets
-description: "Break a design doc into phased implementation tickets with dependencies. Use this skill when processing a ticket-plan queue item."
+description: "Break a design doc into phased implementation tickets with dependencies. Use this skill when processing a ticket-plan queue item. Supports both Jira and GitHub Issues as the target tracker."
 version: 1.0.0
 ---
 
@@ -13,8 +13,9 @@ Generate a phased ticket breakdown from an engineering design doc, with real fil
 - `mcp__slite__get-note` — fetch design doc from Slite
 - `Read`, `Write` — read/write queue items and source code
 - `Grep`, `Glob` — explore codebase architecture, find implementations and patterns
-- `mcp__atlassian__searchJiraIssuesUsingJql` — find existing related tickets
-- `mcp__atlassian__getJiraIssue` — read ticket details
+- `mcp__atlassian__searchJiraIssuesUsingJql` — find existing related tickets (Jira tracker)
+- `mcp__atlassian__getJiraIssue` — read ticket details (Jira tracker)
+- `Bash` — run `gh` CLI commands for GitHub Issues tracker
 
 ## Input
 
@@ -43,9 +44,21 @@ Before generating tickets, understand the current architecture using the project
 
 This research is critical — every ticket must reference **actual file paths** from the codebase, not abstract names.
 
-### 3. Check Jira for Related Tickets
+### 3. Check for Related Tickets
 
-If `jira_project` is set in the frontmatter or `projects.<project>.jira.project` is configured, search Jira for existing tickets that overlap with the planned work. Note any that should be referenced as dependencies or that indicate work already in progress.
+Determine the tracker type for this project:
+- Read `projects.<project>.tracker` from config
+- If `tracker` is absent, infer: `jira` section present → `"jira"`, `github.issues` section present → `"github-issues"`, neither → `"none"`
+
+**If tracker is `jira`:**
+If `jira_project` is set in the frontmatter or `projects.<project>.jira.project` is configured, search Jira for existing tickets that overlap with the planned work using `mcp__atlassian__searchJiraIssuesUsingJql`. Note any that should be referenced as dependencies or that indicate work already in progress.
+
+**If tracker is `github-issues`:**
+Search for related issues using `gh` CLI:
+```bash
+gh issue list --repo {owner}/{repo} --search "{keywords from design doc title and key topics}" --json number,title,url
+```
+Note any that should be referenced as dependencies or that indicate work already in progress.
 
 ### 4. Generate Ticket Breakdown
 
@@ -69,7 +82,7 @@ Write the phased ticket plan in the `## Draft Response` section using the templa
 
 **Design Doc:** {url}
 **Project:** {slug}
-**Jira Project:** {jira_project}
+**Tracker:** {tracker type and project/repo}
 **Total Tickets:** {N}
 **Phases:** {M}
 
@@ -132,6 +145,20 @@ Fill in every section based on the design doc and codebase research. If no exist
 ### 5. Finalize
 
 Update the queue item's frontmatter `status` to `drafted` and move it to `~/.claude/engineer-agent/queue/drafts/`.
+
+### 5a. Create Tickets on Approval
+
+When the ticket-plan is approved via `/engineer review-queue`:
+
+**If tracker is `github-issues`:**
+Create each ticket from the plan via `gh` CLI:
+```bash
+gh issue create --repo {owner}/{repo} --title "{ticket_title}" --body "{ticket_body with acceptance criteria}" --label "{labels}"
+```
+Report the created issue URLs.
+
+**If tracker is `jira`:**
+No automated creation — keep current behavior (manual creation reference). Print: "Use the ticket plan as reference when creating tickets in Jira."
 
 ### 6. Report
 
