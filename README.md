@@ -9,6 +9,7 @@ A Claude Code plugin that automates senior software engineer tasks with an appro
 - **Ticket Implementation** — Implements Jira tickets on feature branches, opens draft PRs
 - **Doc Reviews** — Reviews Slite design documents with inline comments
 - **Spec Refinement** — Analyzes PM feature specs and drafts clarifying questions
+- **Ticket Refinement** — Analyzes existing tickets for scope clarity, feasibility, testability, and Fibonacci sizing
 - **Design Doc Generation** — Creates engineering design docs from refined specs
 - **Ticket Breakdown** — Breaks design docs into phased implementation tickets with dependencies
 - **Standup Generation** — Creates daily standup updates from activity history
@@ -171,6 +172,20 @@ Analyze a PM feature spec and generate clarifying questions.
 
 Generates structured questions across scope, feasibility, missing details, ambiguities, and constraints. After approval, fill in the answer fields to provide context for design doc generation.
 
+### `/engineer refine-ticket <jira-key|github-url|--jql "..."|--text "..."> [--project <slug>]`
+
+Analyze existing tickets for scope, feasibility, testability, and sizing.
+
+```
+/engineer refine-ticket ENG-123
+/engineer refine-ticket ENG-123 ENG-124 ENG-125
+/engineer refine-ticket --jql "project = ENG AND status = 'To Do'"
+/engineer refine-ticket https://github.com/org/repo/issues/45
+/engineer refine-ticket --text "As a user, I want to..."
+```
+
+Assesses scope clarity, implementation feasibility (grounded in codebase analysis), testability, and assigns a Fibonacci sizing estimate. Multiple tickets are processed in parallel. Approve via `/engineer review-queue refinement`.
+
 ### `/engineer create-design-doc <slite-url-or-id> [--project <slug>]`
 
 Generate an engineering design doc from a PM spec.
@@ -223,6 +238,7 @@ Skills are auto-invoked during polling and processing:
 | `generate-standup` | On demand | Creates standup from yesterday's activity (all projects) |
 | `generate-digest` | `/engineer digest` | Summarizes daily activity with metrics (all projects) |
 | `refine-spec` | `/engineer refine-spec` | Analyzes spec, generates clarifying questions |
+| `refine-ticket` | `/engineer refine-ticket` | Analyzes ticket scope, feasibility, testability, and sizing |
 | `create-design-doc` | `/engineer create-design-doc` | Generates engineering design doc from spec |
 | `create-tickets` | `/engineer create-tickets` | Breaks design doc into phased tickets |
 
@@ -260,6 +276,7 @@ commands/
   status.md                    /engineer status command
   digest.md                    /engineer digest command
   refine-spec.md               /engineer refine-spec command
+  refine-ticket.md             /engineer refine-ticket command
   create-design-doc.md         /engineer create-design-doc command
   create-tickets.md            /engineer create-tickets command
 skills/
@@ -274,6 +291,7 @@ skills/
   generate-standup/SKILL.md    Standup generation
   generate-digest/SKILL.md     Digest generation
   refine-spec/SKILL.md         Spec analysis and questions
+  refine-ticket/SKILL.md       Ticket refinement and sizing
   create-design-doc/SKILL.md   Design doc generation
   create-tickets/SKILL.md      Ticket breakdown from design doc
 scripts/
