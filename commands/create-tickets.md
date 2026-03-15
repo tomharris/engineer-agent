@@ -28,7 +28,7 @@ If `--project <slug>` is specified, use that slug. Otherwise, try to infer the p
 ### 3. Parse Arguments
 
 Extract the Slite document ID from `$ARGUMENTS`:
-- If a full URL (e.g. `https://futuresinc.slite.com/api/s/note/...` or `https://futuresinc.slite.com/p/note/...`), extract the note ID from the path
+- If a full URL (e.g. `https://example.slite.com/api/s/note/...` or `https://example.slite.com/p/note/...`), extract the note ID from the path
 - If a bare ID, use it directly
 - If no argument provided, ask the user for the Slite doc URL or ID
 

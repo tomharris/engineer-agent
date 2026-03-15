@@ -176,7 +176,7 @@ The digest includes items processed, approval rates, and breakdowns by project a
 Analyze a PM feature spec and generate clarifying questions.
 
 ```
-/engineer refine-spec https://futuresinc.slite.com/p/note/abc123
+/engineer refine-spec https://example.slite.com/p/note/abc123
 ```
 
 Generates structured questions across scope, feasibility, missing details, ambiguities, and constraints. After approval, fill in the answer fields to provide context for design doc generation.
@@ -200,7 +200,7 @@ Assesses scope clarity, implementation feasibility (grounded in codebase analysi
 Generate an engineering design doc from a PM spec.
 
 ```
-/engineer create-design-doc https://futuresinc.slite.com/p/note/abc123
+/engineer create-design-doc https://example.slite.com/p/note/abc123
 ```
 
 Researches the codebase and produces a full design doc (architecture, components, data model, API changes, risks, implementation phases). If a prior spec refinement exists for this doc, its Q&A is included as context. On approval, the design doc is created in Slite.
@@ -210,7 +210,7 @@ Researches the codebase and produces a full design doc (architecture, components
 Break a design doc into phased implementation tickets.
 
 ```
-/engineer create-tickets https://futuresinc.slite.com/p/note/abc123
+/engineer create-tickets https://example.slite.com/p/note/abc123
 ```
 
 Takes a Slite design doc and generates detailed tickets grouped by implementation phase. Each ticket includes purpose, implementation approach (with real file paths), testing strategy, acceptance criteria, and dependencies on other tickets. On approval, the ticket plan moves to completed for reference when creating tickets in your project tracker.
@@ -220,7 +220,7 @@ Takes a Slite design doc and generates detailed tickets grouped by implementatio
 Detect gaps between pipeline artifacts (spec, design doc, tickets).
 
 ```
-/engineer audit-gaps https://futuresinc.slite.com/p/note/abc123
+/engineer audit-gaps https://example.slite.com/p/note/abc123
 /engineer audit-gaps ENG-123 --boundary design-tickets
 /engineer audit-gaps https://github.com/org/repo/issues/42 --boundary all
 ```
