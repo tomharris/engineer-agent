@@ -12,6 +12,7 @@ A Claude Code plugin that automates senior software engineer tasks with an appro
 - **Ticket Refinement** — Analyzes existing tickets for scope clarity, feasibility, testability, and Fibonacci sizing
 - **Design Doc Generation** — Creates engineering design docs from refined specs
 - **Ticket Breakdown** — Breaks design docs into phased implementation tickets with dependencies
+- **Pipeline Gap Audit** — Bidirectional comparison of spec ↔ design doc ↔ tickets to detect mismatches
 - **Standup Generation** — Creates daily standup updates from activity history
 - **Daily Digest** — Summarizes all agent activity with approval metrics
 
@@ -214,6 +215,18 @@ Break a design doc into phased implementation tickets.
 
 Takes a Slite design doc and generates detailed tickets grouped by implementation phase. Each ticket includes purpose, implementation approach (with real file paths), testing strategy, acceptance criteria, and dependencies on other tickets. On approval, the ticket plan moves to completed for reference when creating tickets in your project tracker.
 
+### `/engineer audit-gaps <url-or-key> [--project <slug>] [--boundary <spec-design|design-tickets|all>]`
+
+Detect gaps between pipeline artifacts (spec, design doc, tickets).
+
+```
+/engineer audit-gaps https://futuresinc.slite.com/p/note/abc123
+/engineer audit-gaps ENG-123 --boundary design-tickets
+/engineer audit-gaps https://github.com/org/repo/issues/42 --boundary all
+```
+
+Performs bidirectional comparison across boundaries. Each gap is classified as missing-right, missing-left, diverged, or ambiguous, with draft fixes where possible. Approve via `/engineer review-queue gap`.
+
 ## How It Works
 
 ### Queue Lifecycle
@@ -250,6 +263,7 @@ Skills are auto-invoked during polling and processing:
 | `refine-ticket` | `/engineer refine-ticket` | Analyzes ticket scope, feasibility, testability, and sizing |
 | `create-design-doc` | `/engineer create-design-doc` | Generates engineering design doc from spec |
 | `create-tickets` | `/engineer create-tickets` | Breaks design doc into phased tickets |
+| `audit-gaps` | `/engineer audit-gaps` | Compares pipeline artifacts across boundaries, produces gap checklist |
 
 ## Automated Polling
 
@@ -288,6 +302,7 @@ commands/
   refine-ticket.md             /engineer refine-ticket command
   create-design-doc.md         /engineer create-design-doc command
   create-tickets.md            /engineer create-tickets command
+  audit-gaps.md                /engineer audit-gaps command
 skills/
   poll-github/SKILL.md         GitHub polling
   poll-slack/SKILL.md          Slack polling
@@ -304,6 +319,7 @@ skills/
   refine-ticket/SKILL.md       Ticket refinement and sizing
   create-design-doc/SKILL.md   Design doc generation
   create-tickets/SKILL.md      Ticket breakdown from design doc
+  audit-gaps/SKILL.md          Pipeline gap auditing
 scripts/
   cron-poll.sh                 Cron polling script
   install-cron.sh              Cron setup script
