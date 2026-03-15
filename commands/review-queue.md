@@ -1,6 +1,6 @@
 ---
 description: "Review and approve/reject queued engineer-agent work items"
-argument-hint: "[filter: pr|slack|ticket|ticket-plan|doc|spec|design|refinement] [--all] [--project <slug>]"
+argument-hint: "[filter: pr|slack|ticket|ticket-plan|doc|spec|design|refinement|gap] [--all] [--project <slug>]"
 allowed-tools: ["Bash", "Read", "Write", "Edit", "Glob", "Grep", "Agent", "AskUserQuestion", "mcp__claude_ai_Slack__slack_send_message", "mcp__slite__append-blocks", "mcp__slite__create-note"]
 ---
 
@@ -10,7 +10,7 @@ Review pending draft items and approve, edit, or reject them.
 
 ## Arguments
 
-- `$ARGUMENTS` may contain a filter: `pr`, `slack`, `ticket`, `ticket-plan`, `doc`, `spec`, `design`, or `refinement` to show only that type
+- `$ARGUMENTS` may contain a filter: `pr`, `slack`, `ticket`, `ticket-plan`, `doc`, `spec`, `design`, `refinement`, or `gap` to show only that type
 - `$ARGUMENTS` may contain `--all` to show all items including completed/rejected
 - `$ARGUMENTS` may contain `--project <slug>` to show only items for a specific project
 
@@ -85,6 +85,7 @@ Ask the user what to do:
   - **If tracker is `github-issues`:** Create GitHub Issues for each ticket in the plan via `gh issue create --repo {owner}/{repo} --title "{title}" --body "{body}" --label "{labels}"`. Report created issue URLs. Move to `~/.claude/engineer-agent/queue/completed/`.
   - **If tracker is `jira`:** No automated creation. Move to `~/.claude/engineer-agent/queue/completed/`. Print: "Ticket plan approved. Use as reference when creating tickets in Jira."
   - **If tracker is `none`:** Move to `~/.claude/engineer-agent/queue/completed/`. Print: "Ticket plan approved. Use as reference when creating tickets in your project tracker."
+- For `gap-audit` type: No external action needed. Move to `~/.claude/engineer-agent/queue/completed/`. Count the number of gaps in the `### Checklist` section. Print: "Gap audit acknowledged for {boundary} boundary. Use the checklist above to address {N} identified gaps."
 
 After executing, update the file's frontmatter `status` to `completed` and move it from `~/.claude/engineer-agent/queue/drafts/` to `~/.claude/engineer-agent/queue/completed/` (write to new location, delete from old).
 
