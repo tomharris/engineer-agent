@@ -114,7 +114,7 @@ When Ralph Loop finishes (either by fulfilling the promise or hitting max iterat
 
 ### 5. Create PR (on approval)
 
-When the human approves the implementation result via `/engineer review-queue`:
+When the human approves the implementation result via `/engineer-agent review-queue`:
 
 Look up `projects.<project>.github.owner` and the repo from config. Create the PR based on tracker type:
 

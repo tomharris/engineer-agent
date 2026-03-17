@@ -19,7 +19,7 @@ Analyze a PM's feature spec from Slite and draft structured clarifying questions
 
 ### 1. Load Config
 
-Read `~/.claude/engineer-agent/engineer.yaml`. If missing, tell the user to run `/engineer setup` and stop.
+Read `~/.claude/engineer-agent/engineer.yaml`. If missing, tell the user to run `/engineer-agent setup` and stop.
 
 ### 2. Determine Project
 
@@ -78,4 +78,4 @@ Follow the `refine-spec` skill behavior to analyze the spec and fill in the `## 
 
 ### 7. Report
 
-Report: "Spec refinement drafted for project '{slug}'. Run `/engineer review-queue` to review."
+Report: "Spec refinement drafted for project '{slug}'. Run `/engineer-agent review-queue` to review."

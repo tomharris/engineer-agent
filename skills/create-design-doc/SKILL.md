@@ -128,4 +128,4 @@ Update frontmatter `status` to `drafted` and move to `~/.claude/engineer-agent/q
 
 ### 5. Report
 
-Report: "Design doc drafted for '{spec_title}'. Review with `/engineer review-queue` before publishing to Slite."
+Report: "Design doc drafted for '{spec_title}'. Review with `/engineer-agent review-queue` before publishing to Slite."

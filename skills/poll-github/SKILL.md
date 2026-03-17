@@ -109,4 +109,4 @@ Update `~/.claude/engineer-agent/state/last-poll.yaml` under `projects.<slug>.gi
 
 ### 4. Report
 
-Report how many new PRs were found per project: "Found N new PRs for review across M projects. Run `/engineer review-queue` to review drafts."
+Report how many new PRs were found per project: "Found N new PRs for review across M projects. Run `/engineer-agent review-queue` to review drafts."

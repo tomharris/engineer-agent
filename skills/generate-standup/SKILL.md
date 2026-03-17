@@ -111,4 +111,4 @@ Keep each bullet point to one short line. This is a standup, not a report.
 
 ### 6. Report
 
-Report: "Standup draft generated covering {N} projects. Run `/engineer review-queue` to review and post."
+Report: "Standup draft generated covering {N} projects. Run `/engineer-agent review-queue` to review and post."

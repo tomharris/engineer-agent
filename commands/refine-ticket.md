@@ -23,7 +23,7 @@ Analyze existing tickets for scope clarity, implementation feasibility, testabil
 
 ### 1. Load Config
 
-Read `~/.claude/engineer-agent/engineer.yaml`. If missing, tell the user to run `/engineer setup` and stop.
+Read `~/.claude/engineer-agent/engineer.yaml`. If missing, tell the user to run `/engineer-agent setup` and stop.
 
 ### 2. Determine Project
 
@@ -112,4 +112,4 @@ If any agent fails, report which ticket(s) failed and continue with the successe
 
 ### 7. Report
 
-Report: "Refined {N} ticket(s) for project '{slug}'. Run `/engineer review-queue refinement` to review."
+Report: "Refined {N} ticket(s) for project '{slug}'. Run `/engineer-agent review-queue refinement` to review."

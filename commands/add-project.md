@@ -11,14 +11,14 @@ Register the current project directory in the user-level engineer-agent config.
 
 ### 1. Load Config
 
-Read `~/.claude/engineer-agent/engineer.yaml`. If missing, tell the user to run `/engineer setup` first and stop.
+Read `~/.claude/engineer-agent/engineer.yaml`. If missing, tell the user to run `/engineer-agent setup` first and stop.
 
 ### 2. Check for Duplicate
 
 Get the absolute path of the current directory via `pwd`.
 
 Check if any existing project entry in `projects` already has a `path` matching this directory. If so, report:
-> This project is already registered as "{slug}". Run `/engineer status` to check health.
+> This project is already registered as "{slug}". Run `/engineer-agent status` to check health.
 
 Stop here.
 
@@ -100,5 +100,5 @@ Project "{slug}" registered!
   Slack:   {configured | not configured}
   Slite:   {configured | not configured}
 
-Run /engineer poll to start polling this project's sources.
+Run /engineer-agent poll to start polling this project's sources.
 ```

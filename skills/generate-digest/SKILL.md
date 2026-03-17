@@ -95,4 +95,4 @@ __{project-slug-2}:__
 
 ### 5. Report
 
-Report: "Daily digest generated covering {M} projects. Run `/engineer review-queue` to review and post."
+Report: "Daily digest generated covering {M} projects. Run `/engineer-agent review-queue` to review and post."
