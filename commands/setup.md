@@ -14,7 +14,7 @@ Initialize engineer-agent at the user level: create config, directories, install
 Read `~/.claude/engineer-agent/engineer.yaml`.
 
 If it exists, report:
-> Engineer-agent is already set up. Run `/engineer add-project` to register another project, or `/engineer status` to check health.
+> Engineer-agent is already set up. Run `/engineer-agent add-project` to register another project, or `/engineer-agent status` to check health.
 
 Stop here — do not continue to further steps.
 
@@ -88,6 +88,6 @@ Engineer-agent setup complete!
 
 Next steps:
   1. Edit ~/.claude/engineer-agent/engineer.yaml with your Slack channels, Jira project, etc.
-  2. Run /engineer add-project from other project directories to register them.
-  3. Run /engineer status to verify everything is working.
+  2. Run /engineer-agent add-project from other project directories to register them.
+  3. Run /engineer-agent status to verify everything is working.
 ```

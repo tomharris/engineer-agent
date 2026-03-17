@@ -20,7 +20,7 @@ Detect mismatches between pipeline artifacts (spec ↔ design doc ↔ tickets) a
 
 ### 1. Load Config
 
-Read `~/.claude/engineer-agent/engineer.yaml`. If missing, tell the user to run `/engineer setup` and stop.
+Read `~/.claude/engineer-agent/engineer.yaml`. If missing, tell the user to run `/engineer-agent setup` and stop.
 
 ### 2. Determine Project
 
@@ -192,4 +192,4 @@ If both boundaries need processing, use the Agent tool to process them in parall
 
 ### 9. Report
 
-Report: "Gap audit drafted: {N} boundaries checked. Run `/engineer review-queue gap` to review."
+Report: "Gap audit drafted: {N} boundaries checked. Run `/engineer-agent review-queue gap` to review."

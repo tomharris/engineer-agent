@@ -148,7 +148,7 @@ Update the queue item's frontmatter `status` to `drafted` and move it to `~/.cla
 
 ### 5a. Create Tickets on Approval
 
-When the ticket-plan is approved via `/engineer review-queue`:
+When the ticket-plan is approved via `/engineer-agent review-queue`:
 
 **If tracker is `github-issues`:**
 Create each ticket from the plan via `gh` CLI:
@@ -162,4 +162,4 @@ No automated creation — keep current behavior (manual creation reference). Pri
 
 ### 6. Report
 
-Report: "Ticket plan drafted for '{design_doc_title}': {N} tickets across {M} phases. Review with `/engineer review-queue` before creating tickets in your project tracker."
+Report: "Ticket plan drafted for '{design_doc_title}': {N} tickets across {M} phases. Review with `/engineer-agent review-queue` before creating tickets in your project tracker."

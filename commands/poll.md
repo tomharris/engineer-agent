@@ -23,7 +23,7 @@ Manually trigger a poll of configured sources for new work items.
 
 ### 1. Load Config
 
-Read `~/.claude/engineer-agent/engineer.yaml`. If missing, tell the user to run `/engineer setup` and stop.
+Read `~/.claude/engineer-agent/engineer.yaml`. If missing, tell the user to run `/engineer-agent setup` and stop.
 
 ### 2. Determine Scope
 
@@ -62,7 +62,7 @@ my-api:
 my-app:
 - Jira: Found N new tickets
 
-Total: N new items queued. Run `/engineer review-queue` to review drafts.
+Total: N new items queued. Run `/engineer-agent review-queue` to review drafts.
 ```
 
 Only include projects and sources that were actually polled.

@@ -19,7 +19,7 @@ Generate a structured engineering design doc from a PM's feature spec in Slite.
 
 ### 1. Load Config
 
-Read `~/.claude/engineer-agent/engineer.yaml`. If missing, tell the user to run `/engineer setup` and stop.
+Read `~/.claude/engineer-agent/engineer.yaml`. If missing, tell the user to run `/engineer-agent setup` and stop.
 
 ### 2. Determine Project
 
@@ -94,4 +94,4 @@ Follow the `create-design-doc` skill behavior to research the codebase and gener
 
 ### 9. Report
 
-Report: "Design doc drafted for project '{slug}'. Run `/engineer review-queue` to review."
+Report: "Design doc drafted for project '{slug}'. Run `/engineer-agent review-queue` to review."

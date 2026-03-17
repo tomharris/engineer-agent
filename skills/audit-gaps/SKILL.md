@@ -168,4 +168,4 @@ Update the queue item's frontmatter `status` to `drafted` and move it from `~/.c
 
 ### 8. Report
 
-Report: "Gap audit drafted for {boundary} boundary: {N} gaps found. Review with `/engineer review-queue gap`."
+Report: "Gap audit drafted for {boundary} boundary: {N} gaps found. Review with `/engineer-agent review-queue gap`."

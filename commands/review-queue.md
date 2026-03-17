@@ -18,7 +18,7 @@ Review pending draft items and approve, edit, or reject them.
 
 ### 1. Load Config
 
-Read `~/.claude/engineer-agent/engineer.yaml`. If missing, tell the user to run `/engineer setup` and stop. Extract `agent.branch_prefix` (default: `engineer-agent`).
+Read `~/.claude/engineer-agent/engineer.yaml`. If missing, tell the user to run `/engineer-agent setup` and stop. Extract `agent.branch_prefix` (default: `engineer-agent`).
 
 ### 2. List Draft Items
 
@@ -28,7 +28,7 @@ If a filter was provided in `$ARGUMENTS`, only show items matching that type in 
 
 If `--project <slug>` was provided, only show items whose `project` frontmatter field matches the slug.
 
-If no items found, report: "No items to review. Run `/engineer poll` to check for new work."
+If no items found, report: "No items to review. Run `/engineer-agent poll` to check for new work."
 
 ### 3. Display Summary Table
 
@@ -78,7 +78,7 @@ Ask the user what to do:
     gh pr create --repo {owner}/{repo} --title "{ticket_key}: {title}" --body "{body}" --head "{branch_prefix}/{ticket_key}" --base main --draft
     ```
 - For `doc-review` type: Call `mcp__slite__append-blocks` to post review comments on the document.
-- For `spec-refinement` type: No external action needed. Move to `~/.claude/engineer-agent/queue/completed/`. Print: "Spec refinement complete. Run `/engineer create-design-doc {source_url}` to generate the design doc."
+- For `spec-refinement` type: No external action needed. Move to `~/.claude/engineer-agent/queue/completed/`. Print: "Spec refinement complete. Run `/engineer-agent create-design-doc {source_url}` to generate the design doc."
 - For `design-doc` type: Look up `projects.<project>.slite.design_doc_parent` from config. Call `mcp__slite__create-note` with title from frontmatter, parent from config, and content from `## Draft Response`. Print: "Design doc created in Slite: {url}"
 - For `ticket-refinement` type: No external action needed. Move to `~/.claude/engineer-agent/queue/completed/`. Print: "Ticket refinement complete for {ticket_key}. Estimated size: {estimated_size} points."
 - For `ticket-plan` type: Determine the tracker type for the item's project.

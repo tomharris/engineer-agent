@@ -14,7 +14,7 @@ Show the current status of the engineer-agent system.
 Read the config file at `~/.claude/engineer-agent/engineer.yaml`.
 
 If it does not exist, report:
-> Config not found. Run `/engineer setup` to initialize engineer-agent.
+> Config not found. Run `/engineer-agent setup` to initialize engineer-agent.
 
 If it exists, confirm: "Config loaded." List the registered project slugs from the `projects` map.
 
@@ -53,4 +53,4 @@ If the file doesn't exist, report "No polls have run yet."
 
 ### 4. Summary
 
-Give a one-line summary: "N items awaiting review across M projects. Run `/engineer review-queue` to review drafts."
+Give a one-line summary: "N items awaiting review across M projects. Run `/engineer-agent review-queue` to review drafts."

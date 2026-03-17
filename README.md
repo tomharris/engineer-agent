@@ -41,7 +41,7 @@ claude --plugin-dir /path/to/engineer-agent
 Then initialize from any project directory:
 
 ```
-/engineer setup
+/engineer-agent setup
 ```
 
 This creates the user-level config, queue directories, and installs automated polling in one step. It also registers the current project. After setup, edit `~/.claude/engineer-agent/engineer.yaml` to configure your sources.
@@ -50,7 +50,7 @@ To register additional projects:
 
 ```
 cd /path/to/another-project
-/engineer add-project
+/engineer-agent add-project
 ```
 
 ## Configuration
@@ -104,46 +104,46 @@ Only configure the integrations you use per project — the agent skips unconfig
 
 ## Usage
 
-### `/engineer setup`
+### `/engineer-agent setup`
 
 One-time user-level initialization. Creates config at `~/.claude/engineer-agent/`, queue directories, installs cron polling, and registers the current project.
 
 ```
-/engineer setup
+/engineer-agent setup
 ```
 
-### `/engineer add-project`
+### `/engineer-agent add-project`
 
 Register the current project directory with engineer-agent. Auto-detects GitHub remote and prompts for integration details.
 
 ```
 cd /path/to/my-project
-/engineer add-project
+/engineer-agent add-project
 ```
 
-### `/engineer poll [source] [--project <slug>]`
+### `/engineer-agent poll [source] [--project <slug>]`
 
 Fetch new work items from configured sources.
 
 ```
-/engineer poll                     # Poll all sources, all projects
-/engineer poll github              # Poll GitHub PRs only, all projects
-/engineer poll github-issues       # Poll GitHub Issues only, all projects
-/engineer poll --project my-api    # Poll all sources, one project
-/engineer poll slack --project my-api  # Poll Slack, one project
+/engineer-agent poll                     # Poll all sources, all projects
+/engineer-agent poll github              # Poll GitHub PRs only, all projects
+/engineer-agent poll github-issues       # Poll GitHub Issues only, all projects
+/engineer-agent poll --project my-api    # Poll all sources, one project
+/engineer-agent poll slack --project my-api  # Poll Slack, one project
 ```
 
 New items are detected, drafted, and placed in the review queue.
 
-### `/engineer review-queue [filter] [--project <slug>]`
+### `/engineer-agent review-queue [filter] [--project <slug>]`
 
 Review pending drafts and approve, edit, or reject them.
 
 ```
-/engineer review-queue                    # Show all pending drafts
-/engineer review-queue pr                 # Show only PR reviews
-/engineer review-queue --project my-api   # Show only my-api items
-/engineer review-queue --all              # Include completed/rejected items
+/engineer-agent review-queue                    # Show all pending drafts
+/engineer-agent review-queue pr                 # Show only PR reviews
+/engineer-agent review-queue --project my-api   # Show only my-api items
+/engineer-agent review-queue --all              # Include completed/rejected items
 ```
 
 For each item you can:
@@ -152,80 +152,80 @@ For each item you can:
 - **Reject** — discard with a reason
 - **Skip** — leave for later
 
-### `/engineer status`
+### `/engineer-agent status`
 
 Check system health: config status, queue counts, and per-project last poll times.
 
 ```
-/engineer status
+/engineer-agent status
 ```
 
-### `/engineer digest [--days N]`
+### `/engineer-agent digest [--days N]`
 
 Generate a daily summary of all agent activity across all projects.
 
 ```
-/engineer digest           # Today's activity
-/engineer digest --days 3  # Last 3 days
+/engineer-agent digest           # Today's activity
+/engineer-agent digest --days 3  # Last 3 days
 ```
 
 The digest includes items processed, approval rates, and breakdowns by project and type. Approve to post it to your configured digest channel.
 
-### `/engineer refine-spec <slite-url-or-id> [--project <slug>]`
+### `/engineer-agent refine-spec <slite-url-or-id> [--project <slug>]`
 
 Analyze a PM feature spec and generate clarifying questions.
 
 ```
-/engineer refine-spec https://example.slite.com/p/note/abc123
+/engineer-agent refine-spec https://example.slite.com/p/note/abc123
 ```
 
 Generates structured questions across scope, feasibility, missing details, ambiguities, and constraints. After approval, fill in the answer fields to provide context for design doc generation.
 
-### `/engineer refine-ticket <jira-key|github-url|--jql "..."|--text "..."> [--project <slug>]`
+### `/engineer-agent refine-ticket <jira-key|github-url|--jql "..."|--text "..."> [--project <slug>]`
 
 Analyze existing tickets for scope, feasibility, testability, and sizing.
 
 ```
-/engineer refine-ticket ENG-123
-/engineer refine-ticket ENG-123 ENG-124 ENG-125
-/engineer refine-ticket --jql "project = ENG AND status = 'To Do'"
-/engineer refine-ticket https://github.com/org/repo/issues/45
-/engineer refine-ticket --text "As a user, I want to..."
+/engineer-agent refine-ticket ENG-123
+/engineer-agent refine-ticket ENG-123 ENG-124 ENG-125
+/engineer-agent refine-ticket --jql "project = ENG AND status = 'To Do'"
+/engineer-agent refine-ticket https://github.com/org/repo/issues/45
+/engineer-agent refine-ticket --text "As a user, I want to..."
 ```
 
-Assesses scope clarity, implementation feasibility (grounded in codebase analysis), testability, and assigns a Fibonacci sizing estimate. Multiple tickets are processed in parallel. Approve via `/engineer review-queue refinement`.
+Assesses scope clarity, implementation feasibility (grounded in codebase analysis), testability, and assigns a Fibonacci sizing estimate. Multiple tickets are processed in parallel. Approve via `/engineer-agent review-queue refinement`.
 
-### `/engineer create-design-doc <slite-url-or-id> [--project <slug>]`
+### `/engineer-agent create-design-doc <slite-url-or-id> [--project <slug>]`
 
 Generate an engineering design doc from a PM spec.
 
 ```
-/engineer create-design-doc https://example.slite.com/p/note/abc123
+/engineer-agent create-design-doc https://example.slite.com/p/note/abc123
 ```
 
 Researches the codebase and produces a full design doc (architecture, components, data model, API changes, risks, implementation phases). If a prior spec refinement exists for this doc, its Q&A is included as context. On approval, the design doc is created in Slite.
 
-### `/engineer create-tickets <slite-url-or-id> [--project <slug>]`
+### `/engineer-agent create-tickets <slite-url-or-id> [--project <slug>]`
 
 Break a design doc into phased implementation tickets.
 
 ```
-/engineer create-tickets https://example.slite.com/p/note/abc123
+/engineer-agent create-tickets https://example.slite.com/p/note/abc123
 ```
 
 Takes a Slite design doc and generates detailed tickets grouped by implementation phase. Each ticket includes purpose, implementation approach (with real file paths), testing strategy, acceptance criteria, and dependencies on other tickets. On approval, the ticket plan moves to completed for reference when creating tickets in your project tracker.
 
-### `/engineer audit-gaps <url-or-key> [--project <slug>] [--boundary <spec-design|design-tickets|all>]`
+### `/engineer-agent audit-gaps <url-or-key> [--project <slug>] [--boundary <spec-design|design-tickets|all>]`
 
 Detect gaps between pipeline artifacts (spec, design doc, tickets).
 
 ```
-/engineer audit-gaps https://example.slite.com/p/note/abc123
-/engineer audit-gaps ENG-123 --boundary design-tickets
-/engineer audit-gaps https://github.com/org/repo/issues/42 --boundary all
+/engineer-agent audit-gaps https://example.slite.com/p/note/abc123
+/engineer-agent audit-gaps ENG-123 --boundary design-tickets
+/engineer-agent audit-gaps https://github.com/org/repo/issues/42 --boundary all
 ```
 
-Performs bidirectional comparison across boundaries. Each gap is classified as missing-right, missing-left, diverged, or ambiguous, with draft fixes where possible. Approve via `/engineer review-queue gap`.
+Performs bidirectional comparison across boundaries. Each gap is classified as missing-right, missing-left, diverged, or ambiguous, with draft fixes where possible. Approve via `/engineer-agent review-queue gap`.
 
 ## How It Works
 
@@ -234,7 +234,7 @@ Performs bidirectional comparison across boundaries. Each gap is classified as m
 ```
 Source detected → ~/.claude/engineer-agent/queue/incoming/ → skill drafts → queue/drafts/
                                                                               ↓
-                                                        human reviews via /engineer review-queue
+                                                        human reviews via /engineer-agent review-queue
                                                                   ↓                    ↓
                                                         queue/completed/       queue/rejected/
                                                         (action posted)        (with reason)
@@ -248,26 +248,26 @@ Skills are auto-invoked during polling and processing:
 
 | Skill | Trigger | What it does |
 |-------|---------|-------------|
-| `poll-github` | `/engineer poll` | Finds PRs requesting your review (all projects) |
-| `poll-slack` | `/engineer poll` | Finds unanswered questions matching keywords (all projects) |
-| `poll-jira` | `/engineer poll` | Finds assigned Jira tickets in target statuses (projects with tracker: jira) |
-| `poll-github-issues` | `/engineer poll` | Finds assigned GitHub issues (projects with tracker: github-issues) |
-| `poll-slite` | `/engineer poll` | Finds docs tagged for review (all projects) |
+| `poll-github` | `/engineer-agent poll` | Finds PRs requesting your review (all projects) |
+| `poll-slack` | `/engineer-agent poll` | Finds unanswered questions matching keywords (all projects) |
+| `poll-jira` | `/engineer-agent poll` | Finds assigned Jira tickets in target statuses (projects with tracker: jira) |
+| `poll-github-issues` | `/engineer-agent poll` | Finds assigned GitHub issues (projects with tracker: github-issues) |
+| `poll-slite` | `/engineer-agent poll` | Finds docs tagged for review (all projects) |
 | `review-pr` | New PR detected | Generates structured review with severity levels |
 | `answer-slack` | New question detected | Drafts answer with confidence level |
 | `implement-ticket` | Ticket approved | Implements Jira or GitHub Issue on feature branch, runs tests |
 | `review-doc` | New doc detected | Reviews for accuracy, completeness, clarity |
 | `generate-standup` | On demand | Creates standup from yesterday's activity (all projects) |
-| `generate-digest` | `/engineer digest` | Summarizes daily activity with metrics (all projects) |
-| `refine-spec` | `/engineer refine-spec` | Analyzes spec, generates clarifying questions |
-| `refine-ticket` | `/engineer refine-ticket` | Analyzes ticket scope, feasibility, testability, and sizing |
-| `create-design-doc` | `/engineer create-design-doc` | Generates engineering design doc from spec |
-| `create-tickets` | `/engineer create-tickets` | Breaks design doc into phased tickets |
-| `audit-gaps` | `/engineer audit-gaps` | Compares pipeline artifacts across boundaries, produces gap checklist |
+| `generate-digest` | `/engineer-agent digest` | Summarizes daily activity with metrics (all projects) |
+| `refine-spec` | `/engineer-agent refine-spec` | Analyzes spec, generates clarifying questions |
+| `refine-ticket` | `/engineer-agent refine-ticket` | Analyzes ticket scope, feasibility, testability, and sizing |
+| `create-design-doc` | `/engineer-agent create-design-doc` | Generates engineering design doc from spec |
+| `create-tickets` | `/engineer-agent create-tickets` | Breaks design doc into phased tickets |
+| `audit-gaps` | `/engineer-agent audit-gaps` | Compares pipeline artifacts across boundaries, produces gap checklist |
 
 ## Automated Polling
 
-`/engineer setup` installs cron polling automatically with the interval from your config (default: 15 minutes). One cron job polls all projects.
+`/engineer-agent setup` installs cron polling automatically with the interval from your config (default: 15 minutes). One cron job polls all projects.
 
 To customize the interval or reinstall manually:
 
@@ -292,17 +292,17 @@ crontab -l | grep -v engineer-agent | crontab -
 ```
 .claude-plugin/plugin.json     Plugin manifest
 commands/
-  setup.md                     /engineer setup command
-  add-project.md               /engineer add-project command
-  poll.md                      /engineer poll command
-  review-queue.md              /engineer review-queue command
-  status.md                    /engineer status command
-  digest.md                    /engineer digest command
-  refine-spec.md               /engineer refine-spec command
-  refine-ticket.md             /engineer refine-ticket command
-  create-design-doc.md         /engineer create-design-doc command
-  create-tickets.md            /engineer create-tickets command
-  audit-gaps.md                /engineer audit-gaps command
+  setup.md                     /engineer-agent setup command
+  add-project.md               /engineer-agent add-project command
+  poll.md                      /engineer-agent poll command
+  review-queue.md              /engineer-agent review-queue command
+  status.md                    /engineer-agent status command
+  digest.md                    /engineer-agent digest command
+  refine-spec.md               /engineer-agent refine-spec command
+  refine-ticket.md             /engineer-agent refine-ticket command
+  create-design-doc.md         /engineer-agent create-design-doc command
+  create-tickets.md            /engineer-agent create-tickets command
+  audit-gaps.md                /engineer-agent audit-gaps command
 skills/
   poll-github/SKILL.md         GitHub polling
   poll-slack/SKILL.md          Slack polling

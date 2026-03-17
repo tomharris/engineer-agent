@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-engineer-agent — A Claude Code plugin that automates senior software engineer tasks with an approval-gated workflow. The agent drafts PR reviews, Slack answers, ticket implementations, doc reviews, and standup updates. The human reviews and approves via `/engineer review-queue` before anything is posted externally.
+engineer-agent — A Claude Code plugin that automates senior software engineer tasks with an approval-gated workflow. The agent drafts PR reviews, Slack answers, ticket implementations, doc reviews, and standup updates. The human reviews and approves via `/engineer-agent review-queue` before anything is posted externally.
 
 ## Plugin Structure
 
@@ -17,7 +17,7 @@ This repo IS the plugin.
 
 ```
 .claude-plugin/plugin.json    — Plugin manifest
-commands/                      — Slash commands (/engineer <command>)
+commands/                      — Slash commands (/engineer-agent <command>)
 skills/                        — Auto-invoked skills by task type
 scripts/                       — Cron and setup scripts
 config/engineer.example.yaml   — Config template
@@ -38,7 +38,7 @@ Runtime data lives at the user level in `~/.claude/engineer-agent/`:
 
 ## Config Loading Pattern
 
-Every skill and command that needs config should start by reading `~/.claude/engineer-agent/engineer.yaml`. If missing, tell the user to run `/engineer setup` and stop.
+Every skill and command that needs config should start by reading `~/.claude/engineer-agent/engineer.yaml`. If missing, tell the user to run `/engineer-agent setup` and stop.
 
 The config has two top-level sections:
 - `agent` — global settings (branch_prefix, max_pr_files, channels, cron interval)

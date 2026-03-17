@@ -19,7 +19,7 @@ Break a design doc into phased implementation tickets with dependencies.
 
 ### 1. Load Config
 
-Read `~/.claude/engineer-agent/engineer.yaml`. If missing, tell the user to run `/engineer setup` and stop.
+Read `~/.claude/engineer-agent/engineer.yaml`. If missing, tell the user to run `/engineer-agent setup` and stop.
 
 ### 2. Determine Project
 
@@ -102,4 +102,4 @@ Follow the `create-tickets` skill behavior to research the codebase and generate
 
 Count the number of tickets and phases generated in the draft response.
 
-Report: "Ticket plan drafted for project '{slug}': {N} tickets across {M} phases. Run `/engineer review-queue` to review."
+Report: "Ticket plan drafted for project '{slug}': {N} tickets across {M} phases. Run `/engineer-agent review-queue` to review."
