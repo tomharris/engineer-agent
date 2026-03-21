@@ -1,6 +1,6 @@
 ---
 description: "Review and approve/reject queued engineer-agent work items"
-argument-hint: "[filter: pr|slack|ticket|ticket-plan|doc|spec|design|refinement|gap] [--all] [--project <slug>]"
+argument-hint: "[filter: pr|slack|ticket|ticket-plan|doc|spec|design|refinement|gap|qa] [--all] [--project <slug>]"
 allowed-tools: ["Bash", "Read", "Write", "Edit", "Glob", "Grep", "Agent", "AskUserQuestion", "mcp__claude_ai_Slack__slack_send_message", "mcp__slite__append-blocks", "mcp__slite__create-note"]
 ---
 
@@ -10,7 +10,7 @@ Review pending draft items and approve, edit, or reject them.
 
 ## Arguments
 
-- `$ARGUMENTS` may contain a filter: `pr`, `slack`, `ticket`, `ticket-plan`, `doc`, `spec`, `design`, `refinement`, or `gap` to show only that type
+- `$ARGUMENTS` may contain a filter: `pr`, `slack`, `ticket`, `ticket-plan`, `doc`, `spec`, `design`, `refinement`, `gap`, or `qa` to show only that type
 - `$ARGUMENTS` may contain `--all` to show all items including completed/rejected
 - `$ARGUMENTS` may contain `--project <slug>` to show only items for a specific project
 
@@ -86,6 +86,35 @@ Ask the user what to do:
   - **If tracker is `jira`:** No automated creation. Move to `~/.claude/engineer-agent/queue/completed/`. Print: "Ticket plan approved. Use as reference when creating tickets in Jira."
   - **If tracker is `none`:** Move to `~/.claude/engineer-agent/queue/completed/`. Print: "Ticket plan approved. Use as reference when creating tickets in your project tracker."
 - For `gap-audit` type: No external action needed. Move to `~/.claude/engineer-agent/queue/completed/`. Count the number of gaps in the `### Checklist` section. Print: "Gap audit acknowledged for {boundary} boundary. Use the checklist above to address {N} identified gaps."
+- For `qa-test-plan` type: Run a three-phase interactive flow:
+
+  **Phase 1 — Run automated tests:**
+  1. Extract the test script (the bash code block under `### Test Script`) from the `## Draft Response`
+  2. Create a temporary directory and save the script as `qa-test.sh`
+  3. Run the script via Bash: `bash qa-test.sh`
+  4. Display the output to the user (pass/fail for each test, final summary)
+  5. If any tests fail, use AskUserQuestion: "Some automated tests failed. What would you like to do?" Options: "Continue to manual checklist", "Re-run tests", "Reject this QA plan"
+  6. If the user chooses to re-run, repeat from step 3
+  7. If the user chooses to reject, follow the **Reject** flow below
+
+  **Phase 2 — Manual checklist:**
+  1. Display the `### Manual Checklist` section from the draft
+  2. Display the `### REPL/Console Tests` section if present, and ask the user to run those manually
+  3. Use AskUserQuestion: "Have you completed the manual checklist and REPL/console tests?" Options: "Yes, all checks passed", "Yes, but some items failed", "Not yet — I'll come back later"
+  4. If "not yet", leave the queue item in `drafts/` and print: "QA plan remains in queue. Run `/engineer-agent review-queue qa` when ready to complete."
+  5. If "some items failed", ask the user to describe which items failed. Record this in the results.
+
+  **Phase 3 — Archive:**
+  1. Create directory `~/.claude/engineer-agent/qa-plans/{branch}-{YYYYMMDD-HHmmss}/`
+  2. Save `qa-test.sh` — the test script extracted in Phase 1
+  3. Save `test-plan.md` — the full `## Draft Response` content including manual checklist
+  4. Save `results.md` — containing:
+     - Automated test output (stdout from the script run)
+     - Pass/fail counts
+     - Manual checklist completion status
+     - Any notes about failed manual items
+     - Timestamp of completion
+  5. Print: "QA complete. Plan archived to `~/.claude/engineer-agent/qa-plans/{branch}-{timestamp}/`"
 
 After executing, update the file's frontmatter `status` to `completed` and move it from `~/.claude/engineer-agent/queue/drafts/` to `~/.claude/engineer-agent/queue/completed/` (write to new location, delete from old).
 
