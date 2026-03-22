@@ -44,7 +44,7 @@ The config has two top-level sections:
 - `agent` — global settings (branch_prefix, max_pr_files, channels, cron interval)
 - `projects` — a map of project slugs to per-project integration config
 
-To find config for a specific project, look up `projects.<slug>`. Each project entry has `path`, `tracker`, `github`, `slack`, `jira`, and `slite` subsections. The `tracker` field (`"jira"` | `"github-issues"` | `"none"`) determines which ticket tracker a project uses. If absent, it's inferred: `jira` section present → `"jira"`, `github.issues` section present → `"github-issues"`, neither → `"none"`.
+To find config for a specific project, look up `projects.<slug>`. Each project entry has `path`, `tracker`, `github`, `slack`, `jira`, `slite`, and `qa` subsections. The `tracker` field (`"jira"` | `"github-issues"` | `"none"`) determines which ticket tracker a project uses. If absent, it's inferred: `jira` section present → `"jira"`, `github.issues` section present → `"github-issues"`, neither → `"none"`.
 
 ## Queue File Format
 
@@ -53,7 +53,7 @@ Files move through: `~/.claude/engineer-agent/queue/incoming/` → `queue/drafts
 Filename: `{YYYYMMDD-HHmmss}-{type}-{short-id}.md`
 
 YAML frontmatter fields:
-- `type`: pr-review | slack-question | ticket | doc-review | spec-refinement | design-doc | ticket-plan | ticket-refinement | gap-audit
+- `type`: pr-review | slack-question | ticket | doc-review | spec-refinement | design-doc | ticket-plan | ticket-refinement | gap-audit | qa-test-plan
 - `source`: github | slack | jira | slite
 - `source_url`: URL to the original item
 - `source_id`: Unique identifier (e.g. "org/repo#142")
@@ -73,3 +73,7 @@ Body sections:
 - Slack: `mcp__claude_ai_Slack__*` tools
 - Jira: `mcp__atlassian__*` tools (optional — either Jira or GitHub Issues per project)
 - Slite: `mcp__slite__*` tools
+
+## Documentation Maintenance
+
+When any command, skill, config option, queue format, or integration is added, changed, or removed, check both `CLAUDE.md` and `README.md` for needed updates. These two files must stay in sync with each other and with the actual plugin behavior.

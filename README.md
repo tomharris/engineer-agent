@@ -12,6 +12,7 @@ A Claude Code plugin that automates senior software engineer tasks with an appro
 - **Ticket Refinement** — Analyzes existing tickets for scope clarity, feasibility, testability, and Fibonacci sizing
 - **Design Doc Generation** — Creates engineering design docs from refined specs
 - **Ticket Breakdown** — Breaks design docs into phased implementation tickets with dependencies
+- **QA Test Plans** — Generates hybrid test plans (runnable scripts + manual checklists) from ticket acceptance criteria and branch code changes
 - **Pipeline Gap Audit** — Bidirectional comparison of spec ↔ design doc ↔ tickets to detect mismatches
 - **Standup Generation** — Creates daily standup updates from activity history
 - **Daily Digest** — Summarizes all agent activity with approval metrics
@@ -85,6 +86,9 @@ projects:
       statuses: ["To Do", "In Progress"]
     slite:
       doc_labels: ["needs-review"]
+    qa:
+      base_url: "http://localhost:3000"  # base URL for curl commands in QA test scripts
+      console_command: ""                # e.g. "rails console", "python manage.py shell", "node" (optional)
 
   # Example: project using GitHub Issues
   my-frontend:
@@ -142,6 +146,7 @@ Review pending drafts and approve, edit, or reject them.
 ```
 /engineer-agent review-queue                    # Show all pending drafts
 /engineer-agent review-queue pr                 # Show only PR reviews
+/engineer-agent review-queue qa                 # Show only QA test plans
 /engineer-agent review-queue --project my-api   # Show only my-api items
 /engineer-agent review-queue --all              # Include completed/rejected items
 ```
@@ -227,6 +232,19 @@ Detect gaps between pipeline artifacts (spec, design doc, tickets).
 
 Performs bidirectional comparison across boundaries. Each gap is classified as missing-right, missing-left, diverged, or ambiguous, with draft fixes where possible. Approve via `/engineer-agent review-queue gap`.
 
+### `/engineer-agent qa [ticket-url-or-key] [--project <slug>] [--base <branch>]`
+
+Generate a QA test plan for a feature branch.
+
+```
+/engineer-agent qa                                          # Infer ticket from branch name
+/engineer-agent qa ENG-123                                  # Specify Jira ticket
+/engineer-agent qa https://github.com/org/repo/issues/45    # Specify GitHub issue
+/engineer-agent qa ENG-123 --base develop                   # Custom base branch for diff
+```
+
+Cross-references ticket acceptance criteria, PR testing notes, and branch code changes to produce a hybrid test plan: a runnable shell script (curl commands, REPL snippets) plus a manual checklist for items requiring human judgment. Approve via `/engineer-agent review-queue qa`.
+
 ## How It Works
 
 ### Queue Lifecycle
@@ -264,6 +282,7 @@ Skills are auto-invoked during polling and processing:
 | `create-design-doc` | `/engineer-agent create-design-doc` | Generates engineering design doc from spec |
 | `create-tickets` | `/engineer-agent create-tickets` | Breaks design doc into phased tickets |
 | `audit-gaps` | `/engineer-agent audit-gaps` | Compares pipeline artifacts across boundaries, produces gap checklist |
+| `generate-qa` | `/engineer-agent qa` | Generates hybrid QA test plan (script + manual checklist) from ticket AC and code changes |
 
 ## Automated Polling
 
@@ -303,6 +322,7 @@ commands/
   create-design-doc.md         /engineer-agent create-design-doc command
   create-tickets.md            /engineer-agent create-tickets command
   audit-gaps.md                /engineer-agent audit-gaps command
+  qa.md                        /engineer-agent qa command
 skills/
   poll-github/SKILL.md         GitHub polling
   poll-slack/SKILL.md          Slack polling
@@ -320,6 +340,7 @@ skills/
   create-design-doc/SKILL.md   Design doc generation
   create-tickets/SKILL.md      Ticket breakdown from design doc
   audit-gaps/SKILL.md          Pipeline gap auditing
+  generate-qa/SKILL.md         QA test plan generation
 scripts/
   cron-poll.sh                 Cron polling script
   install-cron.sh              Cron setup script
@@ -339,3 +360,7 @@ config/
   state/
     last-poll.yaml             Dedup timestamps and seen IDs (per project)
 ```
+
+## Maintenance
+
+When adding, changing, or removing commands, skills, config options, or integrations, check both `CLAUDE.md` and `README.md` for needed updates. Keep both files in sync with each other and with actual plugin behavior.
