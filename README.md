@@ -81,7 +81,11 @@ projects:
       keywords: ["@myname"]
       ignore_bots: true
     jira:
-      project: "ENG"
+      sources:                              # watch multiple Jira projects per repo
+        - project: "ENG"
+          components: ["api", "backend"]    # optional: filter by Jira component
+        # - project: "PLAT"                 # add more Jira projects as needed
+        #   labels: ["infra"]              # optional: filter by Jira label
       assignee: "me@example.com"
       statuses: ["To Do", "In Progress"]
     slite:
@@ -105,6 +109,40 @@ projects:
 ```
 
 Only configure the integrations you use per project — the agent skips unconfigured integrations.
+
+### Multi-Jira Project Routing
+
+Each engineer-agent project can watch multiple Jira projects, and multiple engineer-agent projects can watch the same Jira project with different filters (N:M mapping). Routing uses Jira components and labels:
+
+```yaml
+projects:
+  my-api:
+    tracker: jira
+    jira:
+      sources:
+        - project: ENG
+          components: ["api", "backend"]
+        - project: PLAT
+          labels: ["infra"]
+      assignee: "me@example.com"
+      statuses: ["To Do", "In Progress"]
+
+  my-frontend:
+    tracker: jira
+    jira:
+      sources:
+        - project: ENG
+          components: ["frontend", "ui"]
+      assignee: "me@example.com"
+      statuses: ["To Do", "In Progress"]
+```
+
+When polling, tickets are routed based on their Jira components and labels:
+- A ticket matching exactly one project is routed automatically
+- A ticket matching zero or multiple projects is marked as **unrouted** and appears in the review queue for manual assignment
+- Sources with no `components` or `labels` act as catch-alls for that Jira project
+
+**Backward compatibility:** The legacy `jira.project: "ENG"` format still works and is treated as a catch-all source.
 
 ## Usage
 
@@ -358,7 +396,7 @@ config/
     completed/                 Approved and posted
     rejected/                  Rejected with reason
   state/
-    last-poll.yaml             Dedup timestamps and seen IDs (per project)
+    last-poll.yaml             Dedup timestamps and seen IDs (per project + per Jira project key)
 ```
 
 ## Maintenance

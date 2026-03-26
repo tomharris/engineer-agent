@@ -20,13 +20,15 @@ Review pending draft items and approve, edit, or reject them.
 
 Read `~/.claude/engineer-agent/engineer.yaml`. If missing, tell the user to run `/engineer-agent setup` and stop. Extract `agent.branch_prefix` (default: `engineer-agent`).
 
-### 2. List Draft Items
+### 2. List Draft and Unrouted Items
 
 Use Glob to find all `.md` files in `~/.claude/engineer-agent/queue/drafts/` (excluding `.gitkeep`).
 
+Also scan `~/.claude/engineer-agent/queue/incoming/` for items with `project: _unrouted` in their frontmatter. These are tickets that could not be automatically routed to a project and need manual assignment.
+
 If a filter was provided in `$ARGUMENTS`, only show items matching that type in their YAML frontmatter `type` field.
 
-If `--project <slug>` was provided, only show items whose `project` frontmatter field matches the slug.
+If `--project <slug>` was provided, only show items whose `project` frontmatter field matches the slug. Note: `_unrouted` items are always shown regardless of project filter (since they have no project yet).
 
 If no items found, report: "No items to review. Run `/engineer-agent poll` to check for new work."
 
@@ -39,17 +41,37 @@ Read each file's YAML frontmatter and display a numbered summary:
 
 | #  | Project | Type       | Source             | Title                        | Priority | Age     |
 |----|---------|------------|--------------------|------------------------------|----------|---------|
-| 1  | my-api  | PR Review  | org/repo#142       | Add caching layer to auth... | normal   | 2h ago  |
-| 2  | my-app  | Slack Q&A  | #engineering       | How does auth cache work?    | normal   | 45m ago |
+| 1  | ⚠ ---   | Ticket (unrouted) | ENG-789       | Refactor auth middleware     | normal   | 1h ago  |
+| 2  | my-api  | PR Review  | org/repo#142       | Add caching layer to auth... | normal   | 2h ago  |
+| 3  | my-app  | Slack Q&A  | #engineering       | How does auth cache work?    | normal   | 45m ago |
 ```
 
-Sort by priority (urgent first) then by created_at (oldest first).
+Sort by: unrouted items first, then priority (urgent first), then by created_at (oldest first). Unrouted items display with `⚠ ---` in the Project column.
 
 ### 4. User Selects Item
 
 Ask the user which item to review (by number). Also offer "approve all" if all items are low-risk (no urgent priority, no ticket implementations).
 
-### 5. Show Full Draft
+### 5. Handle Unrouted Items (if applicable)
+
+If the selected item has `project: _unrouted` in its frontmatter, run the assignment flow before proceeding:
+
+1. Show the ticket context: description, Jira components (`jira_components` frontmatter), Jira labels (`jira_labels` frontmatter), and source URL
+2. Check `matched_projects` in frontmatter:
+   - If non-empty (multi-match): "This ticket matched multiple projects: {list}. Which should it be assigned to?" — present the matched projects as options
+   - If empty (no match): "No routing rules matched this ticket. Which project should it be assigned to?" — list all projects in config where `tracker` resolves to `jira`
+3. User selects a project slug
+4. Update the queue item frontmatter:
+   - Set `project` to the selected slug
+   - Remove the `matched_projects` field
+5. Generate a draft for the ticket:
+   - Read `projects.<selected_slug>` config for repo info
+   - Create the `## Draft Response` section with implementation plan (same as poll-jira step 6)
+   - Update `status` to `drafted`
+   - Move the file from `incoming/` to `drafts/`
+6. Continue to Step 5a (Show Full Draft) with the now-drafted item
+
+### 5a. Show Full Draft
 
 Read the selected file completely and display:
 - The `project` field

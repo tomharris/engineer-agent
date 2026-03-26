@@ -33,7 +33,7 @@ Runtime data lives at the user level in `~/.claude/engineer-agent/`:
 │   ├── completed/             — Approved and posted
 │   └── rejected/              — Rejected with reason
 └── state/
-    └── last-poll.yaml         — Dedup timestamps and seen IDs (per project)
+    └── last-poll.yaml         — Dedup timestamps and seen IDs (per project + per Jira project key)
 ```
 
 ## Config Loading Pattern
@@ -45,6 +45,28 @@ The config has two top-level sections:
 - `projects` — a map of project slugs to per-project integration config
 
 To find config for a specific project, look up `projects.<slug>`. Each project entry has `path`, `tracker`, `github`, `slack`, `jira`, `slite`, and `qa` subsections. The `tracker` field (`"jira"` | `"github-issues"` | `"none"`) determines which ticket tracker a project uses. If absent, it's inferred: `jira` section present → `"jira"`, `github.issues` section present → `"github-issues"`, neither → `"none"`.
+
+### Jira Multi-Source Config
+
+The `jira` section supports watching multiple Jira projects per engineer-agent project via a `sources` array:
+
+```yaml
+jira:
+  sources:
+    - project: "ENG"
+      components: ["api"]    # optional: filter by Jira component
+      labels: ["backend"]    # optional: filter by Jira label
+    - project: "PLAT"
+  assignee: "me@example.com"
+  statuses: ["To Do", "In Progress"]
+```
+
+- Each source has a required `project` key and optional `components`/`labels` filters
+- A source with no filters is a catch-all for that Jira project
+- `assignee` and `statuses` are shared across all sources
+- **Backward compat:** `jira.project` (string) is treated as `sources: [{project: <value>}]`
+- Multiple engineer-agent projects can watch the same Jira project with different component/label filters (N:M mapping)
+- Tickets matching zero or multiple projects are created as `_unrouted` for manual assignment
 
 ## Queue File Format
 
@@ -61,7 +83,10 @@ YAML frontmatter fields:
 - `priority`: urgent | normal | low
 - `created_at`: ISO 8601 timestamp
 - `status`: incoming | drafted | completed | rejected
-- `project`: Project slug matching a key in the `projects` config map
+- `project`: Project slug matching a key in the `projects` config map, or `_unrouted` for tickets that could not be automatically routed
+- `matched_projects`: (only for `_unrouted` items) array of project slugs that matched, or empty array if no rules matched
+- `jira_components`: (Jira tickets only) array of Jira component names on the ticket
+- `jira_labels`: (Jira tickets only) array of Jira labels on the ticket
 
 Body sections:
 - `## Context` — metadata about the work item
