@@ -28,9 +28,14 @@ projects:
       keywords: ["@myname"]
       ignore_bots: true
     jira:
-      project: "ENG"
-      assignee: "me@example.com"
-      statuses: ["To Do", "In Progress"]
+      sources:                              # list of Jira projects to watch (N:M mapping supported)
+        - project: "ENG"                    # Jira project key (required)
+          components: ["api", "backend"]    # optional: only match tickets with these Jira components
+          labels: []                        # optional: only match tickets with these Jira labels
+        # - project: "PLAT"                 # watch a second Jira project for this repo
+        #   labels: ["infra"]
+      assignee: "me@example.com"            # shared across all sources
+      statuses: ["To Do", "In Progress"]    # shared across all sources
     slite:
       doc_labels: ["needs-review"]
       design_doc_parent: ""              # Slite note ID or channel where design docs are created
