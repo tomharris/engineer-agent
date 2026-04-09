@@ -1,5 +1,6 @@
 ---
 description: "Analyze a PM feature spec from Slite and draft clarifying questions"
+model: sonnet
 argument-hint: "<slite-url-or-id> [--project <slug>]"
 allowed-tools: ["Bash", "Read", "Write", "Glob", "Grep", "AskUserQuestion",
   "mcp__slite__get-note", "mcp__slite__get-note-children",

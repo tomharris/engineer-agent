@@ -2,6 +2,7 @@
 name: refine-ticket
 description: "Analyze an existing ticket (Jira, GitHub issue, or text) for scope clarity, implementation feasibility, testability, and sizing. Use this skill when processing a ticket-refinement queue item."
 version: 1.0.0
+model: sonnet
 ---
 
 # Refine a Ticket

@@ -2,6 +2,7 @@
 name: generate-standup
 description: "Generate a daily standup update from recent activity. Use this skill when asked to prepare a standup, or when triggered by the daily schedule."
 version: 1.0.0
+model: haiku
 ---
 
 # Generate Standup Update

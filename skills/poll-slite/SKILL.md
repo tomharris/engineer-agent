@@ -2,6 +2,7 @@
 name: poll-slite
 description: "Poll Slite for design documents tagged for review. Use this skill when checking Slite for docs to review, or during an engineer-agent poll cycle."
 version: 1.0.0
+model: haiku
 ---
 
 # Poll Slite for Docs Needing Review

@@ -2,6 +2,7 @@
 name: audit-gaps
 description: "Compare pipeline artifacts across a boundary (spec↔design or design↔tickets) and produce a checklist of gaps. Use this skill when processing a gap-audit queue item."
 version: 1.0.0
+model: sonnet
 ---
 
 # Audit Gaps Between Pipeline Artifacts

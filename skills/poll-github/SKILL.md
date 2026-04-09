@@ -2,6 +2,7 @@
 name: poll-github
 description: "Poll GitHub for new pull requests that need review. Use this skill when checking for new PRs, when running an engineer-agent poll cycle, or when the user asks to check GitHub for work."
 version: 1.0.0
+model: haiku
 ---
 
 # Poll GitHub for New PRs

@@ -1,5 +1,6 @@
 ---
 description: "Set up engineer-agent at the user level"
+model: haiku
 allowed-tools: ["Bash", "Read", "Write", "Glob"]
 ---
 

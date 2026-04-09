@@ -1,5 +1,6 @@
 ---
 description: "Analyze existing tickets for scope, feasibility, testability, and sizing"
+model: sonnet
 argument-hint: "<jira-key|github-url|--jql \"...\"|--text \"...\"> [--project <slug>]"
 allowed-tools: ["Bash", "Read", "Write", "Glob", "Grep", "Agent", "AskUserQuestion",
   "mcp__atlassian__getJiraIssue", "mcp__atlassian__searchJiraIssuesUsingJql"]

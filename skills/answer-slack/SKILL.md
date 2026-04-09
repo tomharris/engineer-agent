@@ -2,6 +2,7 @@
 name: answer-slack
 description: "Draft an answer to a Slack question about code, implementation, or project status. Use this skill when processing a slack-question queue item or when asked to draft a Slack response."
 version: 1.0.0
+model: sonnet
 ---
 
 # Draft a Slack Answer
