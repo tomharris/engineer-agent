@@ -2,6 +2,7 @@
 name: poll-jira
 description: "Poll Jira for new or updated tickets assigned to the user. Use this skill when checking Jira for work, or during an engineer-agent poll cycle."
 version: 2.0.0
+model: haiku
 ---
 
 # Poll Jira for Assigned Tickets

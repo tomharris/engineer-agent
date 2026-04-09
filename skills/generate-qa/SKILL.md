@@ -2,6 +2,7 @@
 name: generate-qa
 description: "Generate a QA test plan from a queue item containing ticket acceptance criteria and branch code changes. Use this skill when processing a qa-test-plan queue item."
 version: 1.0.0
+model: sonnet
 ---
 
 # Generate QA Test Plan

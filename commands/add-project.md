@@ -1,5 +1,6 @@
 ---
 description: "Register the current project with engineer-agent"
+model: haiku
 allowed-tools: ["Bash", "Read", "Write", "Edit", "Glob", "AskUserQuestion"]
 ---
 

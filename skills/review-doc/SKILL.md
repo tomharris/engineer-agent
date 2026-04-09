@@ -2,6 +2,7 @@
 name: review-doc
 description: "Review a design document for technical accuracy, clarity, and completeness. Use this skill when processing a doc-review queue item or when asked to review a design doc."
 version: 1.0.0
+model: sonnet
 ---
 
 # Review a Design Document

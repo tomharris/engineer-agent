@@ -2,6 +2,7 @@
 name: refine-spec
 description: "Analyze a PM feature spec and draft clarifying questions, feasibility notes, and suggested changes. Use this skill when processing a spec-refinement queue item."
 version: 1.0.0
+model: sonnet
 ---
 
 # Refine a Feature Spec

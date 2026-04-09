@@ -2,6 +2,7 @@
 name: poll-slack
 description: "Poll Slack channels for unanswered questions directed at the user. Use this skill when checking Slack for new questions to answer, or during an engineer-agent poll cycle."
 version: 1.0.0
+model: haiku
 ---
 
 # Poll Slack for Questions

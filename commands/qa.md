@@ -1,5 +1,6 @@
 ---
 description: "Generate a QA test plan for a feature branch using ticket acceptance criteria and code changes"
+model: sonnet
 argument-hint: "[ticket-url-or-key] [--project <slug>] [--base <branch>]"
 allowed-tools: ["Bash", "Read", "Write", "Glob", "Grep", "AskUserQuestion", "Agent",
   "mcp__atlassian__getJiraIssue",

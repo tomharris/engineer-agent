@@ -2,6 +2,7 @@
 name: poll-github-issues
 description: "Poll GitHub Issues for new or updated issues assigned to the user. Use this skill when checking GitHub Issues for work, or during an engineer-agent poll cycle."
 version: 1.0.0
+model: haiku
 ---
 
 # Poll GitHub Issues for Assigned Issues

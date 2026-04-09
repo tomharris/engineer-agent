@@ -1,5 +1,6 @@
 ---
 description: "Review and approve/reject queued engineer-agent work items"
+model: sonnet
 argument-hint: "[filter: pr|slack|ticket|ticket-plan|doc|spec|design|refinement|gap|qa] [--all] [--project <slug>]"
 allowed-tools: ["Bash", "Read", "Write", "Edit", "Glob", "Grep", "Agent", "AskUserQuestion", "mcp__claude_ai_Slack__slack_send_message", "mcp__slite__append-blocks", "mcp__slite__create-note"]
 ---

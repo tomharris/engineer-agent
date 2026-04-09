@@ -1,5 +1,6 @@
 ---
 description: "Generate and review a daily activity digest"
+model: haiku
 argument-hint: "[--days N]"
 allowed-tools: ["Bash", "Read", "Write", "Glob", "Grep", "AskUserQuestion", "mcp__claude_ai_Slack__slack_send_message"]
 ---

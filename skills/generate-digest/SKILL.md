@@ -2,6 +2,7 @@
 name: generate-digest
 description: "Generate a daily activity digest summarizing all engineer-agent work. Use this skill when asked to create a digest, or when triggered by the daily schedule."
 version: 1.0.0
+model: haiku
 ---
 
 # Generate Daily Digest
