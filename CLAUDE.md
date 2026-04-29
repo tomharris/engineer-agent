@@ -70,6 +70,8 @@ jira:
 
 ## Queue File Format
 
+Items enter the queue either via polling (`/engineer-agent poll` or the cron) or manually (`/engineer-agent add-ticket <ref>`). Both paths produce identically-shaped queue files.
+
 Files move through: `~/.claude/engineer-agent/queue/incoming/` → `queue/drafts/` → `queue/completed/` or `queue/rejected/`
 
 Filename: `{YYYYMMDD-HHmmss}-{type}-{short-id}.md`
