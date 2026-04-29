@@ -177,6 +177,21 @@ Fetch new work items from configured sources.
 
 New items are detected, drafted, and placed in the review queue.
 
+### `/engineer-agent add-ticket <ref> [--project <slug>] [--no-draft]`
+
+Manually add a Jira ticket or GitHub issue to the implementation queue, bypassing poll filters. Useful for tickets outside your configured assignee/components/labels.
+
+```
+/engineer-agent add-ticket ENG-789                                  # Jira key
+/engineer-agent add-ticket https://example.atlassian.net/browse/ENG-789
+/engineer-agent add-ticket https://github.com/myorg/my-app/issues/45
+/engineer-agent add-ticket myorg/my-app#45
+/engineer-agent add-ticket ENG-789 --project my-api                 # Skip routing, force project
+/engineer-agent add-ticket ENG-789 --no-draft                       # Queue without generating a draft
+```
+
+The command fetches the ticket, resolves a project (using the same component/label routing as polling for Jira; matching `github.owner` + `github.repos` for GitHub), and writes a queue item identical in shape to a polled one. Ambiguous routing prompts you to pick a project. Active-queue dedup blocks adding a ticket already sitting in `incoming/` or `drafts/`, but completed/rejected tickets and `seen_tickets`/`seen_issues` state are bypassed so you can re-queue manually.
+
 ### `/engineer-agent review-queue [filter] [--project <slug>]`
 
 Review pending drafts and approve, edit, or reject them.
@@ -352,6 +367,7 @@ commands/
   setup.md                     /engineer-agent setup command
   add-project.md               /engineer-agent add-project command
   poll.md                      /engineer-agent poll command
+  add-ticket.md                /engineer-agent add-ticket command
   review-queue.md              /engineer-agent review-queue command
   status.md                    /engineer-agent status command
   digest.md                    /engineer-agent digest command
