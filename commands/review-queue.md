@@ -19,7 +19,7 @@ Review pending draft items and approve, edit, or reject them.
 
 ### 1. Load Config
 
-Read `~/.claude/engineer-agent/engineer.yaml`. If missing, tell the user to run `/engineer-agent setup` and stop. Extract `agent.branch_prefix` (default: `engineer-agent`).
+Read `~/.claude/engineer-agent/engineer.yaml`. If missing, tell the user to run `/engineer-agent setup` and stop. Extract `agent.branch_prefix` (required — read the literal string from the yaml; do not assume a default. If missing or empty, stop and tell the user to set `agent.branch_prefix`). When substituting `{branch_prefix}` in the `gh pr create --head` arguments below, use this exact value verbatim.
 
 ### 2. List Draft and Unrouted Items
 

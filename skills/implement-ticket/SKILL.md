@@ -30,7 +30,7 @@ Read the queue item to extract:
 - Implementation plan from the draft response
 
 Read `~/.claude/engineer-agent/engineer.yaml` and extract:
-- `agent.branch_prefix` (default: `engineer-agent`)
+- `agent.branch_prefix` — MUST be read from config. There is no fallback default. If the key is missing or empty, tell the user to set `agent.branch_prefix` in `~/.claude/engineer-agent/engineer.yaml` and stop. Use the literal string from the yaml file verbatim — do not substitute any other value.
 - `projects.<project>.path` — the absolute path to the project directory
 - `projects.<project>.github.owner` and repos for PR creation
 
@@ -42,7 +42,7 @@ Determine the tracker type for this project:
 - Read `projects.<project>.tracker` from config
 - If `tracker` is absent, infer: if `source` frontmatter is `github` → `github-issues`, if `jira` → `jira`
 
-Create the branch based on tracker type:
+Create the branch based on tracker type. The `{branch_prefix}` placeholder below must be substituted with the literal `agent.branch_prefix` value read from config in step 1 — never with the string `engineer-agent` or any other guess.
 
 **If tracker is `github-issues`:**
 - Extract issue number from `ticket_key` (strip the `#` prefix)

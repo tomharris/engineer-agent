@@ -42,9 +42,9 @@ If `$ARGUMENTS` contains a ticket URL or key, use that directly:
 - **Jira URL** (e.g. `https://myorg.atlassian.net/browse/ENG-123`): extract `ENG-123`
 
 Otherwise, extract the ticket ID from the branch name using these patterns (try in order):
-1. `{prefix}/{KEY-123}` → `KEY-123` (e.g. `engineer-agent/ENG-123` → `ENG-123`)
-2. `{prefix}/{KEY-123}-{slug}` → `KEY-123` (e.g. `engineer-agent/ENG-123-add-caching` → `ENG-123`)
-3. `{prefix}/issue-{number}-{slug}` → `#{number}` (e.g. `engineer-agent/issue-42-add-caching` → `#42`)
+1. `{prefix}/{KEY-123}` → `KEY-123` (e.g. with configured prefix `myprefix`: `myprefix/ENG-123` → `ENG-123`)
+2. `{prefix}/{KEY-123}-{slug}` → `KEY-123` (e.g. `myprefix/ENG-123-add-caching` → `ENG-123`)
+3. `{prefix}/issue-{number}-{slug}` → `#{number}` (e.g. `myprefix/issue-42-add-caching` → `#42`)
 4. `{KEY-123}-{slug}` → `KEY-123` (e.g. `ENG-123-add-caching` → `ENG-123`)
 5. `feature/{KEY-123}` → `KEY-123`
 6. `feature/{KEY-123}-{slug}` → `KEY-123`
