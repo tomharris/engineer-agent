@@ -20,7 +20,7 @@ Check GitHub Issues for issues assigned to the configured user that need impleme
 
 ### 1. Load Config
 
-Read `~/.claude/engineer-agent/engineer.yaml`. Extract the `projects` map and `agent.branch_prefix` (default: `engineer-agent`).
+Read `~/.claude/engineer-agent/engineer.yaml`. Extract the `projects` map and `agent.branch_prefix` (required — read the literal string from the yaml; do not assume a default. If missing or empty, stop and tell the user to set `agent.branch_prefix`).
 
 ### 2. Load Dedup State
 
