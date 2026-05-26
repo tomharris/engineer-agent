@@ -13,6 +13,7 @@ A Claude Code plugin that automates senior software engineer tasks with an appro
 - **Design Doc Generation** — Creates engineering design docs from refined specs
 - **Ticket Breakdown** — Breaks design docs into phased implementation tickets with dependencies
 - **QA Test Plans** — Generates hybrid test plans (runnable scripts + manual checklists) from ticket acceptance criteria and branch code changes
+- **Code Audit** — Proactive bug/security scan: Sonnet finds candidates across OWASP-style security, correctness, secrets, and dependency CVEs; Opus verifies each one before it enters the queue
 - **Pipeline Gap Audit** — Bidirectional comparison of spec ↔ design doc ↔ tickets to detect mismatches
 - **Standup Generation** — Creates daily standup updates from activity history
 - **Daily Digest** — Summarizes all agent activity with approval metrics
@@ -321,6 +322,18 @@ Generate a QA test plan for a feature branch.
 
 Cross-references ticket acceptance criteria, PR testing notes, and branch code changes to produce a hybrid test plan: a runnable shell script (curl commands, REPL snippets) plus a manual checklist for items requiring human judgment. Approve via `/engineer-agent review-queue qa`.
 
+### `/engineer-agent audit-code [subdir] [--project <slug>]`
+
+Proactively scan a registered project (or a subdirectory) for bugs and security issues. Uses a Sonnet subagent to surface candidate findings across four scopes — OWASP-style security, correctness bugs, hardcoded secrets, and known dependency vulnerabilities — then an Opus subagent to verify each one before it reaches the queue.
+
+```
+/engineer-agent audit-code                       # full scan of the current project
+/engineer-agent audit-code src/auth              # scan only src/auth
+/engineer-agent audit-code --project my-api      # scan another configured project
+```
+
+Each verified finding becomes its own `code-audit-finding` queue item and triggers an ntfy push (if configured) with Approve/Reject buttons. Approving creates a tracker ticket (Jira or GitHub Issue) in the project's configured tracker, labelled `audit` + `audit:{category}`. Review via `/engineer-agent review-queue audit`.
+
 ## How It Works
 
 ### Queue Lifecycle
@@ -363,6 +376,7 @@ Skills are auto-invoked during polling and processing:
 | `create-tickets` | `/engineer-agent create-tickets` | Breaks design doc into phased tickets |
 | `audit-gaps` | `/engineer-agent audit-gaps` | Compares pipeline artifacts across boundaries, produces gap checklist |
 | `generate-qa` | `/engineer-agent qa` | Generates hybrid QA test plan (script + manual checklist) from ticket AC and code changes |
+| `audit-code` | `/engineer-agent audit-code` | Scans a project for bugs and security issues; Sonnet finds, Opus verifies, verified findings become queue items |
 | `execute-item` | Approve/reject from `review-queue` or `execute` | Performs the external action for one item; the single source of truth shared by terminal and remote approval |
 
 ## Automated Polling
