@@ -31,6 +31,7 @@ Read the queue item to extract:
 
 Read `~/.claude/engineer-agent/engineer.yaml` and extract:
 - `agent.branch_prefix` — MUST be read from config. There is no fallback default. If the key is missing or empty, tell the user to set `agent.branch_prefix` in `~/.claude/engineer-agent/engineer.yaml` and stop. Use the literal string from the yaml file verbatim — do not substitute any other value.
+- `agent.autonomy.auto_execute` — an optional list of action tiers that skip the approval gate. Absent ⇒ empty list. Whether `draft-pr` is present here decides Step 5 below.
 - `projects.<project>.path` — the absolute path to the project directory
 - `projects.<project>.github.owner` and repos for PR creation
 
@@ -112,9 +113,21 @@ When Ralph Loop finishes (either by fulfilling the promise or hitting max iterat
 {if partial, what still needs to be done}
 ```
 
-### 5. Create PR (on approval)
+### 5. Create the Draft PR
 
-When the human approves the implementation result via `/engineer-agent review-queue`:
+A **draft** PR merges nothing and requests no review, so it is safe to create without a
+gate. Decide based on `agent.autonomy.auto_execute` (read in Step 1):
+
+- **If `draft-pr` is in `auto_execute`:** create the draft PR automatically now (no second
+  approval), then send an FYI push so the human knows it exists:
+  ```bash
+  "${CLAUDE_PLUGIN_ROOT}/scripts/notify.sh" --fyi \
+    --title "Draft PR created: {ticket_key}" \
+    --message "{project} — {title} ({iterations} iters, tests {pass|fail})" \
+    --priority normal --tags rocket --source-url "{pr_url}"
+  ```
+- **Otherwise (default):** leave the implementation result in the queue and create the draft
+  PR only when the human approves it via `/engineer-agent review-queue`.
 
 Look up `projects.<project>.github.owner` and the repo from config. Create the PR based on tracker type:
 
