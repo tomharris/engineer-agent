@@ -114,6 +114,25 @@ read `projects.<project>.tracker`, or infer from `source` frontmatter (`github` 
 - **gap-audit** — no external action. Count gaps in the `### Checklist` section and report
   `gap audit acknowledged ({N} gaps)`.
 
+- **code-audit-finding** — create a tracker ticket in the project's configured tracker.
+  Pull the **Title** and **Body** from the `### Proposed ticket` subsection of `## Draft
+  Response` (the `audit-code` skill formats it specifically for this step). Label the new
+  ticket with `audit` and `audit:{audit_category}` (e.g. `audit:security`) when the tracker
+  supports labels.
+  - tracker `github-issues`:
+    ```bash
+    gh issue create --repo {owner}/{repo} --title "{title}" --body "{body}" \
+      --label "audit" --label "audit:{audit_category}"
+    ```
+    Report the created issue URL.
+  - tracker `jira`: create via `mcp__atlassian__createJiraIssue` in
+    `projects.<project>.jira.sources[0].project` (or legacy `jira.project`), issue type
+    `Bug` for `audit_category` in `security|correctness|dependency` and `Task` for
+    `secret`. Set summary to `{title}`, description to `{body}`, and labels to `["audit",
+    "audit-{audit_category}"]`. Report the created issue key/URL.
+  - tracker `none`: do not move the file; report `no tracker configured for project
+    {project}; leaving in drafts/` and exit non-zero so the user can fix config and retry.
+
 - **qa-test-plan** — guarded in Step 3; never reached here.
 
 ### 5. Finalize

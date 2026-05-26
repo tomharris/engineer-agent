@@ -82,8 +82,8 @@ Files move through: `~/.claude/engineer-agent/queue/incoming/` → `queue/drafts
 Filename: `{YYYYMMDD-HHmmss}-{type}-{short-id}.md`
 
 YAML frontmatter fields:
-- `type`: pr-review | slack-question | ticket | doc-review | spec-refinement | design-doc | ticket-plan | ticket-refinement | gap-audit | qa-test-plan
-- `source`: github | slack | jira | slite
+- `type`: pr-review | slack-question | ticket | doc-review | spec-refinement | design-doc | ticket-plan | ticket-refinement | gap-audit | qa-test-plan | code-audit-finding
+- `source`: github | slack | jira | slite | audit
 - `source_url`: URL to the original item
 - `source_id`: Unique identifier (e.g. "org/repo#142")
 - `title`: Short description
@@ -94,6 +94,11 @@ YAML frontmatter fields:
 - `matched_projects`: (only for `_unrouted` items) array of project slugs that matched, or empty array if no rules matched
 - `jira_components`: (Jira tickets only) array of Jira component names on the ticket
 - `jira_labels`: (Jira tickets only) array of Jira labels on the ticket
+- `audit_category`: (code-audit-finding only) `security` | `correctness` | `secret` | `dependency`
+- `audit_severity`: (code-audit-finding only) `critical` | `high` | `medium` | `low`
+- `audit_confidence`: (code-audit-finding only) `medium` | `high` (low is filtered out)
+- `audit_file`: (code-audit-finding only) repo-relative path to the offending file
+- `audit_line_range`: (code-audit-finding only) e.g. `"42-58"`
 
 Body sections:
 - `## Context` — metadata about the work item
