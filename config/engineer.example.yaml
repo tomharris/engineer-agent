@@ -9,6 +9,32 @@ agent:
   digest_channel: "C98765432"
   cron_interval_minutes: 15
 
+  # Autonomy tiers — action types the agent may execute WITHOUT a human approval gate.
+  # Only "draft-pr" is supported today: a draft PR merges nothing and requests no review,
+  # so it is safe to create automatically (you review it on GitHub and mark it ready).
+  # Everything else (Slack posts, PR approve/request-changes, issue creation, non-draft PRs)
+  # always requires approval. Leave the list empty to gate everything.
+  autonomy:
+    auto_execute: ["draft-pr"]
+
+  # Push notifications + remote approval via ntfy (https://ntfy.sh). Optional — omit the
+  # whole `notify` block and the agent behaves exactly as before (no pushes).
+  #
+  # How it works: after a poll, each drafted item is pushed to `topic` with Approve / Reject
+  # / Open buttons. Tapping Approve/Reject POSTs a command to `command_topic`; the local
+  # approval-listener service (see scripts/install-listener.sh) reads it and executes the
+  # action. So you approve work from your phone without opening Claude Code.
+  #
+  # SECURITY: on public ntfy.sh a topic name is effectively a password — anyone who knows
+  # `command_topic` can trigger Slack posts and PR creation. Use long, random topic names,
+  # set an `auth_token`, and/or self-host ntfy via `server`. Treat `command_topic` as a secret.
+  notify:
+    ntfy:
+      server: "https://ntfy.sh"              # self-host for stronger isolation
+      topic: "ea-alert-CHANGE-ME-RANDOM"     # outbound alerts — keep the name secret
+      command_topic: "ea-cmd-CHANGE-ME-RANDOM"  # button taps return here — TREAT AS A PASSWORD
+      auth_token: ""                         # optional ntfy access token (Bearer); recommended
+
 # Each project is registered under a short slug.
 # Run /engineer add-project from a project directory to add entries here.
 projects:
