@@ -322,6 +322,20 @@ Generate a QA test plan for a feature branch.
 
 Cross-references ticket acceptance criteria, PR testing notes, and branch code changes to produce a hybrid test plan: a runnable shell script (curl commands, REPL snippets) plus a manual checklist for items requiring human judgment. Approve via `/engineer-agent review-queue qa`.
 
+### `/engineer-agent uat-plan <ticket-or-issue> [more refs...] [--project <slug>]`
+
+Generate a User Acceptance Testing checklist from a list of issues/tickets.
+
+```
+/engineer-agent uat-plan ENG-123                          # single Jira ticket
+/engineer-agent uat-plan ENG-100 ENG-205 PLAT-7           # mixed Jira keys
+/engineer-agent uat-plan https://github.com/org/repo/issues/42
+/engineer-agent uat-plan org/repo#42 #43 ENG-9            # mixed GitHub + Jira
+/engineer-agent uat-plan EPIC-1                           # Jira epic → expands to all descendants
+```
+
+Accepts a list of GitHub issues and/or Jira tickets (mixing trackers is allowed). A Jira parent (epic/story) is expanded to all its descendants, which replace the parent as the testable units. Working purely from ticket text — title, description, acceptance criteria — it derives concrete user-facing tests, clusters them into inferred feature areas, and emits a single markdown checklist table (`☐ | Feature Area | Test | Expected Result | Source`). Unlike `qa`, this is multi-ticket, code-agnostic, and bypasses the review queue: the table is printed to the terminal and saved under `~/.claude/engineer-agent/uat-plans/`.
+
 ### `/engineer-agent audit-code [subdir] [--project <slug>]`
 
 Proactively scan a registered project (or a subdirectory) for bugs and security issues. Uses a Sonnet subagent to surface candidate findings across four scopes — OWASP-style security, correctness bugs, hardcoded secrets, and known dependency vulnerabilities — then an Opus subagent to verify each one before it reaches the queue.

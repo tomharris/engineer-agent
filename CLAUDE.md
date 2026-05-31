@@ -6,6 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 engineer-agent — A Claude Code plugin that automates senior software engineer tasks with an approval-gated workflow. The agent drafts PR reviews, Slack answers, ticket implementations, doc reviews, and standup updates. The human reviews and approves via `/engineer-agent review-queue` before anything is posted externally — or, with ntfy configured, approves remotely from a phone (see "Notifications & Remote Approval").
 
+A few commands sit outside the approval queue because they produce read-only planning artifacts rather than external posts. `/engineer-agent uat-plan <refs...>` is one: it turns a list of GitHub issues / Jira tickets (expanding any Jira parent into its descendants) into a User Acceptance Testing checklist — a markdown table of user-facing tests with expected results, grouped by feature area — then prints it and saves a copy under `~/.claude/engineer-agent/uat-plans/`. It works from ticket text only (no repo or queue involvement).
+
 ## Plugin Structure
 
 This repo IS the plugin.
@@ -32,6 +34,7 @@ Runtime data lives at the user level in `~/.claude/engineer-agent/`:
 │   ├── drafts/                — Items with drafted responses
 │   ├── completed/             — Approved and posted
 │   └── rejected/              — Rejected with reason
+├── uat-plans/                 — Saved UAT checklists from /engineer-agent uat-plan (not part of the queue)
 └── state/
     ├── last-poll.yaml         — Dedup timestamps and seen IDs (per project + per Jira project key)
     └── ntfy-seen.yaml         — Processed ntfy command message IDs (remote-approval dedup)
