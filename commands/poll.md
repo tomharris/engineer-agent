@@ -2,7 +2,7 @@
 description: "Poll configured sources for new work items"
 model: haiku
 argument-hint: "[github|slack|jira|github-issues|slite|all] [--project <slug>]"
-allowed-tools: ["Bash", "Read", "Write", "Glob", "Grep", "Agent", "mcp__claude_ai_Slack__slack_read_channel", "mcp__claude_ai_Slack__slack_read_thread", "mcp__claude_ai_Slack__slack_search_public_and_private", "mcp__atlassian__searchJiraIssuesUsingJql", "mcp__atlassian__getJiraIssue", "mcp__slite__search-notes", "mcp__slite__get-note", "mcp__slite__get-note-children", "mcp__slite__append-blocks"]
+allowed-tools: ["Bash", "Read", "Write", "Glob", "Grep", "Agent", "mcp__atlassian__searchJiraIssuesUsingJql", "mcp__atlassian__getJiraIssue", "mcp__slite__search-notes", "mcp__slite__get-note", "mcp__slite__get-note-children", "mcp__slite__append-blocks"]
 ---
 
 # Engineer Agent: Poll for New Work

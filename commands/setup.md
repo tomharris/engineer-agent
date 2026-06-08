@@ -89,6 +89,8 @@ Engineer-agent setup complete!
 
 Next steps:
   1. Edit ~/.claude/engineer-agent/engineer.yaml with your Slack channels, Jira project, etc.
-  2. Run /engineer-agent add-project from other project directories to register them.
-  3. Run /engineer-agent status to verify everything is working.
+  2. For Slack: install the Spy CLI (https://github.com/tomharris/spy), sign in to the Slack
+     desktop app, run `spy auth` to confirm, and set agent.slack.workspace in config.
+  3. Run /engineer-agent add-project from other project directories to register them.
+  4. Run /engineer-agent status to verify everything is working.
 ```

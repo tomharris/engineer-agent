@@ -52,6 +52,10 @@ Two `agent` subsections drive autonomy (both optional):
 - `agent.autonomy.auto_execute` — a list of action tiers allowed to run **without** an approval gate. Only `draft-pr` is supported (draft PRs merge nothing / request no review). Absent ⇒ empty ⇒ everything is gated.
 - `agent.notify.ntfy` — push-notification + remote-approval settings (`server`, `topic`, `command_topic`, `auth_token`). Absent ⇒ no notifications; the workflow is otherwise unchanged.
 
+Slack access uses the Spy CLI (`agent.slack`, optional):
+- `agent.slack.bin` — path to the `spy` binary. Effective binary = `agent.slack.bin` ?? `spy` (on PATH).
+- `agent.slack.workspace` — default Slack workspace. Effective workspace = `projects.<slug>.slack.workspace` ?? `agent.slack.workspace` ?? Spy's own default. Pass it as `-w <workspace>` on every `spy` call (Spy errors when multiple workspaces are signed in and no default is set).
+
 To find config for a specific project, look up `projects.<slug>`. Each project entry has `path`, `tracker`, `github`, `slack`, `jira`, `slite`, and `qa` subsections. The `tracker` field (`"jira"` | `"github-issues"` | `"none"`) determines which ticket tracker a project uses. If absent, it's inferred: `jira` section present → `"jira"`, `github.issues` section present → `"github-issues"`, neither → `"none"`.
 
 ### Jira Multi-Source Config
@@ -121,7 +125,10 @@ Key invariant: **`/engineer-agent review-queue` (terminal) and `/engineer-agent 
 ## Available Integrations
 
 - GitHub (PRs and Issues): `gh` CLI via Bash (requires `gh auth login`)
-- Slack: `mcp__claude_ai_Slack__*` tools
+- Slack: the [Spy](https://github.com/tomharris/spy) CLI (`spy`) via Bash — reuses the local
+  Slack desktop session (no OAuth/app install). Reads with `spy read`/`spy thread`, posts
+  with `spy send` (`--thread <ts>` for threaded replies). Same binary works in interactive
+  skills and the headless cron/ntfy scripts.
 - Jira: `mcp__atlassian__*` tools (optional — either Jira or GitHub Issues per project)
 - Slite: `mcp__slite__*` tools
 - ntfy (optional): push notifications + remote approval via `curl` (publish) and `scripts/approval-listener.sh` (subscribe). Listener requires `jq`.

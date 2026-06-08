@@ -11,7 +11,7 @@ Generate a concise, helpful answer to a Slack question by researching the codeba
 
 ## Tools Needed
 
-- `mcp__claude_ai_Slack__slack_read_thread` — read full thread context
+- `Bash` — `spy thread <channel> <ts> --json -w <workspace>` ([Spy](https://github.com/tomharris/spy) Slack CLI) to read full thread context
 - `Read` — read queue items, config, and source code files
 - `Write` — write draft answer
 - `Grep`, `Glob` — search local codebase
@@ -32,6 +32,11 @@ Read the queue item file. Extract the `project` field from frontmatter. Analyze:
 ### 2. Research
 
 Read `~/.claude/engineer-agent/engineer.yaml` to find the project's path at `projects.<project>.path`.
+
+If you need more thread context than the queue item already contains, read it with
+`spy thread <channel_id> <ts> --json -w <workspace>`, resolving the Spy binary
+(`agent.slack.bin`, default `spy`) and workspace (`projects.<project>.slack.workspace` ??
+`agent.slack.workspace`) from config.
 
 Based on the question type:
 

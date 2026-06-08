@@ -11,9 +11,9 @@ Check configured Slack channels for messages matching keywords that may need a r
 
 ## Tools Needed
 
-- `mcp__claude_ai_Slack__slack_read_channel` — read recent messages in a channel
-- `mcp__claude_ai_Slack__slack_read_thread` — read thread context
-- `mcp__claude_ai_Slack__slack_search_public_and_private` — search for keyword matches
+- `Bash` — run the [Spy](https://github.com/tomharris/spy) Slack CLI:
+  - `spy read <channel> <count> --json -w <workspace>` — read recent messages in a channel
+  - `spy thread <channel> <ts> --json -w <workspace>` — read thread context
 - `Read` — read config and state
 - `Write` — create queue items
 - `Glob` — check for existing queue items
@@ -22,7 +22,15 @@ Check configured Slack channels for messages matching keywords that may need a r
 
 ### 1. Load Config
 
-Read `~/.claude/engineer-agent/engineer.yaml`. Extract the `projects` map.
+Read `~/.claude/engineer-agent/engineer.yaml`. Extract the `projects` map and the optional
+`agent.slack` block.
+
+Resolve the Spy invocation settings:
+- **Binary:** `agent.slack.bin` if set, otherwise `spy` (assumed on `PATH`).
+- **Workspace** (resolved per project below): `projects.<slug>.slack.workspace` if set,
+  otherwise `agent.slack.workspace`. Pass it as `-w <workspace>` on every `spy` call. If
+  neither is set, omit `-w` and rely on Spy's own default — but note `spy` errors when
+  multiple workspaces are signed in and no default is set.
 
 ### 2. Load Dedup State
 
@@ -40,7 +48,9 @@ Load dedup state from `projects.<slug>.slack` in last-poll.yaml (use "0" as defa
 
 For each channel in the project's `slack.channels`:
 
-1. Call `mcp__claude_ai_Slack__slack_read_channel` with the channel ID to get recent messages.
+1. Run `spy read <channel_id> 50 --json -w <workspace>` to get recent messages. Each
+   message in the JSON has `ts`, `user_id`, `user_name`, `text`, `reply_count`, and
+   `thread_ts`.
 
 2. Filter messages:
    - Only messages containing at least one keyword from `slack.keywords`
@@ -49,7 +59,9 @@ For each channel in the project's `slack.channels`:
    - Exclude messages that already have a reply from the configured user (check thread replies)
    - Exclude messages whose `source_id` (channel + timestamp) already exists in any queue file
 
-3. For each matching message, read the thread context via `mcp__claude_ai_Slack__slack_read_thread` to understand the full conversation.
+3. For each matching message, read the thread context via
+   `spy thread <channel_id> <ts> --json -w <workspace>` (use the message's `ts`, or its
+   `thread_ts` if it is itself a reply) to understand the full conversation.
 
 #### 3b. Assess Relevance
 

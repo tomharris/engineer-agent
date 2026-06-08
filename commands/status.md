@@ -51,6 +51,17 @@ Read `~/.claude/engineer-agent/state/last-poll.yaml` if it exists. Display the l
 
 If the file doesn't exist, report "No polls have run yet."
 
-### 4. Summary
+### 4. Slack (Spy) Health
+
+If any project has a `slack` section configured, verify the Spy CLI is usable:
+
+1. Resolve the binary (`agent.slack.bin`, default `spy`) and check it is on `PATH`
+   (`command -v <bin>`). If missing, report: "Spy CLI not found — install from
+   https://github.com/tomharris/spy and ensure it's on PATH."
+2. Run `<bin> auth --json -w <agent.slack.workspace>` (omit `-w` if unset). Report the
+   signed-in user/team on success, or the error (e.g. "multiple workspaces signed in; set
+   agent.slack.workspace") on failure.
+
+### 5. Summary
 
 Give a one-line summary: "N items awaiting review across M projects. Run `/engineer-agent review-queue` to review drafts."

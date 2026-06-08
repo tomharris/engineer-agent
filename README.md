@@ -25,7 +25,7 @@ Everything goes through an approval queue — nothing is posted until you say so
 
 - [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) installed and authenticated
 - **GitHub CLI (`gh`)** — for PR reviews, code operations, and GitHub API access. Install from [cli.github.com](https://cli.github.com) and run `gh auth login`
-- **Slack MCP integration** — for channel polling and message posting (`mcp__claude_ai_Slack__*`)
+- **Spy Slack CLI (`spy`)** — for channel polling and message posting. Spy reuses your local Slack desktop session, so there's no OAuth or app install. Build it from [github.com/tomharris/spy](https://github.com/tomharris/spy) (`go install ./cmd/spy`), sign in to the Slack desktop app, then run `spy auth` to confirm. Set the workspace via `agent.slack.workspace` in config (required when multiple workspaces are signed in)
 - **Jira MCP integration** (optional) — for ticket polling and implementation when using Jira as tracker (`mcp__atlassian__*`). Either Jira or GitHub Issues per project — GitHub Issues uses the `gh` CLI (already a prerequisite)
 - **Slite MCP integration** (optional) — for document reviews (`mcp__slite__*`)
 - **ntfy** (optional) — for push notifications and remote approval. No install needed to publish (uses `curl` against [ntfy.sh](https://ntfy.sh) or your self-hosted server); install the [ntfy mobile app](https://ntfy.sh/app) to receive alerts and tap Approve/Reject. The approval listener also needs **`jq`** on the host running it.
@@ -68,6 +68,9 @@ agent:
   standup_channel: "C98765432"
   digest_channel: "C98765432"
   cron_interval_minutes: 15
+  slack:                                  # Spy CLI settings (optional)
+    bin: "spy"                            # path to the spy binary (default: "spy" on PATH)
+    workspace: "myco"                     # default Slack workspace (team domain or team_id)
   autonomy:
     auto_execute: ["draft-pr"]            # action tiers allowed to run without approval
   notify:                                 # optional — omit to disable push notifications
@@ -91,6 +94,7 @@ projects:
       channels: ["C12345678"]
       keywords: ["@myname"]
       ignore_bots: true
+      workspace: "myco"                  # optional: overrides agent.slack.workspace
     jira:
       sources:                              # watch multiple Jira projects per repo
         - project: "ENG"
