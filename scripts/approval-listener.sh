@@ -77,14 +77,41 @@ handle_line() {
   echo "- \"${id}\"" >> "$SEEN_FILE"           # record before acting: at-most-once
   [ -n "$mtime" ] && echo "$mtime" > "$SINCE_FILE"
 
+  # Pin --permission-mode so this headless run never inherits the user's global
+  # `permissions.defaultMode` (e.g. "plan"): in plan mode claude -p just prints a plan
+  # and exits 0 without executing, silently leaving the item in drafts/.
+  #
+  # Use acceptEdits + a tight --allowedTools allowlist rather than bypassPermissions:
+  # execute-item reads UNTRUSTED draft-body content (Slack/Jira/GitHub text), so a
+  # prompt-injection payload must not be able to run arbitrary commands. The allowlist is
+  # exactly what execute-item / execute.md legitimately need — gh, spy, mv, the plugin's
+  # notify.sh, the file-editing tools, and the slite/atlassian MCP tools. Anything else is
+  # denied; under acceptEdits a denied tool fails non-interactively, which the drafts/
+  # check below surfaces as a WARN (no longer a silent no-op).
+  # Redirect stdin from /dev/null so claude doesn't try to read the listener's curl stream.
+  local allowed_tools=(
+    "Bash(gh *)" "Bash(spy *)" "Bash(mv *)" "Bash(${PLUGIN_ROOT}/scripts/notify.sh *)"
+    Read Edit Write Glob Grep
+    "mcp__slite__append-blocks" "mcp__slite__create-note" "mcp__atlassian__createJiraIssue"
+  )
   claude -p \
     --plugin-dir "$PLUGIN_ROOT" \
     --model sonnet \
+    --permission-mode acceptEdits \
+    --allowedTools "${allowed_tools[@]}" \
     --max-budget-usd 0.50 \
     "Run the engineer-agent execute command (commands/execute.md) for queue item '${item}' with decision '${decision}'. Read config from ~/.claude/engineer-agent/engineer.yaml. Be concise." \
-    >> "$LOG_FILE" 2>&1 \
-    && log "done: ${decision} ${item}" \
-    || log "WARN: execute returned non-zero for ${decision} ${item} (item left in drafts for retry)"
+    </dev/null >> "$LOG_FILE" 2>&1
+
+  # Trust the filesystem, not claude -p's exit code (which is 0 whenever the CLI ran,
+  # regardless of whether execute-item actually performed the action). execute-item moves
+  # the file out of drafts/ on success and leaves it on failure, so its location is the
+  # authoritative done/failed signal.
+  if [ ! -e "${AGENT_DIR}/queue/drafts/${item}" ]; then
+    log "done: ${decision} ${item}"
+  else
+    log "WARN: ${decision} ${item} did not complete (still in drafts/); see log above. Re-run after fixing."
+  fi
 }
 
 # Reconnect loop with capped backoff. Dedup makes replays on reconnect harmless.
