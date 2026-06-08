@@ -9,6 +9,15 @@ agent:
   digest_channel: "C98765432"
   cron_interval_minutes: 15
 
+  # Slack access via the Spy CLI (https://github.com/tomharris/spy) — no OAuth/app install;
+  # spy reuses your local Slack desktop session. Sign in to Slack desktop, then run
+  # `spy auth` to confirm. Optional block — omit it and the agent assumes `spy` is on PATH
+  # with a single signed-in workspace (or a default set via `spy workspaces use`).
+  slack:
+    bin: "spy"            # path to the spy binary (default: "spy" on PATH)
+    workspace: "myco"     # default Slack workspace (team domain or team_id) — required when
+                          # multiple workspaces are signed in. Per-project override below.
+
   # Autonomy tiers — action types the agent may execute WITHOUT a human approval gate.
   # Only "draft-pr" is supported today: a draft PR merges nothing and requests no review,
   # so it is safe to create automatically (you review it on GitHub and mark it ready).
@@ -53,6 +62,7 @@ projects:
       channels: ["C12345678"]
       keywords: ["@myname"]
       ignore_bots: true
+      workspace: "myco"                  # optional: overrides agent.slack.workspace for this project
     jira:
       sources:                              # list of Jira projects to watch (N:M mapping supported)
         - project: "ENG"                    # Jira project key (required)
@@ -86,3 +96,4 @@ projects:
   #     channels: ["C12345678"]
   #     keywords: ["@myname"]
   #     ignore_bots: true
+  #     workspace: "myco"                # optional: overrides agent.slack.workspace

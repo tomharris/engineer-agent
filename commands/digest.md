@@ -2,7 +2,7 @@
 description: "Generate and review a daily activity digest"
 model: haiku
 argument-hint: "[--days N]"
-allowed-tools: ["Bash", "Read", "Write", "Glob", "Grep", "AskUserQuestion", "mcp__claude_ai_Slack__slack_send_message"]
+allowed-tools: ["Bash", "Read", "Write", "Glob", "Grep", "AskUserQuestion"]
 ---
 
 # Engineer Agent: Daily Digest
@@ -28,10 +28,13 @@ If `--days N` was specified, scan items from the last N days instead of just tod
 ### 3. Present for Review
 
 Display the generated digest to the user and ask:
-- **Approve** — Post to the configured digest Slack channel via `mcp__claude_ai_Slack__slack_send_message`
+- **Approve** — Post to the configured digest Slack channel via the Spy CLI (`spy send`)
 - **Edit** — Modify the digest content inline, then re-present
 - **Skip** — Don't post, leave the draft in the queue
 
 ### 4. Post if Approved
 
-If approved, post the digest message to the channel specified in `agent.digest_channel` config, then move the queue item to `completed/`.
+If approved, post the digest message to the channel specified in `agent.digest_channel`
+config via `spy send <digest_channel> "<message>" -w <workspace> --json` (resolve the binary
+from `agent.slack.bin` (default `spy`) and the workspace from `agent.slack.workspace`), then
+move the queue item to `completed/`.

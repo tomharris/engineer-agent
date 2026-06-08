@@ -2,7 +2,7 @@
 description: "Headlessly execute (approve/reject) a single queue item — used by the ntfy remote-approval listener"
 model: sonnet
 argument-hint: "<item-id> <approve|reject> [reason...]"
-allowed-tools: ["Bash", "Read", "Write", "Edit", "Glob", "Grep", "mcp__claude_ai_Slack__slack_send_message", "mcp__slite__append-blocks", "mcp__slite__create-note"]
+allowed-tools: ["Bash", "Read", "Write", "Edit", "Glob", "Grep", "mcp__slite__append-blocks", "mcp__slite__create-note"]
 ---
 
 # Engineer Agent: Execute Item

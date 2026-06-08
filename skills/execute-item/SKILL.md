@@ -19,9 +19,9 @@ both the interactive review queue and the remote ntfy approval path call into it
 
 ## Tools Needed
 
-`Bash`, `Read`, `Write`, `Edit`, `Glob`, `Grep`, and the posting MCP tools:
-`mcp__claude_ai_Slack__slack_send_message`, `mcp__slite__append-blocks`,
-`mcp__slite__create-note`.
+`Bash`, `Read`, `Write`, `Edit`, `Glob`, `Grep`. Posting happens via the
+[Spy](https://github.com/tomharris/spy) Slack CLI (`spy send …` over `Bash`), the `gh` CLI,
+and the Slite MCP tools `mcp__slite__append-blocks`, `mcp__slite__create-note`.
 
 ## Steps
 
@@ -75,8 +75,13 @@ read `projects.<project>.tracker`, or infer from `source` frontmatter (`github` 
   gh pr review {pr_number} --repo {repo} --{approve|comment|request-changes} --body "{review_body}"
   ```
 
-- **slack-question** — call `mcp__claude_ai_Slack__slack_send_message` to post the reply
-  in the original thread.
+- **slack-question** — post the reply in the original thread via the Spy CLI. Resolve the
+  binary (`agent.slack.bin`, default `spy`) and workspace
+  (`projects.<project>.slack.workspace` ?? `agent.slack.workspace`), then use the item's
+  `channel_id` and `message_ts` (the thread parent):
+  ```bash
+  spy send {channel_id} "{reply_text}" --thread {message_ts} -w {workspace} --json
+  ```
 
 - **ticket** — create a **draft** PR. (See "Auto-execute: draft-pr" below for when this is
   allowed to run without a human approval.) Look up `projects.<project>.github.owner` and repo.
