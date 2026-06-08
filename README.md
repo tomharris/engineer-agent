@@ -511,6 +511,7 @@ config/
   state/
     last-poll.yaml             Dedup timestamps and seen IDs (per project + per Jira project key)
     ntfy-seen.yaml             Processed ntfy command message IDs (remote-approval dedup)
+    ntfy-listener.since        Last-seen ntfy command timestamp (listener stream resume point)
     approval-listener.log      Listener activity log
 ```
 
