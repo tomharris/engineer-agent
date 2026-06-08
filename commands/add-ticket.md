@@ -59,7 +59,10 @@ Do **not** consult `completed/`, `rejected/`, or the `seen_tickets`/`seen_issues
 
 **If `--project <slug>` was supplied:** validate that the slug exists in the `projects` map. If not, error and list available slugs. Otherwise use it.
 
-**Else for Jira:** fetch the ticket first (Step 5) so components/labels are known, then apply the routing logic from `skills/poll-jira/SKILL.md` Step 5b: collect every `(slug, source)` pair where `source.project == ticket.jira_project_key`, then filter by `source.components` (case-insensitive intersection with the ticket's components) and/or `source.labels` (case-insensitive intersection with the ticket's labels). A source with neither filter is a catch-all match. Deduplicate matched slugs.
+**Else for Jira:** fetch the ticket first (Step 5) so summary/components/labels are known, then apply the routing logic from `skills/poll-jira/SKILL.md`:
+
+- **Summary prefix (takes precedence, Step 5b):** parse a leading `[<token>]` from the ticket summary. Among watchers where `source.project == ticket.jira_project_key`, if exactly one project slug equals `<token>` (case-insensitive) or has a `github.repos` entry equal to `<token>` (case-insensitive), use it and skip the component/label matching below.
+- **Component/label (Step 5c):** otherwise collect every `(slug, source)` pair where `source.project == ticket.jira_project_key`, then filter by `source.components` (case-insensitive intersection with the ticket's components) and/or `source.labels` (case-insensitive intersection with the ticket's labels). A source with neither filter is a catch-all match. Deduplicate matched slugs.
 
 - **Exactly 1 match:** use it.
 - **0 or 2+ matches:** call `AskUserQuestion` with one question listing all configured project slugs whose tracker resolves to `jira` as options. If there were 2+ matches, prefix matched slugs with `(matched) ` in the option label so the user can see which ones the routing logic picked. Use the user's selection.

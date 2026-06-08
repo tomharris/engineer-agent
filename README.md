@@ -152,7 +152,8 @@ projects:
       statuses: ["To Do", "In Progress"]
 ```
 
-When polling, tickets are routed based on their Jira components and labels:
+When polling, tickets are routed by summary prefix first, then by Jira components and labels:
+- **Summary prefix (takes precedence):** if a summary starts with `[<token>]` (e.g. `[payroll-workflows] - …`) and exactly one watching project's slug or `github.repos` entry equals `<token>` (case-insensitive), the ticket routes there regardless of components/labels — useful when several projects share one Jira project key. A prefix matching zero or multiple watchers is ignored and falls through to component/label routing.
 - A ticket matching exactly one project is routed automatically
 - A ticket matching zero or multiple projects is marked as **unrouted** and appears in the review queue for manual assignment
 - Sources with no `components` or `labels` act as catch-alls for that Jira project

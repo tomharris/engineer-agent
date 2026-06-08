@@ -80,7 +80,23 @@ For each ticket returned from Phase 1:
 
 - Exclude tickets whose `source_id` already exists in any queue file (check all queue directories via Glob)
 
-#### 5b. Route via Component/Label Matching
+#### 5b. Route via Summary Prefix (takes precedence)
+
+Many teams share a single Jira project key (e.g. `WIRE`) across several engineer-agent
+projects with no distinguishing components/labels, and prefix the ticket summary with the
+target repo, e.g. `[payroll-workflows] - Add void paycycle endpoint`. Check this first:
+
+1. Parse a leading `[<token>]` from the ticket summary (the bracketed text at the very
+   start, trimmed of whitespace). If absent, skip to 5c.
+2. Among the watchers for this Jira project key, find any whose engineer-agent project
+   slug equals `<token>` (case-insensitive) **or** whose `projects.<slug>.github.repos`
+   contains an entry equal to `<token>` (case-insensitive).
+3. If **exactly one** watcher matches, route the ticket to that project — this takes
+   precedence; skip 5c entirely and treat it as a single match in 5d.
+4. If the prefix matches zero or multiple watchers, ignore the prefix and fall through to
+   5c (component/label/catch-all matching).
+
+#### 5c. Route via Component/Label Matching
 
 1. Extract the ticket's Jira project key, components list, and labels list
 2. Look up all watchers for this Jira project key from the query map
@@ -93,7 +109,7 @@ For each ticket returned from Phase 1:
      - If source has neither `components` nor `labels`: automatic match (catch-all)
 4. Collect all matching engineer-agent project slugs (deduplicated)
 
-#### 5c. Create Queue Items Based on Match Count
+#### 5d. Create Queue Items Based on Match Count
 
 **Exactly 1 match** — Route to that project:
 

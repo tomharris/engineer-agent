@@ -78,6 +78,7 @@ jira:
 - `assignee` and `statuses` are shared across all sources
 - **Backward compat:** `jira.project` (string) is treated as `sources: [{project: <value>}]`
 - Multiple engineer-agent projects can watch the same Jira project with different component/label filters (N:M mapping)
+- **Summary-prefix routing (takes precedence):** if a ticket summary starts with `[<token>]` (e.g. `[payroll-workflows] - …`) and exactly one watching project's slug or `github.repos` entry equals `<token>` (case-insensitive), the ticket routes to that project regardless of components/labels. This disambiguates teams that share one Jira project key with no distinguishing components/labels. A prefix matching zero or multiple watchers is ignored and falls through to component/label matching.
 - Tickets matching zero or multiple projects are created as `_unrouted` for manual assignment
 
 ## Queue File Format

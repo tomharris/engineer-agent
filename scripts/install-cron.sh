@@ -28,8 +28,10 @@ fi
 # Make cron-poll.sh executable
 chmod +x "${PLUGIN_ROOT}/scripts/cron-poll.sh"
 
-# Install crontab entry (remove old entry first if exists)
-CRON_CMD="*/${INTERVAL} * * * * ${PLUGIN_ROOT}/scripts/cron-poll.sh"
+# Install crontab entry (remove any old/commented entry first if it exists).
+# Prefix PATH so cron can find the `claude` CLI (commonly in ~/.local/bin). cron-poll.sh
+# also exports PATH itself, but setting it here keeps the entry robust on its own.
+CRON_CMD="*/${INTERVAL} * * * * PATH=${HOME}/.local/bin:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin ${PLUGIN_ROOT}/scripts/cron-poll.sh"
 (crontab -l 2>/dev/null | grep -v "engineer-agent.*cron-poll.sh" || true; echo "$CRON_CMD") | crontab -
 
 echo "Engineer-agent cron installed:"
