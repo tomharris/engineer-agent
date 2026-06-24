@@ -156,6 +156,8 @@ For each acceptance criterion, find the matching items in the Pass 1 inventory:
   - What to look for or verify
   - Any specific interactions to try
 
+**Principle — never punt scripted tests to manual.** An AC that maps to an API route or service method gets a *scripted* test. If generating or running that scripted test is hard (unvalidated route, a failure on first run, etc.), it is resolved in the Pass 3 run-and-fix loop below — it is **never** relocated into the manual checklist to avoid dealing with it. The manual checklist is only for ACs that are genuinely UI/judgment-only.
+
 - **AC maps to nothing in inventory:** Flag as:
   - `**AC {N}: {text}** — untested: no matching code change found. This may be out of scope for this branch, or the implementation may be missing.`
 
@@ -252,9 +254,76 @@ Build the manual checklist markdown:
 - [ ] {existing behavior} — still works after changes
 ```
 
-### 3. Write Draft Response
+### Pass 3 — Execute & Fix Loop
 
-Combine the test script and manual checklist into the `## Draft Response`:
+Run the scripted tests and fix failing ones in place. The goal: every scripted (curl) test either passes or is left failing for a deliberate, recorded reason — never abandoned, never demoted to the manual checklist.
+
+**Scope:** this loop runs the bash/curl script from step 2.5 only. The REPL/console snippets (service-only ACs) stay as guidance the reviewer runs by hand — the console is interactive and not reliably scriptable.
+
+#### 3.1. Materialize the Script
+
+Write the composed `qa-test.sh` to a temp file under the session scratchpad directory so it can be executed. Keep this file in sync with any fixes you make in the loop — the final, corrected version is what goes into the Draft Response (step 4).
+
+#### 3.2. Reachability Precheck
+
+If the script contains no executable curl tests (everything is UI/manual or REPL-only), skip the rest of Pass 3 and record execution status `not executed — no scripted tests`.
+
+Otherwise probe the host once:
+
+```bash
+curl -s -o /dev/null -w "%{http_code}" --max-time 5 "$BASE_URL"
+```
+
+If the connection is refused or the host is unresolvable (curl exits non-zero / no HTTP code), **abort the loop**: leave the generated script unchanged, record execution status `not executed — app unreachable at {base_url}`, and skip to step 4. Do not attempt to "fix" tests against a dead endpoint, and do not move anything to the manual checklist.
+
+> The loop cannot start the app or obtain credentials itself — there is no config or convention for that. It is strictly best-effort against whatever is already running at `base_url`.
+
+#### 3.3. Run
+
+Execute the script and capture the per-test `PASS`/`FAIL` lines and the summary:
+
+```bash
+bash {scratchpad}/qa-test.sh
+```
+
+The script already exits non-zero on any failure via its `check`/`[ "$FAIL" -eq 0 ]` harness. If every test passes, record `ran — {N} passed / 0 failed` and go to step 4.
+
+#### 3.4. Diagnose Each Failure
+
+Classify each failing test into **exactly one** of these, and act accordingly:
+
+- **Test defect → fix the test, then re-run.** The test itself is wrong. Examples:
+  - Wrong path (404 because the route path is off) — correct it against the validated route definitions from step 1.5.
+  - Placeholder/missing auth producing 401/403 — supply a real token only if one is plainly derivable from the project; otherwise treat as an env limitation (below).
+  - Expected status disagrees with the AC — correct the expectation to what the **AC** specifies.
+  - Invalid happy-path sample data triggering an unintended validation error — fix the request body.
+  - Malformed curl (quoting, headers, Content-Type) — fix the command.
+
+- **Real code bug → do NOT touch the test.** The request is correct and the AC says behavior X but the app does Y. Leave the test failing and record a finding: which AC/file, expected vs. actual, and why this is a code issue rather than a test issue.
+
+- **Env limitation → leave the test in place, mark not-executed.** The test can't run meaningfully because auth is required and no token is configured or derivable (or a dependency is missing). Don't demote it to manual, and don't fix it against a dead path. Record it as `not executed — {reason}`.
+
+**Hard guardrail:** never rewrite an `expected` value to match the observed `actual` just to make a test go green. Expectations come from the acceptance criteria, not from the app's current behavior. "Make it pass" is only valid when the *test* was wrong, never when the *app* is wrong.
+
+#### 3.5. Loop
+
+After fixing the test-defect failures, re-run the full script (step 3.3). Repeat until one of:
+- all tests pass,
+- every remaining failure is classified as a real code bug or an env limitation, or
+- an iteration cap of **5** fix-and-rerun cycles is reached (prevents infinite loops).
+
+On hitting the cap, record the remaining failures with their last diagnosis.
+
+#### 3.6. Result
+
+The corrected `qa-test.sh` (with all test-defect fixes applied) is the version that flows into the Draft Response. Record for step 4:
+- execution status: `ran` | `not executed — {reason}`
+- `{N} passed / {M} failed`
+- for each remaining failure: its classification (`real code bug` | `not executed — {reason}`) and detail.
+
+### 4. Write Draft Response
+
+Combine the (fixed) test script, execution results, and manual checklist into the `## Draft Response`:
 
 ```markdown
 ## Draft Response
@@ -269,7 +338,17 @@ Combine the test script and manual checklist into the `## Draft Response`:
 
 ### Test Script
 
-{the complete bash script from step 2.5}
+{the complete, fixed bash script — the version produced by the Pass 3 loop, not the original from step 2.5}
+
+### Execution Results
+
+**Status:** {ran | not executed — {reason}}
+**Result:** {N} passed / {M} failed
+
+{for each remaining failure:}
+- **{test description}** — {real code bug | not executed — {reason}}: {expected vs. actual / detail}
+
+{if status is "not executed", briefly state what's needed to run it (start app at {base_url}, provide auth, etc.).}
 
 ### REPL/Console Tests
 
@@ -290,17 +369,22 @@ Run in `{console_command or "your project's REPL/console"}`:
 
 ### Coverage Summary
 - {N}/{M} acceptance criteria have automated tests
+- {N} automated tests executed and passing
+- {N} potential code bugs surfaced by execution
+- {N} automated tests not executed (env: app unreachable / auth required)
 - {N} acceptance criteria need manual verification
 - {N} acceptance criteria have no matching code change (possibly out of scope)
 - {N} code changes not mapped to any acceptance criterion
 - {N} existing tests cover related behavior
 ```
 
-### 4. Finalize
+### 5. Finalize
 
 1. Update the queue item's frontmatter `status` to `drafted`
 2. Move from `~/.claude/engineer-agent/queue/incoming/` to `~/.claude/engineer-agent/queue/drafts/` (write to new location, delete from old)
 
-### 5. Report
+### 6. Report
 
-Report: "QA test plan drafted for {ticket-key}: {N} automated tests, {N} manual checks, {N} regression tests. Review with `/engineer-agent review-queue qa`."
+Report: "QA test plan drafted for {ticket-key}: {N} automated tests ({P} passed / {F} failed on run), {B} potential bugs surfaced, {N} manual checks, {N} regression tests. Review with `/engineer-agent review-queue qa`."
+
+If the loop aborted, report execution status instead, e.g.: "... automated tests not executed: app unreachable at {base_url}. ..."
