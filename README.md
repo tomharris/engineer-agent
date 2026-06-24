@@ -12,7 +12,7 @@ A Claude Code plugin that automates senior software engineer tasks with an appro
 - **Ticket Refinement** — Analyzes existing tickets for scope clarity, feasibility, testability, and Fibonacci sizing
 - **Design Doc Generation** — Creates engineering design docs from refined specs
 - **Ticket Breakdown** — Breaks design docs into phased implementation tickets with dependencies
-- **QA Test Plans** — Generates hybrid test plans (runnable scripts + manual checklists) from ticket acceptance criteria and branch code changes
+- **QA Test Plans** — Generates hybrid test plans (runnable scripts + manual checklists) from ticket acceptance criteria and branch code changes, then runs the scripts and self-fixes failing tests (surfacing genuine code bugs) when the app is reachable
 - **Code Audit** — Proactive bug/security scan: Sonnet finds candidates across OWASP-style security, correctness, secrets, and dependency CVEs; Opus verifies each one before it enters the queue
 - **Pipeline Gap Audit** — Bidirectional comparison of spec ↔ design doc ↔ tickets to detect mismatches
 - **Standup Generation** — Creates daily standup updates from activity history
@@ -325,7 +325,7 @@ Generate a QA test plan for a feature branch.
 /engineer-agent qa ENG-123 --base develop                   # Custom base branch for diff
 ```
 
-Cross-references ticket acceptance criteria, PR testing notes, and branch code changes to produce a hybrid test plan: a runnable shell script (curl commands, REPL snippets) plus a manual checklist for items requiring human judgment. Approve via `/engineer-agent review-queue qa`.
+Cross-references ticket acceptance criteria, PR testing notes, and branch code changes to produce a hybrid test plan: a runnable shell script (curl commands, REPL snippets) plus a manual checklist for items requiring human judgment. When the app is reachable at `qa.base_url`, it also **runs the generated script and fixes failing scripted tests in place** — correcting test defects (wrong path, bad expected status, malformed request) while leaving genuine code-bug failures intact and surfacing them as findings (it never rewrites an expectation just to go green). If the app is unreachable, it keeps the generated script and reports that tests weren't executed. Approve via `/engineer-agent review-queue qa`.
 
 ### `/engineer-agent uat-plan <ticket-or-issue> [more refs...] [--project <slug>]`
 
@@ -394,7 +394,7 @@ Skills are auto-invoked during polling and processing:
 | `create-design-doc` | `/engineer-agent create-design-doc` | Generates engineering design doc from spec |
 | `create-tickets` | `/engineer-agent create-tickets` | Breaks design doc into phased tickets |
 | `audit-gaps` | `/engineer-agent audit-gaps` | Compares pipeline artifacts across boundaries, produces gap checklist |
-| `generate-qa` | `/engineer-agent qa` | Generates hybrid QA test plan (script + manual checklist) from ticket AC and code changes |
+| `generate-qa` | `/engineer-agent qa` | Generates hybrid QA test plan (script + manual checklist) from ticket AC and code changes, then runs and self-fixes the scripted tests when the app is reachable |
 | `audit-code` | `/engineer-agent audit-code` | Scans a project for bugs and security issues; Sonnet finds, Opus verifies, verified findings become queue items |
 | `execute-item` | Approve/reject from `review-queue` or `execute` | Performs the external action for one item; the single source of truth shared by terminal and remote approval |
 
