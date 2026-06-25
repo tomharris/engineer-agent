@@ -81,6 +81,10 @@ jira:
 - **Summary-prefix routing (takes precedence):** if a ticket summary starts with `[<token>]` (e.g. `[payroll-workflows] - …`) and exactly one watching project's slug or `github.repos` entry equals `<token>` (case-insensitive), the ticket routes to that project regardless of components/labels. This disambiguates teams that share one Jira project key with no distinguishing components/labels. A prefix matching zero or multiple watchers is ignored and falls through to component/label matching.
 - Tickets matching zero or multiple projects are created as `_unrouted` for manual assignment
 
+### QA Documentation Config
+
+The `qa` subsection drives QA test plans: `base_url` and `console_command` (used during generation), plus optional documentation keys `document_to` (`"slite"` | empty — empty/absent disables) and `document_parent` (Slite channel/note id; empty ⇒ the user's private personal channel). When `document_to: slite`, a completed QA plan (review-queue Phase 3) is published to Slite as one note containing the full plan, the inlined `qa-test.sh` script, and the execution results — best-effort, never blocking completion.
+
 ## Queue File Format
 
 Items enter the queue either via polling (`/engineer-agent poll` or the cron) or manually (`/engineer-agent add-ticket <ref>`). Both paths produce identically-shaped queue files.
