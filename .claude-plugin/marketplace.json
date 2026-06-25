@@ -9,7 +9,7 @@
     {
       "name": "engineer-agent",
       "description": "Automates senior software engineer tasks with an approval-gated workflow",
-      "version": "1.4.1",
+      "version": "1.5.0",
       "source": {
         "source": "github",
         "repo": "tomharris/engineer-agent"
