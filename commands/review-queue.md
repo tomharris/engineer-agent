@@ -127,10 +127,13 @@ refuses it). Run its three-phase flow here:
      - Timestamp of completion
   5. Print: "QA complete. Plan archived to `~/.claude/engineer-agent/qa-plans/{branch}-{timestamp}/`"
 
+After the three QA phases complete, update the file's frontmatter `status` to `completed` and move it from `~/.claude/engineer-agent/queue/drafts/` to `~/.claude/engineer-agent/queue/completed/` (write to new location, delete from old). (For all other types, execute-item has already done this.)
+
   **Phase 3b — Document the completed plan (optional):**
 
-  This runs only after the plan is fully completed and locally archived above. It is
-  best-effort: a failure here is reported but never un-completes the plan.
+  This runs last — only after the plan is fully completed (frontmatter `status: completed`,
+  moved to `completed/`) and locally archived above. It is best-effort: a failure here is
+  reported but never un-completes the plan.
 
   1. Read `projects.<project>.qa.document_to` from `~/.claude/engineer-agent/engineer.yaml`.
      - Empty or absent → skip silently (feature disabled).
@@ -157,8 +160,6 @@ refuses it). Run its three-phase flow here:
   5. On success, print: `QA plan documented to Slite: {note_url}`.
      On any failure (channel resolution or note creation), print a warning with the error
      and continue — the plan remains completed and locally archived.
-
-After the three QA phases complete, update the file's frontmatter `status` to `completed` and move it from `~/.claude/engineer-agent/queue/drafts/` to `~/.claude/engineer-agent/queue/completed/` (write to new location, delete from old). (For all other types, execute-item has already done this.)
 
 **Edit** — Two options:
 1. **Inline**: Ask the user what to change. Apply their feedback to the `## Draft Response` section using Edit. Then re-display and ask for approval again.
