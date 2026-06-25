@@ -2,7 +2,7 @@
 description: "Review and approve/reject queued engineer-agent work items"
 model: sonnet
 argument-hint: "[filter: pr|slack|ticket|ticket-plan|doc|spec|design|refinement|gap|qa|audit] [--all] [--project <slug>]"
-allowed-tools: ["Bash", "Read", "Write", "Edit", "Glob", "Grep", "Agent", "AskUserQuestion", "mcp__slite__append-blocks", "mcp__slite__create-note"]
+allowed-tools: ["Bash", "Read", "Write", "Edit", "Glob", "Grep", "Agent", "AskUserQuestion", "mcp__slite__append-blocks", "mcp__slite__create-note", "mcp__slite__list-channels"]
 ---
 
 # Engineer Agent: Review Queue
@@ -126,6 +126,37 @@ refuses it). Run its three-phase flow here:
      - Any notes about failed manual items
      - Timestamp of completion
   5. Print: "QA complete. Plan archived to `~/.claude/engineer-agent/qa-plans/{branch}-{timestamp}/`"
+
+  **Phase 3b — Document the completed plan (optional):**
+
+  This runs only after the plan is fully completed and locally archived above. It is
+  best-effort: a failure here is reported but never un-completes the plan.
+
+  1. Read `projects.<project>.qa.document_to` from `~/.claude/engineer-agent/engineer.yaml`.
+     - Empty or absent → skip silently (feature disabled).
+     - `slite` → continue.
+     - Any other value → print `unrecognized qa.document_to value '{value}'; skipping QA documentation` and skip.
+  2. Resolve the Slite parent id:
+     - If `projects.<project>.qa.document_parent` is set, use it.
+     - If empty/absent, call `mcp__slite__list-channels` and select the user's personal
+       channel — the channel whose id is prefixed `user-`. Use that id as the parent.
+       If no personal channel can be resolved, print `could not resolve a private Slite
+       channel; skipping QA documentation` and skip.
+  3. Compose the note content (a complete record), in order:
+     - A header: ticket key + `source_url`, PR URL (`pr_url` or "None"), `branch`, `base`,
+       base URL, and the completion timestamp.
+     - The full test plan — the `test-plan.md` content saved in Phase 3 (manual checklist,
+       REPL/console tests, coverage summary).
+     - The generated `qa-test.sh` script inlined in a fenced ```bash code block.
+     - The execution results — the `results.md` content saved in Phase 3 (stdout, pass/fail
+       counts, manual checklist status, notes on failed items).
+  4. Call `mcp__slite__create-note` with:
+     - title: `QA Plan: {ticket-key} — {title} ({branch})`
+     - parent: the resolved parent id from step 2
+     - content: the composed record from step 3
+  5. On success, print: `QA plan documented to Slite: {note_url}`.
+     On any failure (channel resolution or note creation), print a warning with the error
+     and continue — the plan remains completed and locally archived.
 
 After the three QA phases complete, update the file's frontmatter `status` to `completed` and move it from `~/.claude/engineer-agent/queue/drafts/` to `~/.claude/engineer-agent/queue/completed/` (write to new location, delete from old). (For all other types, execute-item has already done this.)
 
