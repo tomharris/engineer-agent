@@ -108,6 +108,8 @@ projects:
     qa:
       base_url: "http://localhost:3000"  # base URL for curl commands in QA test scripts
       console_command: ""                # e.g. "rails console", "python manage.py shell", "node" (optional)
+      document_to: ""                    # where to document completed QA plans: "slite" | "" (empty/absent disables)
+      document_parent: ""                # Slite channel/note id for the QA doc; empty → user's private (personal) channel
 
   # Example: project using GitHub Issues
   my-frontend:
