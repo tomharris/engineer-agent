@@ -51,7 +51,11 @@ Sort by: unrouted items first, then priority (urgent first), then by created_at 
 
 ### 4. User Selects Item
 
-Ask the user which item to review (by number). Also offer "approve all" if all items are low-risk (no urgent priority, no ticket implementations).
+**If exactly one item matches** (after applying any filter / `--project`), do **not** present a selection prompt. State which item is being reviewed and proceed directly to Step 5 (unrouted handling) / Step 5a (show full draft) for that item.
+
+**If two or more items match**, ask the user which item to review (by number). Also offer "approve all" if all items are low-risk (no urgent priority, no ticket implementations).
+
+Whenever you use `AskUserQuestion`, it must have **at least 2 options** — a one-option question is invalid and will error. For a yes/no or single-target confirmation, ask in plain text instead of via `AskUserQuestion`.
 
 ### 5. Handle Unrouted Items (if applicable)
 
