@@ -92,6 +92,9 @@ For each finding, include:
 - What the issue is
 - Why it matters
 - Suggested fix (when applicable)
+- **Disposition:** — left blank in the initial draft; filled in when the finding is acted on
+  (`fixed` / `accepted-risk` / `deferred` / `n/a`) with a one-line note. This closes the
+  integrate loop: the completed review becomes an auditable "found X → did Y" record.
 
 ### 5. Write the Draft
 
@@ -127,6 +130,15 @@ The draft response format:
 ### Positive
 
 {what's done well}
+
+### Findings & Disposition
+
+{The shared ledger — one row per Critical/Important finding above. Dispositions start blank
+and are filled as findings are resolved, so the completed item records how each was handled.}
+
+| Source | Finding | Disposition | Note |
+|---|---|---|---|
+| pr-review | {finding} | fixed / accepted-risk / deferred / n/a | {commit or rationale} |
 ```
 
 ### 6. Report

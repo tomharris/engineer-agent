@@ -94,8 +94,8 @@ Files move through: `~/.claude/engineer-agent/queue/incoming/` → `queue/drafts
 Filename: `{YYYYMMDD-HHmmss}-{type}-{short-id}.md`
 
 YAML frontmatter fields:
-- `type`: pr-review | slack-question | ticket | doc-review | spec-refinement | design-doc | ticket-plan | ticket-refinement | gap-audit | qa-test-plan | code-audit-finding
-- `source`: github | slack | jira | slite | audit
+- `type`: pr-review | slack-question | ticket | doc-review | spec-refinement | design-doc | ticket-plan | ticket-refinement | gap-audit | qa-test-plan | code-audit-finding | codify-candidate
+- `source`: github | slack | jira | slite | audit | internal
 - `source_url`: URL to the original item
 - `source_id`: Unique identifier (e.g. "org/repo#142")
 - `title`: Short description
@@ -111,10 +111,18 @@ YAML frontmatter fields:
 - `audit_confidence`: (code-audit-finding only) `medium` | `high` (low is filtered out)
 - `audit_file`: (code-audit-finding only) repo-relative path to the offending file
 - `audit_line_range`: (code-audit-finding only) e.g. `"42-58"`
+- `codify_target`: (codify-candidate only) `memory-file` | `skill-note` | `claude-md`
+- `codify_path`: (codify-candidate only) absolute path of the file the learning will be written to on approval
 
 Body sections:
-- `## Context` — metadata about the work item
-- `## Draft Response` — filled by the processing skill
+- `## Context` — metadata about the work item. For ticket/implementation items this leads with
+  an `### Intent` block (Goal / Key constraints / Definition of done / Non-goals) synthesized
+  from the ticket so the session and PR are self-contained intent artifacts.
+- `## Draft Response` — filled by the processing skill. Review/QA/implementation items carry a
+  `### Findings & Disposition` ledger (Source | Finding | Disposition | Note) that records how
+  each surfaced finding was resolved (`fixed` / `accepted-risk` / `deferred` / `real-bug-filed`
+  / `not-executed` / `n/a`), closing the verify→integrate loop; `execute-item` ensures it is
+  filled before an item moves to `completed/`.
 
 ## Notifications & Remote Approval
 

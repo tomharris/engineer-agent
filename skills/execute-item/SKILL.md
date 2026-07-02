@@ -138,11 +138,34 @@ read `projects.<project>.tracker`, or infer from `source` frontmatter (`github` 
   - tracker `none`: do not move the file; report `no tracker configured for project
     {project}; leaving in drafts/` and exit non-zero so the user can fix config and retry.
 
+- **codify-candidate** — perform a **local file write only** (no external post). Read
+  `codify_target` and `codify_path` from frontmatter and the proposed content from the
+  `### Proposed change to …` subsection of `## Draft Response`:
+  - `memory-file`: `Write` the full file content to `codify_path`, then append the one-line
+    pointer to the sibling `MEMORY.md` (create it if absent). If a memory file with the same
+    `name` already exists, update it in place rather than duplicating.
+  - `skill-note`: `Edit` the target `SKILL.md` at `codify_path` to append the proposed text to
+    the indicated section.
+  - `claude-md`: `Edit` the target `CLAUDE.md` at `codify_path` to add the proposed content.
+  Confirm `codify_path` is within an expected location (a project `path`, a `skills/` dir, or a
+  Claude Code `memory/` dir) before writing; if it looks wrong, leave the item in `drafts/`,
+  report the mismatch, and exit non-zero. Report the file written on success.
+
 - **qa-test-plan** — guarded in Step 3; never reached here.
 
 ### 5. Finalize
 
-After a successful approve action: set frontmatter `status: completed` and move the file to
+After a successful approve action, close the integrate loop before moving the file:
+
+- **Findings & Disposition ledger.** For item types that surface findings (`pr-review`,
+  `ticket`, `qa-test-plan`, `code-audit-finding`), the `## Draft Response` should carry a
+  `### Findings & Disposition` ledger. If any finding still has a blank `Disposition`, fill it
+  from what the approve action actually did (`fixed` / `accepted-risk` / `deferred` /
+  `real-bug-filed` / `not-executed` / `n/a`) so the completed file is a self-contained
+  "found X → did Y" record. Types with no findings (slack-question, design-doc, etc.) skip
+  this.
+
+Then set frontmatter `status: completed` and move the file to
 `~/.claude/engineer-agent/queue/completed/`. Report a one-line result naming the action
 taken (e.g. `approved pr-review org/repo#142 (commented)` or `created draft PR {url}`).
 

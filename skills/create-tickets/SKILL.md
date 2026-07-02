@@ -96,6 +96,12 @@ Write the phased ticket plan in the `## Draft Response` section using the templa
 **Priority:** High | Medium | Low
 **Estimate:** S | M | L
 
+**Intent:**
+- **Goal:** {one line — the user-facing outcome this ticket delivers}
+- **Key constraint(s):** {binding limits — perf, compat, scope}
+- **Definition of done:** {the acceptance criteria condensed to checkable bullets}
+- **Non-goals:** {what this ticket explicitly does NOT do}
+
 **Description:**
 {1-2 paragraphs: what this ticket delivers and why it's needed at this stage}
 
