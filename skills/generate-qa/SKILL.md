@@ -350,6 +350,17 @@ Combine the (fixed) test script, execution results, and manual checklist into th
 
 {if status is "not executed", briefly state what's needed to run it (start app at {base_url}, provide auth, etc.).}
 
+### Findings & Disposition
+
+{The shared ledger — one row per finding surfaced by the run. The Pass 3 loop already
+classifies each failure; map its classification into a disposition so QA reads identically to
+`review-pr` and `implement-ticket`: test-defect-fixed → `fixed`, real-code-bug → `real-bug-filed`,
+env-limitation → `not-executed`. Include the passing-after-fix tests as `fixed`.}
+
+| Source | Finding | Disposition | Note |
+|---|---|---|---|
+| qa | {failing AC / test} | fixed / real-bug-filed / not-executed | {expected vs. actual / reason} |
+
 ### REPL/Console Tests
 
 {if any service-layer-only ACs exist:}

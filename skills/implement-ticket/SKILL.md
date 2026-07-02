@@ -29,6 +29,24 @@ Read the queue item to extract:
 - Acceptance criteria from the context section
 - Implementation plan from the draft response
 
+Then synthesize the **Intent block** — a compact, self-contained framing of the work, so the
+session and the eventual PR are reusable intent artifacts even if the ticket itself is thin.
+Derive each field from the ticket's acceptance criteria and description (if the item's
+`## Context` already carries an `### Intent` block — e.g. one emitted by `create-tickets` —
+reuse it verbatim rather than regenerating):
+
+```markdown
+### Intent
+- **Goal:** {one line — the user-facing outcome this delivers}
+- **Key constraint(s):** {the binding limits — perf, compat, scope}
+- **Definition of done:** {the acceptance criteria, condensed to checkable bullets}
+- **Non-goals:** {what this explicitly does NOT do — prevents scope creep}
+```
+
+If the ticket lacks enough detail to fill **Goal** or **Definition of done**, do not invent
+intent — fall back to the "Ticket too vague" edge case below (draft "Needs clarification",
+priority `urgent`, do not start Ralph Loop).
+
 Read `~/.claude/engineer-agent/engineer.yaml` and extract:
 - `agent.branch_prefix` — MUST be read from config. There is no fallback default. If the key is missing or empty, tell the user to set `agent.branch_prefix` in `~/.claude/engineer-agent/engineer.yaml` and stop. Use the literal string from the yaml file verbatim — do not substitute any other value.
 - `agent.autonomy.auto_execute` — an optional list of action tiers that skip the approval gate. Absent ⇒ empty list. Whether `draft-pr` is present here decides Step 5 below.
@@ -64,6 +82,9 @@ Invoke Ralph Loop to iteratively implement the ticket. Construct the prompt from
 
 ```
 /ralph-loop "Implement ticket {ticket_key}: {title}
+
+## Intent
+{the Intent block synthesized in Step 1 — Goal / Key constraints / Definition of done / Non-goals}
 
 ## Acceptance Criteria
 {acceptance_criteria}
@@ -109,6 +130,15 @@ When Ralph Loop finishes (either by fulfilling the promise or hitting max iterat
 ### Test Results
 {test output summary}
 
+### Findings & Disposition
+{Any finding surfaced while implementing — a failing test, a review note, a bug found
+in passing — recorded with its disposition so the integrate loop is auditable. Use the
+shared ledger format (omit the section entirely only if genuinely nothing was surfaced):}
+
+| Source | Finding | Disposition | Note |
+|---|---|---|---|
+| {impl / test / self-review} | {what was found} | fixed / accepted-risk / deferred / n/a | {commit sha or rationale} |
+
 ### Remaining Work
 {if partial, what still needs to be done}
 ```
@@ -129,16 +159,22 @@ gate. Decide based on `agent.autonomy.auto_execute` (read in Step 1):
 - **Otherwise (default):** leave the implementation result in the queue and create the draft
   PR only when the human approves it via `/engineer-agent review-queue`.
 
-Look up `projects.<project>.github.owner` and the repo from config. Create the PR based on tracker type:
+Look up `projects.<project>.github.owner` and the repo from config.
+
+**PR body composition.** Lead the body with the **Intent block** from Step 1, then the changes
+summary and test results, then the **Findings & Disposition** ledger from the Implementation
+Result (when non-empty). This makes the PR self-contained as an intent + integrate record — a
+reviewer can see the goal, the definition of done, and how each finding was resolved without
+opening the ticket. Create the PR based on tracker type:
 
 **If tracker is `github-issues`:**
 ```bash
-gh pr create --repo {owner}/{repo} --title "#{number}: {title}" --body "{body with 'Closes #{number}', changes summary, and test results}" --head "{branch_prefix}/issue-{number}-{slug}" --base main --draft
+gh pr create --repo {owner}/{repo} --title "#{number}: {title}" --body "{Intent block; 'Closes #{number}'; changes summary; test results; Findings & Disposition ledger}" --head "{branch_prefix}/issue-{number}-{slug}" --base main --draft
 ```
 
 **If tracker is `jira`:**
 ```bash
-gh pr create --repo {owner}/{repo} --title "{ticket_key}: {title}" --body "{body with ticket link, changes summary, and test results}" --head "{branch_prefix}/{ticket_key}" --base main --draft
+gh pr create --repo {owner}/{repo} --title "{ticket_key}: {title}" --body "{Intent block; ticket link; changes summary; test results; Findings & Disposition ledger}" --head "{branch_prefix}/{ticket_key}" --base main --draft
 ```
 
 ### 6. Update Queue Item

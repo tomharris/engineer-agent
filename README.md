@@ -218,6 +218,7 @@ Review pending drafts and approve, edit, or reject them.
 /engineer-agent review-queue                    # Show all pending drafts
 /engineer-agent review-queue pr                 # Show only PR reviews
 /engineer-agent review-queue qa                 # Show only QA test plans
+/engineer-agent review-queue codify             # Show only codify candidates
 /engineer-agent review-queue --project my-api   # Show only my-api items
 /engineer-agent review-queue --all              # Include completed/rejected items
 ```
@@ -355,6 +356,41 @@ Proactively scan a registered project (or a subdirectory) for bugs and security 
 
 Each verified finding becomes its own `code-audit-finding` queue item and triggers an ntfy push (if configured) with Approve/Reject buttons. Approving creates a tracker ticket (Jira or GitHub Issue) in the project's configured tracker, labelled `audit` + `audit:{category}`. Review via `/engineer-agent review-queue audit`.
 
+### `/engineer-agent codify [--since <date>|last-week] [--project <slug>]`
+
+Capture recurring in-session learnings back into your tooling. Scans recently completed and
+rejected queue items (default: last 7 days) for recurring friction and discoveries — repeated
+environment workarounds, debugging techniques, rejection reasons that reveal a missing
+convention — and drafts each as a `codify-candidate` queue item.
+
+```
+/engineer-agent codify                       # last 7 days, all projects
+/engineer-agent codify --since last-week
+/engineer-agent codify --project my-api
+```
+
+Each candidate is classified as a **memory-file**, a **skill-note**, or a **CLAUDE.md**
+addition, with the exact proposed content. Approving one via `/engineer-agent review-queue`
+performs the local file write (no external post); rejecting writes nothing. This is how one-off
+discoveries become compounding, reusable assets. Review via `/engineer-agent review-queue codify`.
+
+## Golden Path
+
+The end-to-end loop these commands are designed to chain into, per ticket:
+
+```
+/engineer-agent:implement-ticket <ticket>   # branch, implement (Ralph Loop), draft PR
+        │  (in parallel)
+        └─ /security-review                  # security pass on the diff
+/engineer-agent:qa <ticket>                  # generate + run QA test plan
+/engineer-agent:review-queue                 # approve/triage everything above
+/engineer-agent:codify --since last-week     # (weekly) fold learnings back into tooling
+```
+
+Each stage carries an **Intent block** (Goal / Key constraints / Definition of done /
+Non-goals) and a **Findings & Disposition** ledger forward into the PR and the completed queue
+item, so the work is self-documenting for intent and closes the loop on every review finding.
+
 ## How It Works
 
 ### Queue Lifecycle
@@ -398,6 +434,7 @@ Skills are auto-invoked during polling and processing:
 | `audit-gaps` | `/engineer-agent audit-gaps` | Compares pipeline artifacts across boundaries, produces gap checklist |
 | `generate-qa` | `/engineer-agent qa` | Generates hybrid QA test plan (script + manual checklist) from ticket AC and code changes, then runs and self-fixes the scripted tests when the app is reachable |
 | `audit-code` | `/engineer-agent audit-code` | Scans a project for bugs and security issues; Sonnet finds, Opus verifies, verified findings become queue items |
+| `codify-learnings` | `/engineer-agent codify` | Scans recent completed/rejected work for recurring learnings, drafts memory-file / skill-note / CLAUDE.md candidates |
 | `execute-item` | Approve/reject from `review-queue` or `execute` | Performs the external action for one item; the single source of truth shared by terminal and remote approval |
 
 ## Automated Polling
