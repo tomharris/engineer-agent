@@ -450,6 +450,8 @@ To customize the interval or reinstall manually:
 
 This installs a crontab entry that runs `scripts/cron-poll.sh`, which invokes Claude headlessly to poll all sources for all projects. Logs are written to `~/.claude/engineer-agent/state/cron-poll.log`.
 
+By default the scripts resolve the `claude` binary from `PATH`. To use a specific Claude Code binary (a version shim, wrapper, or non-standard install path), set the `CLAUDE_BIN` env var — e.g. `CLAUDE_BIN=/opt/claude/bin/claude scripts/install-cron.sh 30`. Because cron does not inherit your interactive shell environment, the installer bakes the value set at install time into the crontab entry so the scheduled run uses the same binary.
+
 ```bash
 # Verify cron is running
 crontab -l | grep engineer-agent
@@ -483,6 +485,8 @@ cron-poll → drafts item → notify.sh ──ntfy push (Approve / Reject / Open
 ```
 
 This registers a supervised service (`engineer-agent-listener`) that restarts on failure and survives reboots: a **systemd user service** on Linux (run `loginctl enable-linger $USER` so it keeps running while you're logged out) or a **launchd LaunchAgent** on macOS (starts at login, restarts on crash — no extra steps). On hosts with neither it falls back to a `nohup` background process. Logs go to `~/.claude/engineer-agent/state/approval-listener.log`.
+
+As with cron, set `CLAUDE_BIN` to pick a specific Claude Code binary — e.g. `CLAUDE_BIN=/opt/claude/bin/claude scripts/install-listener.sh`. Since the supervised service does not inherit your shell environment, the installer bakes the install-time value into the systemd unit (`Environment=`) or launchd plist (`EnvironmentVariables`).
 
 **Hands-free draft PRs:** with `agent.autonomy.auto_execute: ["draft-pr"]`, draft-PR creation after a ticket is implemented runs without an approval gate — a draft PR merges nothing and requests no review, and you still review it on GitHub. Every other action (Slack posts, PR approve/request-changes, issue creation, non-draft PRs) always requires explicit approval.
 

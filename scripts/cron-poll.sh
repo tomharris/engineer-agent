@@ -9,7 +9,9 @@ LOG_FILE="${AGENT_DIR}/state/cron-poll.log"
 # CLI is commonly installed), causing "claude: command not found". Make sure it's
 # findable regardless of how the script is invoked.
 export PATH="${HOME}/.local/bin:${HOME}/bin:/usr/local/bin:/opt/homebrew/bin:${PATH}"
-CLAUDE_BIN="$(command -v claude || echo "${HOME}/.local/bin/claude")"
+# CLAUDE_BIN can be set in the environment to select a specific Claude Code binary
+# (e.g. a version shim or non-standard install path); otherwise discover it on PATH.
+CLAUDE_BIN="${CLAUDE_BIN:-$(command -v claude || echo "${HOME}/.local/bin/claude")}"
 
 # Ensure state directory exists
 mkdir -p "${AGENT_DIR}/state"

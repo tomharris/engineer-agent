@@ -20,6 +20,10 @@ PLUGIN_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 # shellcheck source=lib-ntfy.sh
 source "${SCRIPT_DIR}/lib-ntfy.sh"
 
+# CLAUDE_BIN can be set in the environment to select a specific Claude Code binary
+# (e.g. a version shim or non-standard install path); otherwise discover it on PATH.
+CLAUDE_BIN="${CLAUDE_BIN:-$(command -v claude || echo "${HOME}/.local/bin/claude")}"
+
 AGENT_DIR="${EA_AGENT_DIR}"
 STATE_DIR="${AGENT_DIR}/state"
 LOG_FILE="${STATE_DIR}/approval-listener.log"
@@ -30,7 +34,7 @@ mkdir -p "$STATE_DIR"
 log() { echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] $*" | tee -a "$LOG_FILE" >&2; }
 
 command -v jq >/dev/null 2>&1 || { log "FATAL: jq is required but not found on PATH"; exit 1; }
-command -v claude >/dev/null 2>&1 || { log "FATAL: claude CLI not found on PATH"; exit 1; }
+command -v "$CLAUDE_BIN" >/dev/null 2>&1 || { log "FATAL: claude CLI not found (CLAUDE_BIN='${CLAUDE_BIN}')"; exit 1; }
 
 resolve_ntfy_settings
 if [ -z "$NTFY_COMMAND_TOPIC" ]; then
@@ -94,7 +98,7 @@ handle_line() {
     Read Edit Write Glob Grep
     "mcp__slite__append-blocks" "mcp__slite__create-note" "mcp__atlassian__createJiraIssue"
   )
-  claude -p \
+  "$CLAUDE_BIN" -p \
     --plugin-dir "$PLUGIN_ROOT" \
     --model sonnet \
     --permission-mode acceptEdits \

@@ -26,6 +26,22 @@ if ! grep -q "command_topic" "${AGENT_DIR}/engineer.yaml" 2>/dev/null; then
   echo "  The listener will exit immediately until you configure it (see /engineer-agent setup)." >&2
 fi
 
+# cron/systemd/launchd do not inherit the interactive shell environment. If CLAUDE_BIN
+# is set at install time, bake it into the service definition so the listener resolves the
+# same binary override when it runs supervised. Each block carries its own trailing newline
+# so that when CLAUDE_BIN is unset the generated unit/plist is byte-for-byte unchanged.
+SYSTEMD_ENV=""
+LAUNCHD_ENV=""
+if [ -n "${CLAUDE_BIN:-}" ]; then
+  SYSTEMD_ENV="Environment=CLAUDE_BIN=${CLAUDE_BIN}"$'\n'
+  LAUNCHD_ENV="    <key>EnvironmentVariables</key>
+    <dict>
+        <key>CLAUDE_BIN</key>
+        <string>${CLAUDE_BIN}</string>
+    </dict>
+"
+fi
+
 if command -v systemctl >/dev/null 2>&1 && systemctl --user show-environment >/dev/null 2>&1; then
   UNIT_DIR="${HOME}/.config/systemd/user"
   mkdir -p "$UNIT_DIR"
@@ -36,7 +52,7 @@ After=network-online.target
 
 [Service]
 ExecStart=${LISTENER}
-Restart=always
+${SYSTEMD_ENV}Restart=always
 RestartSec=5
 
 [Install]
@@ -76,7 +92,7 @@ elif [ "$(uname)" = "Darwin" ] && command -v launchctl >/dev/null 2>&1; then
     <array>
         <string>${LISTENER}</string>
     </array>
-    <key>RunAtLoad</key>
+${LAUNCHD_ENV}    <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>
     <true/>
