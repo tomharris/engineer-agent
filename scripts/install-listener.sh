@@ -57,6 +57,57 @@ UNIT
   echo ""
   echo "Tip: for the service to keep running after you log out, enable lingering:"
   echo "  loginctl enable-linger \$USER"
+elif [ "$(uname)" = "Darwin" ] && command -v launchctl >/dev/null 2>&1; then
+  # macOS: register a launchd LaunchAgent. Like the systemd path, this restarts
+  # the listener on crash (KeepAlive) and starts it at login (RunAtLoad).
+  LA_DIR="${HOME}/Library/LaunchAgents"
+  PLIST="${LA_DIR}/${SERVICE_NAME}.plist"
+  LOG_FILE="${AGENT_DIR}/state/approval-listener.log"
+  DOMAIN="gui/$(id -u)"
+  mkdir -p "$LA_DIR"
+  cat > "$PLIST" <<PLISTEOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>${SERVICE_NAME}</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>${LISTENER}</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>${LOG_FILE}</string>
+    <key>StandardErrorPath</key>
+    <string>${LOG_FILE}</string>
+</dict>
+</plist>
+PLISTEOF
+
+  # Reload idempotently: bootout any prior instance, then bootstrap + kickstart.
+  # Fall back to the legacy load/unload API on older macOS where bootstrap is absent.
+  launchctl bootout "${DOMAIN}/${SERVICE_NAME}" >/dev/null 2>&1 || true
+  if launchctl bootstrap "$DOMAIN" "$PLIST" 2>/dev/null; then
+    launchctl kickstart -k "${DOMAIN}/${SERVICE_NAME}" >/dev/null 2>&1 || true
+  else
+    launchctl unload "$PLIST" >/dev/null 2>&1 || true
+    launchctl load -w "$PLIST"
+  fi
+
+  echo "Engineer-agent approval listener installed as a launchd LaunchAgent:"
+  echo "  Plist:  ${PLIST}"
+  echo "  Log:    ${LOG_FILE}"
+  echo ""
+  echo "Status:  launchctl print ${DOMAIN}/${SERVICE_NAME}"
+  echo "Logs:    tail -f ${LOG_FILE}"
+  echo "Stop:    launchctl bootout ${DOMAIN}/${SERVICE_NAME}"
+  echo "Remove:  launchctl bootout ${DOMAIN}/${SERVICE_NAME}; rm ${PLIST}"
+  echo ""
+  echo "The LaunchAgent starts at login and restarts on crash automatically."
 else
   # Fallback: nohup-managed background process.
   PID_FILE="${AGENT_DIR}/state/approval-listener.pid"
