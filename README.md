@@ -482,7 +482,7 @@ cron-poll → drafts item → notify.sh ──ntfy push (Approve / Reject / Open
 /path/to/engineer-agent/scripts/install-listener.sh
 ```
 
-This registers a systemd user service (`engineer-agent-listener`) that restarts on failure and survives reboots (run `loginctl enable-linger $USER` so it keeps running while you're logged out). On hosts without systemd it falls back to a `nohup` background process. Logs go to `~/.claude/engineer-agent/state/approval-listener.log`.
+This registers a supervised service (`engineer-agent-listener`) that restarts on failure and survives reboots: a **systemd user service** on Linux (run `loginctl enable-linger $USER` so it keeps running while you're logged out) or a **launchd LaunchAgent** on macOS (starts at login, restarts on crash — no extra steps). On hosts with neither it falls back to a `nohup` background process. Logs go to `~/.claude/engineer-agent/state/approval-listener.log`.
 
 **Hands-free draft PRs:** with `agent.autonomy.auto_execute: ["draft-pr"]`, draft-PR creation after a ticket is implemented runs without an approval gate — a draft PR merges nothing and requests no review, and you still review it on GitHub. Every other action (Slack posts, PR approve/request-changes, issue creation, non-draft PRs) always requires explicit approval.
 
