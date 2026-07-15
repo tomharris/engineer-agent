@@ -102,6 +102,15 @@ Items enter the queue either via polling (`/engineer-agent poll` or the cron) or
 
 Files move through: `~/.local/share/engineer-agent/queue/incoming/` → `queue/drafts/` → `queue/completed/` or `queue/rejected/`
 
+`incoming/` is for items that are detected but not yet drafted; a skill drafts them and moves
+them to `drafts/`. Skills that compose the full `## Draft Response` in the same run that
+discovers the item (`audit-code`) write directly to `drafts/` as `status: drafted` instead —
+there is no undrafted window to protect. **Only `drafts/` is reachable by the approval gate:**
+`review-queue` lists `drafts/` (plus `_unrouted` items in `incoming/`), and `execute-item` acts
+only on `drafts/`, treating anything else as an idempotent no-op. An item parked in `incoming/`
+with a finished draft is invisible to both approval paths — terminal and ntfy — and fails
+silently in each. When adding an item type, make sure something moves it to `drafts/`.
+
 Filename: `{YYYYMMDD-HHmmss}-{type}-{short-id}.md`
 
 YAML frontmatter fields:

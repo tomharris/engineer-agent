@@ -11,7 +11,7 @@ Orchestrate a two-pass code audit:
 1. **Find pass (Sonnet):** broad scan of the scan root, emitting candidate findings across security, correctness, hardcoded secrets, and known dependency vulnerabilities.
 2. **Verify pass (Opus):** per-candidate verification with the actual file content. Drops false positives and low-confidence findings.
 
-Each surviving finding becomes a `code-audit-finding` queue item in `~/.local/share/engineer-agent/queue/incoming/`, and a ntfy push is sent (no-op if ntfy is not configured).
+Each surviving finding becomes a `code-audit-finding` queue item in `~/.local/share/engineer-agent/queue/drafts/`, and a ntfy push is sent (no-op if ntfy is not configured).
 
 ## Inputs
 
@@ -114,7 +114,7 @@ Drop any result where `verified` is `false` **or** `confidence` is `low`. Surviv
 
 ### 5. Emit Queue Items
 
-For each verified finding, write a file to `~/.local/share/engineer-agent/queue/incoming/` named:
+For each verified finding, write a file to `~/.local/share/engineer-agent/queue/drafts/` named:
 
 ```
 {YYYYMMDD-HHmmss}-code-audit-finding-{shortid}.md
@@ -133,7 +133,7 @@ source_id: "{file}:{line_range}"
 title: "{refined_title}"
 priority: "{urgent if severity=critical, normal if high/medium, low if low}"
 created_at: "{ISO 8601 UTC}"
-status: incoming
+status: drafted
 project: "{project_slug}"
 audit_category: "{security|correctness|secret|dependency}"
 audit_severity: "{critical|high|medium|low}"
@@ -183,6 +183,14 @@ audit_line_range: "{line_range}"
 ```
 
 `source_url` is intentionally empty — there is no upstream URL for an audit finding. `execute-item` uses the `## Draft Response` body verbatim when creating the tracker ticket.
+
+Findings are written straight to `drafts/` as `status: drafted`, skipping `incoming/`. For the
+poll skills `incoming/` is a crash-safe intermediate state — a window where an item is detected
+but not yet drafted. This skill composes the whole `## Draft Response` above before writing the
+file, so that window never exists. It also must not be re-introduced: `review-queue` only lists
+`drafts/` (plus `_unrouted` items), and `execute-item` only acts on `drafts/` and silently
+no-ops otherwise — so a finding left in `incoming/` is unreachable from both the terminal and
+the ntfy approval paths, while step 6 still pushes it a live Approve button.
 
 ### 6. Notify
 
