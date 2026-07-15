@@ -47,7 +47,7 @@ Examples:
 
 ### 1. Load Config
 
-Read `~/.claude/engineer-agent/engineer.yaml`. If missing, tell the user to run
+Read `~/.local/share/engineer-agent/engineer.yaml`. If missing, tell the user to run
 `/engineer-agent setup` and stop.
 
 ### 2. Resolve Project (best-effort, only when needed)
@@ -112,7 +112,7 @@ Login" area. Keep every test traceable to its originating ticket(s) via the Sour
 ### 6. Emit the Table
 
 Build the markdown below, **print it to the terminal**, and **save the same content** to
-`~/.claude/engineer-agent/uat-plans/{YYYYMMDD-HHmmss}-uat-plan-{first-ref}.md` (create the
+`~/.local/share/engineer-agent/uat-plans/{YYYYMMDD-HHmmss}-uat-plan-{first-ref}.md` (create the
 `uat-plans/` directory if it does not exist; `{first-ref}` is a filename-safe form of the first
 argument, e.g. `ENG-100` or `org-repo-42`).
 
@@ -144,4 +144,4 @@ table so the gap is visible.
 ### 7. Report
 
 After printing the table, print the saved file path as the final line:
-`Saved to ~/.claude/engineer-agent/uat-plans/{filename}`.
+`Saved to ~/.local/share/engineer-agent/uat-plans/{filename}`.

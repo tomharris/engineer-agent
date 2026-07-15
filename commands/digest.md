@@ -17,7 +17,7 @@ Generate a digest of all engineer-agent activity.
 
 ### 1. Load Config
 
-Read `~/.claude/engineer-agent/engineer.yaml`. If missing, tell the user to run `/engineer-agent setup` and stop.
+Read `~/.local/share/engineer-agent/engineer.yaml`. If missing, tell the user to run `/engineer-agent setup` and stop.
 
 ### 2. Generate Digest
 

@@ -19,7 +19,7 @@ Generate a structured engineering design doc from a PM's feature spec in Slite.
 
 ### 1. Load Config
 
-Read `~/.claude/engineer-agent/engineer.yaml`. If missing, tell the user to run `/engineer-agent setup` and stop.
+Read `~/.local/share/engineer-agent/engineer.yaml`. If missing, tell the user to run `/engineer-agent setup` and stop.
 
 ### 2. Determine Project
 
@@ -40,7 +40,7 @@ If the fetch fails, report the error and stop.
 
 ### 5. Check for Prior Refinement
 
-Search `~/.claude/engineer-agent/queue/completed/` for files matching `*-spec-refinement-*.md`. Read each file's frontmatter and check if `source_id` matches `slite:{doc_id}`.
+Search `~/.local/share/engineer-agent/queue/completed/` for files matching `*-spec-refinement-*.md`. Read each file's frontmatter and check if `source_id` matches `slite:{doc_id}`.
 
 If found, read the completed refinement's `## Draft Response` section to pull in the Q&A context (especially the filled-in `_Answer:_` fields).
 
@@ -50,7 +50,7 @@ If `projects.<slug>.slite.design_doc_template` is set (non-empty), fetch that Sl
 
 ### 7. Create Queue Item
 
-Generate a timestamp and write a new file to `~/.claude/engineer-agent/queue/incoming/`:
+Generate a timestamp and write a new file to `~/.local/share/engineer-agent/queue/incoming/`:
 
 Filename: `{YYYYMMDD-HHmmss}-design-doc-{doc_id_short}.md` (use first 8 chars of doc ID)
 

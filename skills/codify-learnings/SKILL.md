@@ -29,14 +29,14 @@ last 7 days) and `--project <slug>`.
 
 ### 1. Load Config
 
-Read `~/.claude/engineer-agent/engineer.yaml`. Extract the `projects` map (each entry's
+Read `~/.local/share/engineer-agent/engineer.yaml`. Extract the `projects` map (each entry's
 `path` and slug). If missing, stop and tell the user to run `/engineer-agent setup`.
 
 ### 2. Scan Recent Work
 
 Determine the cutoff date from `--since` (default: 7 days ago). Using the same date-scan
-approach as `generate-digest`, glob `~/.claude/engineer-agent/queue/completed/` and
-`~/.claude/engineer-agent/queue/rejected/` for items created since the cutoff (filter by
+approach as `generate-digest`, glob `~/.local/share/engineer-agent/queue/completed/` and
+`~/.local/share/engineer-agent/queue/rejected/` for items created since the cutoff (filter by
 `--project` if given). For each item, read the body — especially the
 `### Findings & Disposition` ledger, `### Remaining Work`, rejection reasons, and any
 debugging or environment notes.
@@ -73,7 +73,7 @@ For each surviving learning, choose exactly one target:
 
 ### 5. Draft One Candidate per Learning
 
-Write each candidate as a queue item in `~/.claude/engineer-agent/queue/drafts/`.
+Write each candidate as a queue item in `~/.local/share/engineer-agent/queue/drafts/`.
 
 **Filename:** `{YYYYMMDD-HHmmss}-codify-{short-slug}.md`
 

@@ -11,11 +11,11 @@ Orchestrate a two-pass code audit:
 1. **Find pass (Sonnet):** broad scan of the scan root, emitting candidate findings across security, correctness, hardcoded secrets, and known dependency vulnerabilities.
 2. **Verify pass (Opus):** per-candidate verification with the actual file content. Drops false positives and low-confidence findings.
 
-Each surviving finding becomes a `code-audit-finding` queue item in `~/.claude/engineer-agent/queue/incoming/`, and a ntfy push is sent (no-op if ntfy is not configured).
+Each surviving finding becomes a `code-audit-finding` queue item in `~/.local/share/engineer-agent/queue/incoming/`, and a ntfy push is sent (no-op if ntfy is not configured).
 
 ## Inputs
 
-- **project_slug** — a key in `projects.<slug>` from `~/.claude/engineer-agent/engineer.yaml`.
+- **project_slug** — a key in `projects.<slug>` from `~/.local/share/engineer-agent/engineer.yaml`.
 - **scan_root** — an absolute path inside that project's `path` (the project root by default, or a user-supplied subdir).
 
 ## Tools Needed
@@ -30,7 +30,7 @@ Each surviving finding becomes a `code-audit-finding` queue item in `~/.claude/e
 
 ### 1. Load Config
 
-Read `~/.claude/engineer-agent/engineer.yaml`. Extract:
+Read `~/.local/share/engineer-agent/engineer.yaml`. Extract:
 - `projects.<project_slug>.path` — required.
 - `projects.<project_slug>.tracker` (or infer: `jira` section ⇒ `jira`, `github.issues` ⇒ `github-issues`, else `none`).
 - `agent.notify.ntfy` — used only to know whether ntfy is configured; `scripts/notify.sh` reads the actual values itself.
@@ -79,7 +79,7 @@ Prompt the agent to:
   ```
 - Hard cap: emit at most **30** candidates total. If more were found, keep the highest severity ones.
 
-Parse the JSON. If parsing fails, log the raw output to `~/.claude/engineer-agent/state/audit-code.log` and stop with an error — do not proceed to the verify pass on garbage input.
+Parse the JSON. If parsing fails, log the raw output to `~/.local/share/engineer-agent/state/audit-code.log` and stop with an error — do not proceed to the verify pass on garbage input.
 
 ### 4. Verify Pass (Opus)
 
@@ -114,7 +114,7 @@ Drop any result where `verified` is `false` **or** `confidence` is `low`. Surviv
 
 ### 5. Emit Queue Items
 
-For each verified finding, write a file to `~/.claude/engineer-agent/queue/incoming/` named:
+For each verified finding, write a file to `~/.local/share/engineer-agent/queue/incoming/` named:
 
 ```
 {YYYYMMDD-HHmmss}-code-audit-finding-{shortid}.md
@@ -211,7 +211,7 @@ verified findings queued: N (dropped: not-verified=A, low-confidence=B)
 files_truncated: true|false
 ```
 
-Also append a one-line entry to `~/.claude/engineer-agent/state/audit-code.log` with timestamp, project, scan root, and counts.
+Also append a one-line entry to `~/.local/share/engineer-agent/state/audit-code.log` with timestamp, project, scan root, and counts.
 
 ## Error handling
 

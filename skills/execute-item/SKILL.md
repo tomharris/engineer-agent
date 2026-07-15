@@ -13,7 +13,7 @@ both the interactive review queue and the remote ntfy approval path call into it
 ## Inputs
 
 - **item** — the path to a queue file (or a bare filename resolved against
-  `~/.claude/engineer-agent/queue/drafts/`).
+  `~/.local/share/engineer-agent/queue/drafts/`).
 - **decision** — `approve` or `reject`.
 - **reason** (optional) — rejection reason text; only used when `decision` is `reject`.
 
@@ -27,7 +27,7 @@ and the Slite MCP tools `mcp__slite__append-blocks`, `mcp__slite__create-note`.
 
 ### 1. Load Config and Resolve the Item
 
-Read `~/.claude/engineer-agent/engineer.yaml`. If missing, stop and report that
+Read `~/.local/share/engineer-agent/engineer.yaml`. If missing, stop and report that
 `/engineer-agent setup` must be run.
 
 Extract:
@@ -38,7 +38,7 @@ Extract:
   gate (e.g. `["draft-pr"]`). Absent ⇒ empty list.
 
 Resolve **item** to a file. If only a filename was given, look in
-`~/.claude/engineer-agent/queue/drafts/`. **Idempotency:** if the file is not in
+`~/.local/share/engineer-agent/queue/drafts/`. **Idempotency:** if the file is not in
 `drafts/` (already moved to `completed/` or `rejected/`, or never existed), do nothing and
 report `already-handled` — this makes repeated/duplicate triggers safe.
 
@@ -50,7 +50,7 @@ etc.) and its `## Draft Response` section.
 If **decision** is `reject`:
 1. Add `rejected_reason: "{reason or 'rejected via execute'}"` to the frontmatter.
 2. Set `status: rejected`.
-3. Move the file to `~/.claude/engineer-agent/queue/rejected/`.
+3. Move the file to `~/.local/share/engineer-agent/queue/rejected/`.
 4. Report: `rejected {filename}`.
 
 Stop here.
@@ -166,7 +166,7 @@ After a successful approve action, close the integrate loop before moving the fi
   this.
 
 Then set frontmatter `status: completed` and move the file to
-`~/.claude/engineer-agent/queue/completed/`. Report a one-line result naming the action
+`~/.local/share/engineer-agent/queue/completed/`. Report a one-line result naming the action
 taken (e.g. `approved pr-review org/repo#142 (commented)` or `created draft PR {url}`).
 
 If the external action fails (e.g. `gh` non-zero, MCP error): **do not move the file.** Leave

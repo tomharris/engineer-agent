@@ -8,7 +8,9 @@
 set -euo pipefail
 
 PLUGIN_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-AGENT_DIR="${HOME}/.claude/engineer-agent"
+# shellcheck source=lib-paths.sh
+source "${PLUGIN_ROOT}/scripts/lib-paths.sh"
+AGENT_DIR="$EA_AGENT_DIR"
 LISTENER="${PLUGIN_ROOT}/scripts/approval-listener.sh"
 SERVICE_NAME="engineer-agent-listener"
 

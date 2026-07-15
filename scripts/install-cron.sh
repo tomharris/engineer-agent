@@ -2,9 +2,11 @@
 set -euo pipefail
 
 PLUGIN_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# shellcheck source=lib-paths.sh
+source "${PLUGIN_ROOT}/scripts/lib-paths.sh"
 INTERVAL="${1:-15}"
 
-AGENT_DIR="${HOME}/.claude/engineer-agent"
+AGENT_DIR="$EA_AGENT_DIR"
 
 # Validate interval
 if ! [[ "$INTERVAL" =~ ^[0-9]+$ ]] || [ "$INTERVAL" -lt 1 ]; then

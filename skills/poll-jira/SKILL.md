@@ -21,11 +21,11 @@ Check Jira for tickets assigned to configured users that need implementation. Su
 
 ### 1. Load Config
 
-Read `~/.claude/engineer-agent/engineer.yaml`. Extract the `projects` map and `agent.branch_prefix` (required — read the literal string from the yaml; do not assume a default. If missing or empty, stop and tell the user to set `agent.branch_prefix`).
+Read `~/.local/share/engineer-agent/engineer.yaml`. Extract the `projects` map and `agent.branch_prefix` (required — read the literal string from the yaml; do not assume a default. If missing or empty, stop and tell the user to set `agent.branch_prefix`).
 
 ### 2. Load Dedup State
 
-Read `~/.claude/engineer-agent/state/last-poll.yaml`. This contains:
+Read `~/.local/share/engineer-agent/state/last-poll.yaml`. This contains:
 - `jira_projects.<key>.last_checked` — per-Jira-project-key timestamps
 - `projects.<slug>.jira.seen_tickets` — per-engineer-agent-project seen ticket lists
 
@@ -113,13 +113,13 @@ target repo, e.g. `[payroll-workflows] - Add void paycycle endpoint`. Check this
 
 **Exactly 1 match** — Route to that project:
 
-Create a file in `~/.claude/engineer-agent/queue/incoming/` and proceed to generate a draft (see Step 6).
+Create a file in `~/.local/share/engineer-agent/queue/incoming/` and proceed to generate a draft (see Step 6).
 
 Set `project: "{matched_slug}"` in frontmatter.
 
 **0 matches** — Unrouted (no rules matched):
 
-Create a file in `~/.claude/engineer-agent/queue/incoming/` with:
+Create a file in `~/.local/share/engineer-agent/queue/incoming/` with:
 ```yaml
 project: "_unrouted"
 matched_projects: []
@@ -129,7 +129,7 @@ Do NOT generate a draft. The item stays in `incoming/` until the user assigns a 
 
 **2+ matches** — Unrouted (ambiguous):
 
-Create a file in `~/.claude/engineer-agent/queue/incoming/` with:
+Create a file in `~/.local/share/engineer-agent/queue/incoming/` with:
 ```yaml
 project: "_unrouted"
 matched_projects: ["slug-a", "slug-b"]
@@ -215,7 +215,7 @@ Approving this item will start a Ralph Loop session to implement the changes, th
 
 ### 7. Update State
 
-Update `~/.claude/engineer-agent/state/last-poll.yaml`:
+Update `~/.local/share/engineer-agent/state/last-poll.yaml`:
 
 1. For each Jira project key queried, update `jira_projects.<key>.last_checked` to the current timestamp
 2. For each routed ticket, append the ticket key to `projects.<slug>.jira.seen_tickets`

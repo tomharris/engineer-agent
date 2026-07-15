@@ -18,7 +18,7 @@ Generate a concise, helpful answer to a Slack question by researching the codeba
 
 ## Input
 
-A queue item file in `~/.claude/engineer-agent/queue/incoming/` with type `slack-question`, containing the message text and thread context.
+A queue item file in `~/.local/share/engineer-agent/queue/incoming/` with type `slack-question`, containing the message text and thread context.
 
 ## Steps
 
@@ -31,7 +31,7 @@ Read the queue item file. Extract the `project` field from frontmatter. Analyze:
 
 ### 2. Research
 
-Read `~/.claude/engineer-agent/engineer.yaml` to find the project's path at `projects.<project>.path`.
+Read `~/.local/share/engineer-agent/engineer.yaml` to find the project's path at `projects.<project>.path`.
 
 If you need more thread context than the queue item already contains, read it with
 `spy thread <channel_id> <ts> --json -w <workspace>`, resolving the Spy binary
@@ -93,7 +93,7 @@ Update the queue item file:
 
 2. Update frontmatter `status` to `drafted`
 3. If confidence is low, update `priority` to `urgent`
-4. Move the file from `~/.claude/engineer-agent/queue/incoming/` to `~/.claude/engineer-agent/queue/drafts/`
+4. Move the file from `~/.local/share/engineer-agent/queue/incoming/` to `~/.local/share/engineer-agent/queue/drafts/`
 
 ### 5. Report
 

@@ -19,7 +19,7 @@ Analyze an existing ticket and produce a structured assessment with a Fibonacci 
 
 ## Input
 
-A queue item file in `~/.claude/engineer-agent/queue/incoming/` with type `ticket-refinement`, containing the ticket content in `## Context`.
+A queue item file in `~/.local/share/engineer-agent/queue/incoming/` with type `ticket-refinement`, containing the ticket content in `## Context`.
 
 ## Steps
 
@@ -27,7 +27,7 @@ A queue item file in `~/.claude/engineer-agent/queue/incoming/` with type `ticke
 
 Read the queue item to get the full ticket content from the `## Context` section. Extract `project`, `ticket_key`, and `source` from frontmatter.
 
-Read `~/.claude/engineer-agent/engineer.yaml` to find the project config at `projects.<project>` for codebase path and integration settings.
+Read `~/.local/share/engineer-agent/engineer.yaml` to find the project config at `projects.<project>` for codebase path and integration settings.
 
 ### 2. Analyze the Codebase
 
@@ -117,7 +117,7 @@ Update frontmatter:
 - Set `status` to `drafted`
 - Set `estimated_size` to the Fibonacci number
 
-Move the file to `~/.claude/engineer-agent/queue/drafts/`.
+Move the file to `~/.local/share/engineer-agent/queue/drafts/`.
 
 ### 6. Report
 

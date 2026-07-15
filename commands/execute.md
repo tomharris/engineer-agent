@@ -31,7 +31,7 @@ the usage line above. Do not ask the user anything — this command runs unatten
 ### 2. Execute via the Shared Skill
 
 Invoke the **execute-item** skill with the parsed `item`, `decision`, and `reason`. That
-skill loads config, resolves the item against `~/.claude/engineer-agent/queue/drafts/`
+skill loads config, resolves the item against `~/.local/share/engineer-agent/queue/drafts/`
 (idempotently — an already-handled item is a no-op), performs the type-specific external
 action, and moves the file to `completed/` or `rejected/`.
 

@@ -1,7 +1,7 @@
 #!/bin/bash
 # notify.sh — publish an engineer-agent notification to ntfy.
 #
-# Reads ntfy settings from ~/.claude/engineer-agent/engineer.yaml under
+# Reads ntfy settings from the engineer.yaml in the engineer-agent data dir (lib-paths.sh) under
 # agent.notify.ntfy (server, topic, command_topic, auth_token), or from
 # EA_NTFY_* env vars which take precedence. If no topic can be resolved it
 # logs a warning and exits 0 — so installs without ntfy configured keep working.

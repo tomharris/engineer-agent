@@ -21,11 +21,11 @@ Create a standup message from recent queue activity and git history across all p
 
 ### 1. Load Config
 
-Read `~/.claude/engineer-agent/engineer.yaml`. Extract the `projects` map and `agent.standup_channel`.
+Read `~/.local/share/engineer-agent/engineer.yaml`. Extract the `projects` map and `agent.standup_channel`.
 
 ### 2. Gather Yesterday's Work
 
-**Completed queue items:** Glob for files in `~/.claude/engineer-agent/queue/completed/` with timestamps from the previous business day. Read each file's frontmatter to extract type, title, source, and project.
+**Completed queue items:** Glob for files in `~/.local/share/engineer-agent/queue/completed/` with timestamps from the previous business day. Read each file's frontmatter to extract type, title, source, and project.
 
 **Git commits per project:** For each project in the `projects` config map:
 
@@ -48,7 +48,7 @@ Group by project, then by category:
 
 ### 3. Gather Today's Planned Work
 
-**Pending queue items:** Glob for files in `~/.claude/engineer-agent/queue/drafts/` and `~/.claude/engineer-agent/queue/incoming/`. These represent upcoming work. Note the `project` field for each.
+**Pending queue items:** Glob for files in `~/.local/share/engineer-agent/queue/drafts/` and `~/.local/share/engineer-agent/queue/incoming/`. These represent upcoming work. Note the `project` field for each.
 
 **In-progress tickets:** Look for ticket-type items that are in progress or recently created.
 
@@ -61,7 +61,7 @@ Check for:
 
 ### 5. Write the Draft
 
-Create a queue item in `~/.claude/engineer-agent/queue/drafts/`:
+Create a queue item in `~/.local/share/engineer-agent/queue/drafts/`:
 
 **Filename:** `{YYYYMMDD-HHmmss}-standup.md`
 

@@ -27,7 +27,7 @@ Flags:
 
 ### 1. Load Config
 
-Read `~/.claude/engineer-agent/engineer.yaml`. If missing, tell the user to run `/engineer-agent setup` and stop.
+Read `~/.local/share/engineer-agent/engineer.yaml`. If missing, tell the user to run `/engineer-agent setup` and stop.
 
 ### 2. Parse Arguments
 
@@ -46,7 +46,7 @@ For Jira refs, `ticket_key = <KEY>` and `source_id = <KEY>`. For GitHub refs, `t
 
 ### 3. Active-Queue Dedup Check
 
-Glob `~/.claude/engineer-agent/queue/incoming/*.md` and `~/.claude/engineer-agent/queue/drafts/*.md`. For each match, read the YAML frontmatter and check `source_id`. If any file has the same `source_id`, abort with:
+Glob `~/.local/share/engineer-agent/queue/incoming/*.md` and `~/.local/share/engineer-agent/queue/drafts/*.md`. For each match, read the YAML frontmatter and check `source_id`. If any file has the same `source_id`, abort with:
 
 ```
 {ticket_key} is already in the queue: {path/to/file}
@@ -100,7 +100,7 @@ If the fetch fails, report the error and stop.
 
 ### 6. Write Queue Item
 
-Compute the current timestamp `YYYYMMDD-HHmmss` (local time, same as polling skills). Write a new file in `~/.claude/engineer-agent/queue/incoming/` with frontmatter and `## Context` matching the polling skill output exactly, so downstream skills see no difference between a manually-added and a polled item.
+Compute the current timestamp `YYYYMMDD-HHmmss` (local time, same as polling skills). Write a new file in `~/.local/share/engineer-agent/queue/incoming/` with frontmatter and `## Context` matching the polling skill output exactly, so downstream skills see no difference between a manually-added and a polled item.
 
 #### Jira ticket
 
@@ -196,7 +196,7 @@ Append a `## Draft Response` section with the implementation plan, then move the
 
 ### 8. Update Dedup State
 
-Read `~/.claude/engineer-agent/state/last-poll.yaml`. Append to the relevant list under the resolved project so the next poll cycle won't re-queue:
+Read `~/.local/share/engineer-agent/state/last-poll.yaml`. Append to the relevant list under the resolved project so the next poll cycle won't re-queue:
 
 - **Jira:** append `ticket_key` to `projects.<slug>.jira.seen_tickets` (create the list if missing).
 - **GitHub:** append `source_id` (i.e. `owner/repo#N`) to `projects.<slug>.github_issues.seen_issues` (create the list if missing).

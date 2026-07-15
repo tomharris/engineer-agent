@@ -20,11 +20,11 @@ Check GitHub Issues for issues assigned to the configured user that need impleme
 
 ### 1. Load Config
 
-Read `~/.claude/engineer-agent/engineer.yaml`. Extract the `projects` map and `agent.branch_prefix` (required — read the literal string from the yaml; do not assume a default. If missing or empty, stop and tell the user to set `agent.branch_prefix`).
+Read `~/.local/share/engineer-agent/engineer.yaml`. Extract the `projects` map and `agent.branch_prefix` (required — read the literal string from the yaml; do not assume a default. If missing or empty, stop and tell the user to set `agent.branch_prefix`).
 
 ### 2. Load Dedup State
 
-Read `~/.claude/engineer-agent/state/last-poll.yaml`. This contains per-project state under `projects.<slug>`.
+Read `~/.local/share/engineer-agent/state/last-poll.yaml`. This contains per-project state under `projects.<slug>`.
 
 ### 3. Iterate Over Projects
 
@@ -57,7 +57,7 @@ For each issue returned:
 
 #### 3c. Create Queue Items
 
-For each new issue, create a file in `~/.claude/engineer-agent/queue/incoming/`:
+For each new issue, create a file in `~/.local/share/engineer-agent/queue/incoming/`:
 
 **Filename:** `{YYYYMMDD-HHmmss}-ticket-gh-{number}.md`
 
@@ -131,7 +131,7 @@ Approving this item will start a Ralph Loop session to implement the changes, th
 
 #### 3e. Update State
 
-Update `projects.<slug>.github_issues.last_checked` and append new issue source_ids to `projects.<slug>.github_issues.seen_issues` in `~/.claude/engineer-agent/state/last-poll.yaml`.
+Update `projects.<slug>.github_issues.last_checked` and append new issue source_ids to `projects.<slug>.github_issues.seen_issues` in `~/.local/share/engineer-agent/state/last-poll.yaml`.
 
 ### 4. Report
 

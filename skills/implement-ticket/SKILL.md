@@ -16,7 +16,7 @@ Implement the code changes described in a ticket using iterative development via
 
 ## Input
 
-A queue item file in `~/.claude/engineer-agent/queue/drafts/` with type `ticket` that has been approved by the human. The file contains the ticket details, acceptance criteria, and implementation plan.
+A queue item file in `~/.local/share/engineer-agent/queue/drafts/` with type `ticket` that has been approved by the human. The file contains the ticket details, acceptance criteria, and implementation plan.
 
 ## Steps
 
@@ -47,8 +47,8 @@ If the ticket lacks enough detail to fill **Goal** or **Definition of done**, do
 intent — fall back to the "Ticket too vague" edge case below (draft "Needs clarification",
 priority `urgent`, do not start Ralph Loop).
 
-Read `~/.claude/engineer-agent/engineer.yaml` and extract:
-- `agent.branch_prefix` — MUST be read from config. There is no fallback default. If the key is missing or empty, tell the user to set `agent.branch_prefix` in `~/.claude/engineer-agent/engineer.yaml` and stop. Use the literal string from the yaml file verbatim — do not substitute any other value.
+Read `~/.local/share/engineer-agent/engineer.yaml` and extract:
+- `agent.branch_prefix` — MUST be read from config. There is no fallback default. If the key is missing or empty, tell the user to set `agent.branch_prefix` in `~/.local/share/engineer-agent/engineer.yaml` and stop. Use the literal string from the yaml file verbatim — do not substitute any other value.
 - `agent.autonomy.auto_execute` — an optional list of action tiers that skip the approval gate. Absent ⇒ empty list. Whether `draft-pr` is present here decides Step 5 below.
 - `projects.<project>.path` — the absolute path to the project directory
 - `projects.<project>.github.owner` and repos for PR creation
@@ -179,7 +179,7 @@ gh pr create --repo {owner}/{repo} --title "{ticket_key}: {title}" --body "{Inte
 
 ### 6. Update Queue Item
 
-Move the queue item to `~/.claude/engineer-agent/queue/completed/` with `status: completed`.
+Move the queue item to `~/.local/share/engineer-agent/queue/completed/` with `status: completed`.
 
 ## Edge Cases
 

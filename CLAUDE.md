@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 engineer-agent — A Claude Code plugin that automates senior software engineer tasks with an approval-gated workflow. The agent drafts PR reviews, Slack answers, ticket implementations, doc reviews, and standup updates. The human reviews and approves via `/engineer-agent review-queue` before anything is posted externally — or, with ntfy configured, approves remotely from a phone (see "Notifications & Remote Approval").
 
-A few commands sit outside the approval queue because they produce read-only planning artifacts rather than external posts. `/engineer-agent uat-plan <refs...>` is one: it turns a list of GitHub issues / Jira tickets (expanding any Jira parent into its descendants) into a User Acceptance Testing checklist — a markdown table of user-facing tests with expected results, grouped by feature area — then prints it and saves a copy under `~/.claude/engineer-agent/uat-plans/`. It works from ticket text only (no repo or queue involvement).
+A few commands sit outside the approval queue because they produce read-only planning artifacts rather than external posts. `/engineer-agent uat-plan <refs...>` is one: it turns a list of GitHub issues / Jira tickets (expanding any Jira parent into its descendants) into a User Acceptance Testing checklist — a markdown table of user-facing tests with expected results, grouped by feature area — then prints it and saves a copy under `~/.local/share/engineer-agent/uat-plans/`. It works from ticket text only (no repo or queue involvement).
 
 ## Plugin Structure
 
@@ -25,9 +25,20 @@ scripts/                       — Cron polling, ntfy notify/listener, and setup
 config/engineer.example.yaml   — Config template
 ```
 
-Runtime data lives at the user level in `~/.claude/engineer-agent/`:
+Runtime data lives at the user level in `~/.local/share/engineer-agent/` (override with the
+`EA_AGENT_DIR` env var; honors `XDG_DATA_HOME`). `scripts/lib-paths.sh` is the single source
+of truth for this location — source it rather than hardcoding the path.
+
+> **Do not move runtime data back under `~/.claude/`.** Claude Code guards everything inside a
+> `.claude/` directory as sensitive and refuses the Edit/Write tools there — an explicit
+> `--allowedTools "Edit(...)"` rule does **not** override it. The guard is invisible
+> interactively (a human just approves the prompt), but silently fatal headlessly: it left both
+> `cron-poll.sh` and `approval-listener.sh` unable to record state or move queue files, so the
+> cron polled every 15 minutes for a month and never queued a single item. Installs predating
+> the move are migrated with `scripts/migrate-storage.sh`.
+
 ```
-~/.claude/engineer-agent/
+~/.local/share/engineer-agent/
 ├── engineer.yaml              — User config (one file for all projects)
 ├── queue/
 │   ├── incoming/              — Newly detected items
@@ -42,7 +53,7 @@ Runtime data lives at the user level in `~/.claude/engineer-agent/`:
 
 ## Config Loading Pattern
 
-Every skill and command that needs config should start by reading `~/.claude/engineer-agent/engineer.yaml`. If missing, tell the user to run `/engineer-agent setup` and stop.
+Every skill and command that needs config should start by reading `~/.local/share/engineer-agent/engineer.yaml`. If missing, tell the user to run `/engineer-agent setup` and stop.
 
 The config has two top-level sections:
 - `agent` — global settings (branch_prefix, max_pr_files, channels, cron interval, `autonomy`, `notify`)
@@ -89,7 +100,7 @@ The `qa` subsection drives QA test plans: `base_url` and `console_command` (used
 
 Items enter the queue either via polling (`/engineer-agent poll` or the cron) or manually (`/engineer-agent add-ticket <ref>`). Both paths produce identically-shaped queue files.
 
-Files move through: `~/.claude/engineer-agent/queue/incoming/` → `queue/drafts/` → `queue/completed/` or `queue/rejected/`
+Files move through: `~/.local/share/engineer-agent/queue/incoming/` → `queue/drafts/` → `queue/completed/` or `queue/rejected/`
 
 Filename: `{YYYYMMDD-HHmmss}-{type}-{short-id}.md`
 
@@ -131,7 +142,34 @@ ntfy turns the approval gate into a remote, async one without a custom server. B
 - **Outbound** (`topic`): after a poll, `cron-poll.sh` calls `scripts/notify.sh` to push each new draft with **Approve / Reject / Open** action buttons.
 - **Inbound** (`command_topic`): the Approve/Reject buttons are ntfy `http` actions that POST `approve|<item-id>` / `reject|<item-id>` back to the command topic. `scripts/approval-listener.sh` (a long-running service installed by `scripts/install-listener.sh`) streams that topic and runs `/engineer-agent execute <item-id> <decision>` headlessly.
 
+**Writing a headless `claude -p` run** (both scripts do this; the rules below were each learned
+from a run that failed silently):
+- **Pin `--permission-mode`.** Otherwise the run inherits `permissions.defaultMode`; in `plan` mode
+  `claude -p` prints a plan and exits 0 without doing anything.
+- **`--permission-mode` is not enough on its own — pass `--allowedTools`.** Only a built-in set of
+  Bash commands (`ls`, `cat`, `grep`, read-only `git`, …) is auto-approved. `gh` and `spy` are not
+  in it, so they prompt in every mode, and a prompt in `-p` is a denial.
+- **Don't put `--allowedTools` last before the prompt.** It takes a variable number of values and
+  will swallow the prompt as another rule (`Input must be provided … when using --print`). Keep a
+  single-value flag in between.
+- **Use `Edit(path)`, never `Write(path)`.** The CLI rejects `Write(path)` rules; one `Edit` rule
+  covers every file-editing tool. Path rules need `//abs` to anchor at the filesystem root — a
+  single leading `/` anchors to the cwd.
+- **Never trust the exit code.** `claude -p` exits 0 whenever the CLI ran, regardless of whether the
+  work happened. Determine success from a real side effect: the listener checks that the item left
+  `queue/drafts/`; the cron checks that `last-poll.yaml` advanced, and pushes an ntfy alert if not.
+- **Redirect `</dev/null`** so the run doesn't block reading its parent's stdin.
+
 Both `cron-poll.sh` and `approval-listener.sh` resolve the Claude Code binary from `PATH` by default, but honor a `CLAUDE_BIN` env var override (a specific shim/wrapper/install path). Because cron, systemd, and launchd do not inherit the interactive shell environment, `install-cron.sh` and `install-listener.sh` capture `CLAUDE_BIN` when set at install time and bake it into the crontab entry / systemd `Environment=` / launchd `EnvironmentVariables` so the supervised runs use the same binary.
+
+Key invariant: **polling reads; only `execute-item` writes.** `cron-poll.sh` passes a deliberately
+read-only `--allowedTools` allowlist (`gh pr list/view/diff`, `gh issue list/view`, `spy read/thread`),
+so the poll can discover work and draft responses but *physically cannot* post. `gh pr create`,
+`gh pr review`, `gh issue create` and `spy send` are unmatched, as is `gh api` (`gh api -X POST`
+writes). This is what makes the approval gate structural rather than advisory: polling ingests
+untrusted text (PR/issue bodies, Slack messages), so a prompt-injection payload must not be able
+to reach a write verb. Keep every posting capability in `execute-item`, behind the gate. When
+adding a source, give the poll its read verbs only.
 
 Key invariant: **`/engineer-agent review-queue` (terminal) and `/engineer-agent execute` (remote) both delegate to the shared `execute-item` skill** — the single source of truth for what approving an item does. `qa-test-plan` is interactive-only and is refused on the remote path. (The `generate-qa` skill, when the app is reachable at `qa.base_url`, also runs its generated script and fixes failing scripted tests in place — fixing test defects but leaving genuine code-bug failures as reported findings, never demoting them to the manual checklist; best-effort, it skips execution and reports when the app is unreachable.) `scripts/lib-ntfy.sh` is the shared config reader sourced by `notify.sh` and `approval-listener.sh`.
 

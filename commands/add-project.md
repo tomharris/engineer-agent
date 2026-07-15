@@ -12,7 +12,7 @@ Register the current project directory in the user-level engineer-agent config.
 
 ### 1. Load Config
 
-Read `~/.claude/engineer-agent/engineer.yaml`. If missing, tell the user to run `/engineer-agent setup` first and stop.
+Read `~/.local/share/engineer-agent/engineer.yaml`. If missing, tell the user to run `/engineer-agent setup` first and stop.
 
 ### 2. Check for Duplicate
 
@@ -56,7 +56,7 @@ For each integration the user wants to configure, ask for the required fields. F
 
 ### 5. Update Config
 
-Use Edit to append the new project entry to the `projects` map in `~/.claude/engineer-agent/engineer.yaml`.
+Use Edit to append the new project entry to the `projects` map in `~/.local/share/engineer-agent/engineer.yaml`.
 
 The new entry should follow this structure:
 
@@ -87,7 +87,7 @@ The new entry should follow this structure:
 
 ### 6. Initialize State Entry
 
-Read `~/.claude/engineer-agent/state/last-poll.yaml`. Add entries for the new project:
+Read `~/.local/share/engineer-agent/state/last-poll.yaml`. Add entries for the new project:
 
 1. Add a `projects.<slug>` entry with initial state:
 

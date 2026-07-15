@@ -21,7 +21,7 @@ Generate a QA test plan for a feature branch by cross-referencing ticket accepta
 
 ### 1. Load Config
 
-Read `~/.claude/engineer-agent/engineer.yaml`. If missing, tell the user to run `/engineer-agent setup` and stop.
+Read `~/.local/share/engineer-agent/engineer.yaml`. If missing, tell the user to run `/engineer-agent setup` and stop.
 
 ### 2. Determine Project
 
@@ -104,7 +104,7 @@ git diff {base}...HEAD
 
 Generate a timestamp for the filename. Use the ticket key as the short ID (e.g. `ENG-123` or `issue-42`).
 
-Create the queue item at `~/.claude/engineer-agent/queue/incoming/{YYYYMMDD-HHmmss}-qa-test-plan-{ticket-key}.md`:
+Create the queue item at `~/.local/share/engineer-agent/queue/incoming/{YYYYMMDD-HHmmss}-qa-test-plan-{ticket-key}.md`:
 
 Set `source` based on tracker type: `jira` if tracker is `jira`, `github` if tracker is `github-issues` or if no ticket was found.
 

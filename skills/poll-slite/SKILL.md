@@ -22,11 +22,11 @@ Check Slite for documents tagged with review labels. Iterates over all projects 
 
 ### 1. Load Config
 
-Read `~/.claude/engineer-agent/engineer.yaml`. Extract the `projects` map.
+Read `~/.local/share/engineer-agent/engineer.yaml`. Extract the `projects` map.
 
 ### 2. Load Dedup State
 
-Read `~/.claude/engineer-agent/state/last-poll.yaml`. This contains per-project state under `projects.<slug>`.
+Read `~/.local/share/engineer-agent/state/last-poll.yaml`. This contains per-project state under `projects.<slug>`.
 
 ### 3. Iterate Over Projects
 
@@ -50,7 +50,7 @@ For each matching document, call `mcp__slite__get-note` with the document ID to 
 
 #### 3b. Create Queue Items
 
-For each new document, create a file in `~/.claude/engineer-agent/queue/incoming/`:
+For each new document, create a file in `~/.local/share/engineer-agent/queue/incoming/`:
 
 **Filename:** `{YYYYMMDD-HHmmss}-doc-review-{doc_id_short}.md`
 
@@ -87,7 +87,7 @@ For each new item, invoke the **review-doc** skill behavior to generate review c
 
 #### 3d. Update State
 
-Update `projects.<slug>.slite.last_checked` and append new doc IDs to `projects.<slug>.slite.seen_docs` in `~/.claude/engineer-agent/state/last-poll.yaml`.
+Update `projects.<slug>.slite.last_checked` and append new doc IDs to `projects.<slug>.slite.seen_docs` in `~/.local/share/engineer-agent/state/last-poll.yaml`.
 
 ### 4. Report
 
