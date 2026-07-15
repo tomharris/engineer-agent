@@ -22,7 +22,7 @@ Check configured Slack channels for messages matching keywords that may need a r
 
 ### 1. Load Config
 
-Read `~/.claude/engineer-agent/engineer.yaml`. Extract the `projects` map and the optional
+Read `~/.local/share/engineer-agent/engineer.yaml`. Extract the `projects` map and the optional
 `agent.slack` block.
 
 Resolve the Spy invocation settings:
@@ -34,7 +34,7 @@ Resolve the Spy invocation settings:
 
 ### 2. Load Dedup State
 
-Read `~/.claude/engineer-agent/state/last-poll.yaml`. This contains per-project state under `projects.<slug>`.
+Read `~/.local/share/engineer-agent/state/last-poll.yaml`. This contains per-project state under `projects.<slug>`.
 
 ### 3. Iterate Over Projects
 
@@ -74,7 +74,7 @@ Only create queue items for messages that genuinely need a response.
 
 #### 3c. Create Queue Items
 
-For each relevant message, create a file in `~/.claude/engineer-agent/queue/incoming/`:
+For each relevant message, create a file in `~/.local/share/engineer-agent/queue/incoming/`:
 
 **Filename:** `{YYYYMMDD-HHmmss}-slack-question-{channel_id}-{msg_ts}.md`
 
@@ -118,7 +118,7 @@ For each new item, invoke the **answer-slack** skill behavior to generate a draf
 
 #### 3e. Update State
 
-Update `projects.<slug>.slack.last_checked_ts` in `~/.claude/engineer-agent/state/last-poll.yaml` to the highest message timestamp seen.
+Update `projects.<slug>.slack.last_checked_ts` in `~/.local/share/engineer-agent/state/last-poll.yaml` to the highest message timestamp seen.
 
 ### 4. Report
 

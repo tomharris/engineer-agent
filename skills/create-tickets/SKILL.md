@@ -19,7 +19,7 @@ Generate a phased ticket breakdown from an engineering design doc, with real fil
 
 ## Input
 
-A queue item file in `~/.claude/engineer-agent/queue/incoming/` with type `ticket-plan`, containing the design doc content in `## Context`. The frontmatter includes `design_doc_id` linking to the source design doc, `project` identifying the project slug, and optionally `jira_project` for the target project.
+A queue item file in `~/.local/share/engineer-agent/queue/incoming/` with type `ticket-plan`, containing the design doc content in `## Context`. The frontmatter includes `design_doc_id` linking to the source design doc, `project` identifying the project slug, and optionally `jira_project` for the target project.
 
 ## Steps
 
@@ -27,7 +27,7 @@ A queue item file in `~/.claude/engineer-agent/queue/incoming/` with type `ticke
 
 Read the queue item's `## Context` section for the design doc content. Extract the `project` field from frontmatter.
 
-Read `~/.claude/engineer-agent/engineer.yaml` to find the project config at `projects.<project>` for codebase path and Jira settings.
+Read `~/.local/share/engineer-agent/engineer.yaml` to find the project config at `projects.<project>` for codebase path and Jira settings.
 
 If the context includes a "Queue Design Doc Context" subsection, use it as enriched context — it may contain additional design detail from the queue's design-doc draft.
 
@@ -150,7 +150,7 @@ Fill in every section based on the design doc and codebase research. If no exist
 
 ### 5. Finalize
 
-Update the queue item's frontmatter `status` to `drafted` and move it to `~/.claude/engineer-agent/queue/drafts/`.
+Update the queue item's frontmatter `status` to `drafted` and move it to `~/.local/share/engineer-agent/queue/drafts/`.
 
 ### 5a. Create Tickets on Approval
 

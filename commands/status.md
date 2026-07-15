@@ -11,7 +11,7 @@ Show the current status of the engineer-agent system.
 
 ### 1. Check Config
 
-Read the config file at `~/.claude/engineer-agent/engineer.yaml`.
+Read the config file at `~/.local/share/engineer-agent/engineer.yaml`.
 
 If it does not exist, report:
 > Config not found. Run `/engineer-agent setup` to initialize engineer-agent.
@@ -20,7 +20,7 @@ If it exists, confirm: "Config loaded." List the registered project slugs from t
 
 ### 2. Queue Counts
 
-Count files (excluding .gitkeep) in each queue directory under `~/.claude/engineer-agent/queue/`:
+Count files (excluding .gitkeep) in each queue directory under `~/.local/share/engineer-agent/queue/`:
 
 - `incoming/` — items detected but not yet processed
 - `drafts/` — items processed, awaiting human approval
@@ -40,7 +40,7 @@ Display as a summary table:
 
 ### 3. Last Poll Times
 
-Read `~/.claude/engineer-agent/state/last-poll.yaml` if it exists. Display the last poll time for each project and each source within that project:
+Read `~/.local/share/engineer-agent/state/last-poll.yaml` if it exists. Display the last poll time for each project and each source within that project:
 
 ```
 | Project  | GitHub             | Slack              | Jira               | Slite              |

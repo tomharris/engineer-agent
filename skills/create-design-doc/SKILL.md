@@ -19,7 +19,7 @@ Generate a comprehensive engineering design doc from a PM's feature spec, incorp
 
 ## Input
 
-A queue item file in `~/.claude/engineer-agent/queue/incoming/` with type `design-doc`, containing the spec content in `## Context`. The frontmatter may include `spec_refinement_id` linking to a completed spec-refinement for additional Q&A context.
+A queue item file in `~/.local/share/engineer-agent/queue/incoming/` with type `design-doc`, containing the spec content in `## Context`. The frontmatter may include `spec_refinement_id` linking to a completed spec-refinement for additional Q&A context.
 
 ## Steps
 
@@ -27,9 +27,9 @@ A queue item file in `~/.claude/engineer-agent/queue/incoming/` with type `desig
 
 Read the queue item's `## Context` section for the spec content. Extract the `project` field from frontmatter.
 
-Read `~/.claude/engineer-agent/engineer.yaml` to find the project config at `projects.<project>` for codebase path and Slite settings.
+Read `~/.local/share/engineer-agent/engineer.yaml` to find the project config at `projects.<project>` for codebase path and Slite settings.
 
-If `spec_refinement_id` is present in the frontmatter, search `~/.claude/engineer-agent/queue/completed/` for a matching spec-refinement item (by `source_id`). Extract the Q&A from its `## Draft Response` — the filled-in `_Answer:_` fields provide critical context from PM conversations.
+If `spec_refinement_id` is present in the frontmatter, search `~/.local/share/engineer-agent/queue/completed/` for a matching spec-refinement item (by `source_id`). Extract the Q&A from its `## Draft Response` — the filled-in `_Answer:_` fields provide critical context from PM conversations.
 
 ### 2. Determine Template
 
@@ -124,7 +124,7 @@ Using either the fetched template structure or the built-in default, generate th
 
 Fill in every section based on the spec, refinement Q&A, and codebase research. If a section genuinely doesn't apply, include it with "N/A — {brief reason}".
 
-Update frontmatter `status` to `drafted` and move to `~/.claude/engineer-agent/queue/drafts/`.
+Update frontmatter `status` to `drafted` and move to `~/.local/share/engineer-agent/queue/drafts/`.
 
 ### 5. Report
 

@@ -20,13 +20,13 @@ Check configured GitHub repos for pull requests that need review and create queu
 
 ### 1. Load Config
 
-Read `~/.claude/engineer-agent/engineer.yaml`. Extract the `projects` map and `agent` settings.
+Read `~/.local/share/engineer-agent/engineer.yaml`. Extract the `projects` map and `agent` settings.
 
 If config is missing, report the error and stop.
 
 ### 2. Load Dedup State
 
-Read `~/.claude/engineer-agent/state/last-poll.yaml` if it exists. This contains per-project state under `projects.<slug>`.
+Read `~/.local/share/engineer-agent/state/last-poll.yaml` if it exists. This contains per-project state under `projects.<slug>`.
 
 If the state file doesn't exist, treat everything as new (use epoch as last_checked).
 
@@ -58,7 +58,7 @@ For each repo in `projects.<slug>.github.repos`:
 
 #### 3b. Create Queue Items
 
-For each new PR found, create a file in `~/.claude/engineer-agent/queue/incoming/` with:
+For each new PR found, create a file in `~/.local/share/engineer-agent/queue/incoming/` with:
 
 **Filename:** `{YYYYMMDD-HHmmss}-pr-review-{repo}-{number}.md`
 
@@ -104,7 +104,7 @@ After creating queue items, for each new item in `incoming/`, invoke the **revie
 
 #### 3d. Update State
 
-Update `~/.claude/engineer-agent/state/last-poll.yaml` under `projects.<slug>.github` with:
+Update `~/.local/share/engineer-agent/state/last-poll.yaml` under `projects.<slug>.github` with:
 - `last_checked`: current ISO timestamp
 - `seen_prs`: append newly found PR source_ids
 

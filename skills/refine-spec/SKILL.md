@@ -19,7 +19,7 @@ Analyze a PM's feature spec from Slite and produce structured clarifying questio
 
 ## Input
 
-A queue item file in `~/.claude/engineer-agent/queue/incoming/` with type `spec-refinement`, containing the spec content in `## Context`.
+A queue item file in `~/.local/share/engineer-agent/queue/incoming/` with type `spec-refinement`, containing the spec content in `## Context`.
 
 ## Steps
 
@@ -27,7 +27,7 @@ A queue item file in `~/.claude/engineer-agent/queue/incoming/` with type `spec-
 
 Read the queue item to get the full spec content from the `## Context` section. Extract the `project` field from frontmatter.
 
-Read `~/.claude/engineer-agent/engineer.yaml` to find the project config at `projects.<project>` for codebase path and Jira settings.
+Read `~/.local/share/engineer-agent/engineer.yaml` to find the project config at `projects.<project>` for codebase path and Jira settings.
 
 ### 2. Analyze Across Five Dimensions
 
@@ -97,7 +97,7 @@ Update the queue item with the analysis:
 
 The `_Answer:_` fields are intentionally left blank — the human fills these in via the Edit action in review-queue after consulting with the PM. Multiple edit cycles are expected.
 
-Update frontmatter `status` to `drafted` and move to `~/.claude/engineer-agent/queue/drafts/`.
+Update frontmatter `status` to `drafted` and move to `~/.local/share/engineer-agent/queue/drafts/`.
 
 ### 5. Report
 

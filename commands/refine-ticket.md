@@ -24,7 +24,7 @@ Analyze existing tickets for scope clarity, implementation feasibility, testabil
 
 ### 1. Load Config
 
-Read `~/.claude/engineer-agent/engineer.yaml`. If missing, tell the user to run `/engineer-agent setup` and stop.
+Read `~/.local/share/engineer-agent/engineer.yaml`. If missing, tell the user to run `/engineer-agent setup` and stop.
 
 ### 2. Determine Project
 
@@ -61,7 +61,7 @@ If any fetch fails, report the error for that ticket and continue with others.
 
 ### 5. Create Queue Items
 
-For each ticket, generate a timestamp and write a new file to `~/.claude/engineer-agent/queue/incoming/`:
+For each ticket, generate a timestamp and write a new file to `~/.local/share/engineer-agent/queue/incoming/`:
 
 Filename: `{YYYYMMDD-HHmmss}-ticket-refinement-{ticket_key_short}.md`
 - For Jira: use the key lowercased (e.g., `eng-123`)
@@ -103,9 +103,9 @@ _(to be filled by refine-ticket skill)_
 **Single ticket:** Follow the `refine-ticket` skill behavior directly to analyze the ticket and fill in the `## Draft Response` section.
 
 **Multiple tickets (2+):** Dispatch parallel agents using the `Agent` tool — one agent per queue item. Each agent should:
-- Read the queue item from `~/.claude/engineer-agent/queue/incoming/`
+- Read the queue item from `~/.local/share/engineer-agent/queue/incoming/`
 - Follow the `refine-ticket` skill to analyze the ticket against the codebase
-- Write the draft and move the item to `~/.claude/engineer-agent/queue/drafts/`
+- Write the draft and move the item to `~/.local/share/engineer-agent/queue/drafts/`
 
 Launch all agents in a single message so they run concurrently. Wait for all to complete before reporting.
 

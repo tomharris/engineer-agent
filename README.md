@@ -48,7 +48,7 @@ Then initialize from any project directory:
 /engineer-agent setup
 ```
 
-This creates the user-level config, queue directories, and installs automated polling in one step. It also registers the current project. After setup, edit `~/.claude/engineer-agent/engineer.yaml` to configure your sources.
+This creates the user-level config, queue directories, and installs automated polling in one step. It also registers the current project. After setup, edit `~/.local/share/engineer-agent/engineer.yaml` to configure your sources.
 
 To register additional projects:
 
@@ -59,7 +59,7 @@ cd /path/to/another-project
 
 ## Configuration
 
-Edit `~/.claude/engineer-agent/engineer.yaml`:
+Edit `~/.local/share/engineer-agent/engineer.yaml`:
 
 ```yaml
 agent:
@@ -166,7 +166,7 @@ When polling, tickets are routed by summary prefix first, then by Jira component
 
 ### `/engineer-agent setup`
 
-One-time user-level initialization. Creates config at `~/.claude/engineer-agent/`, queue directories, installs cron polling, and registers the current project.
+One-time user-level initialization. Creates config at `~/.local/share/engineer-agent/`, queue directories, installs cron polling, and registers the current project.
 
 ```
 /engineer-agent setup
@@ -342,7 +342,7 @@ Generate a User Acceptance Testing checklist from a list of issues/tickets.
 /engineer-agent uat-plan EPIC-1                           # Jira epic → expands to all descendants
 ```
 
-Accepts a list of GitHub issues and/or Jira tickets (mixing trackers is allowed). A Jira parent (epic/story) is expanded to all its descendants, which replace the parent as the testable units. Working purely from ticket text — title, description, acceptance criteria — it derives concrete user-facing tests, clusters them into inferred feature areas, and emits a single markdown checklist table (`☐ | Feature Area | Test | Expected Result | Source`). Unlike `qa`, this is multi-ticket, code-agnostic, and bypasses the review queue: the table is printed to the terminal and saved under `~/.claude/engineer-agent/uat-plans/`.
+Accepts a list of GitHub issues and/or Jira tickets (mixing trackers is allowed). A Jira parent (epic/story) is expanded to all its descendants, which replace the parent as the testable units. Working purely from ticket text — title, description, acceptance criteria — it derives concrete user-facing tests, clusters them into inferred feature areas, and emits a single markdown checklist table (`☐ | Feature Area | Test | Expected Result | Source`). Unlike `qa`, this is multi-ticket, code-agnostic, and bypasses the review queue: the table is printed to the terminal and saved under `~/.local/share/engineer-agent/uat-plans/`.
 
 ### `/engineer-agent audit-code [subdir] [--project <slug>]`
 
@@ -396,7 +396,7 @@ item, so the work is self-documenting for intent and closes the loop on every re
 ### Queue Lifecycle
 
 ```
-Source detected → ~/.claude/engineer-agent/queue/incoming/ → skill drafts → queue/drafts/
+Source detected → ~/.local/share/engineer-agent/queue/incoming/ → skill drafts → queue/drafts/
                                                                               ↓
                                                        (ntfy push: Approve/Reject/Open)
                                                                               ↓
@@ -448,7 +448,17 @@ To customize the interval or reinstall manually:
 /path/to/engineer-agent/scripts/install-cron.sh 30
 ```
 
-This installs a crontab entry that runs `scripts/cron-poll.sh`, which invokes Claude headlessly to poll all sources for all projects. Logs are written to `~/.claude/engineer-agent/state/cron-poll.log`.
+This installs a crontab entry that runs `scripts/cron-poll.sh`, which invokes Claude headlessly to poll all sources for all projects. Logs are written to `~/.local/share/engineer-agent/state/cron-poll.log`.
+
+**The poll is read-only by construction.** It runs with an allowlist limited to read verbs (`gh pr list/view/diff`, `gh issue list/view`, `spy read/thread`), so it can find work and draft responses but cannot post anything. Every outbound action stays behind the approval gate. If a poll can't make progress, it logs a `WARN` and — when ntfy is configured — sends you an urgent push, rather than failing silently.
+
+**Upgrading from a version before runtime data moved?** Data used to live in `~/.claude/engineer-agent/`, which Claude Code guards as sensitive — headless runs (cron, ntfy listener) couldn't write there, so they silently did nothing. Migrate with:
+
+```bash
+/path/to/engineer-agent/scripts/migrate-storage.sh
+```
+
+It copies everything to `~/.local/share/engineer-agent/`, never overwrites, and leaves the old tree intact for you to delete. Set `EA_AGENT_DIR` to choose a different location (`XDG_DATA_HOME` is honored).
 
 By default the scripts resolve the `claude` binary from `PATH`. To use a specific Claude Code binary (a version shim, wrapper, or non-standard install path), set the `CLAUDE_BIN` env var — e.g. `CLAUDE_BIN=/opt/claude/bin/claude scripts/install-cron.sh 30`. Because cron does not inherit your interactive shell environment, the installer bakes the value set at install time into the crontab entry so the scheduled run uses the same binary.
 
@@ -484,7 +494,7 @@ cron-poll → drafts item → notify.sh ──ntfy push (Approve / Reject / Open
 /path/to/engineer-agent/scripts/install-listener.sh
 ```
 
-This registers a supervised service (`engineer-agent-listener`) that restarts on failure and survives reboots: a **systemd user service** on Linux (run `loginctl enable-linger $USER` so it keeps running while you're logged out) or a **launchd LaunchAgent** on macOS (starts at login, restarts on crash — no extra steps). On hosts with neither it falls back to a `nohup` background process. Logs go to `~/.claude/engineer-agent/state/approval-listener.log`.
+This registers a supervised service (`engineer-agent-listener`) that restarts on failure and survives reboots: a **systemd user service** on Linux (run `loginctl enable-linger $USER` so it keeps running while you're logged out) or a **launchd LaunchAgent** on macOS (starts at login, restarts on crash — no extra steps). On hosts with neither it falls back to a `nohup` background process. Logs go to `~/.local/share/engineer-agent/state/approval-listener.log`.
 
 As with cron, set `CLAUDE_BIN` to pick a specific Claude Code binary — e.g. `CLAUDE_BIN=/opt/claude/bin/claude scripts/install-listener.sh`. Since the supervised service does not inherit your shell environment, the installer bakes the install-time value into the systemd unit (`Environment=`) or launchd plist (`EnvironmentVariables`).
 
@@ -538,13 +548,15 @@ scripts/
   approval-listener.sh         Long-running ntfy command-topic subscriber (remote approval)
   install-listener.sh          Installs the approval listener as a service
   lib-ntfy.sh                  Shared ntfy config resolution (sourced by the above)
+  lib-paths.sh                 Runtime data location — single source of truth (EA_AGENT_DIR)
+  migrate-storage.sh           One-time move off the legacy ~/.claude/engineer-agent/ path
 config/
   engineer.example.yaml        Configuration template
 ```
 
 ### User-level data
 ```
-~/.claude/engineer-agent/
+~/.local/share/engineer-agent/
   engineer.yaml                User config (all projects in one file)
   queue/
     incoming/                  Newly detected items (all projects)

@@ -19,7 +19,7 @@ Compare two pipeline artifacts and produce a checklist of gaps, mismatches, and 
 
 ## Input
 
-A queue item file in `~/.claude/engineer-agent/queue/incoming/` with `type: gap-audit`. The frontmatter includes a `boundary` field (`spec-design` or `design-tickets`). The `## Context` section contains the full content of both artifacts being compared, structured as `### Left Artifact` and `### Right Artifact`.
+A queue item file in `~/.local/share/engineer-agent/queue/incoming/` with `type: gap-audit`. The frontmatter includes a `boundary` field (`spec-design` or `design-tickets`). The `## Context` section contains the full content of both artifacts being compared, structured as `### Left Artifact` and `### Right Artifact`.
 
 ## Steps
 
@@ -165,7 +165,7 @@ No gaps detected. The artifacts appear well-aligned across this boundary.
 
 ### 7. Finalize
 
-Update the queue item's frontmatter `status` to `drafted` and move it from `~/.claude/engineer-agent/queue/incoming/` to `~/.claude/engineer-agent/queue/drafts/` (write to new location, delete from old).
+Update the queue item's frontmatter `status` to `drafted` and move it from `~/.local/share/engineer-agent/queue/incoming/` to `~/.local/share/engineer-agent/queue/drafts/` (write to new location, delete from old).
 
 ### 8. Report
 

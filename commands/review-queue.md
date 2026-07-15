@@ -19,13 +19,13 @@ Review pending draft items and approve, edit, or reject them.
 
 ### 1. Load Config
 
-Read `~/.claude/engineer-agent/engineer.yaml`. If missing, tell the user to run `/engineer-agent setup` and stop. Extract `agent.branch_prefix` (required — read the literal string from the yaml; do not assume a default. If missing or empty, stop and tell the user to set `agent.branch_prefix`). When substituting `{branch_prefix}` in the `gh pr create --head` arguments below, use this exact value verbatim.
+Read `~/.local/share/engineer-agent/engineer.yaml`. If missing, tell the user to run `/engineer-agent setup` and stop. Extract `agent.branch_prefix` (required — read the literal string from the yaml; do not assume a default. If missing or empty, stop and tell the user to set `agent.branch_prefix`). When substituting `{branch_prefix}` in the `gh pr create --head` arguments below, use this exact value verbatim.
 
 ### 2. List Draft and Unrouted Items
 
-Use Glob to find all `.md` files in `~/.claude/engineer-agent/queue/drafts/` (excluding `.gitkeep`).
+Use Glob to find all `.md` files in `~/.local/share/engineer-agent/queue/drafts/` (excluding `.gitkeep`).
 
-Also scan `~/.claude/engineer-agent/queue/incoming/` for items with `project: _unrouted` in their frontmatter. These are tickets that could not be automatically routed to a project and need manual assignment.
+Also scan `~/.local/share/engineer-agent/queue/incoming/` for items with `project: _unrouted` in their frontmatter. These are tickets that could not be automatically routed to a project and need manual assignment.
 
 If a filter was provided in `$ARGUMENTS`, only show items matching that type in their YAML frontmatter `type` field.
 
@@ -97,7 +97,7 @@ Invoke the `execute-item` skill with `item` = the selected file and `decision` =
 It performs the type-specific external action (submit the PR review, post the Slack reply,
 create the draft PR, create the design doc, create issues from a ticket-plan, acknowledge a
 gap-audit, etc.), sets `status: completed`, and moves the file to
-`~/.claude/engineer-agent/queue/completed/`. Display the one-line result it returns. If it
+`~/.local/share/engineer-agent/queue/completed/`. Display the one-line result it returns. If it
 reports a failure, the item stays in `drafts/` — surface the error and let the user retry.
 
 **Exception — `qa-test-plan`:** this type is interactive and is NOT delegated (execute-item
@@ -120,7 +120,7 @@ refuses it). Run its three-phase flow here:
   5. If "some items failed", ask the user to describe which items failed. Record this in the results.
 
   **Phase 3 — Archive:**
-  1. Create directory `~/.claude/engineer-agent/qa-plans/{branch}-{YYYYMMDD-HHmmss}/`
+  1. Create directory `~/.local/share/engineer-agent/qa-plans/{branch}-{YYYYMMDD-HHmmss}/`
   2. Save `qa-test.sh` — the test script extracted in Phase 1
   3. Save `test-plan.md` — the full `## Draft Response` content including manual checklist
   4. Save `results.md` — containing:
@@ -129,9 +129,9 @@ refuses it). Run its three-phase flow here:
      - Manual checklist completion status
      - Any notes about failed manual items
      - Timestamp of completion
-  5. Print: "QA complete. Plan archived to `~/.claude/engineer-agent/qa-plans/{branch}-{timestamp}/`"
+  5. Print: "QA complete. Plan archived to `~/.local/share/engineer-agent/qa-plans/{branch}-{timestamp}/`"
 
-After the three QA phases complete, update the file's frontmatter `status` to `completed` and move it from `~/.claude/engineer-agent/queue/drafts/` to `~/.claude/engineer-agent/queue/completed/` (write to new location, delete from old). (For all other types, execute-item has already done this.)
+After the three QA phases complete, update the file's frontmatter `status` to `completed` and move it from `~/.local/share/engineer-agent/queue/drafts/` to `~/.local/share/engineer-agent/queue/completed/` (write to new location, delete from old). (For all other types, execute-item has already done this.)
 
   **Phase 3b — Document the completed plan (optional):**
 
@@ -139,7 +139,7 @@ After the three QA phases complete, update the file's frontmatter `status` to `c
   moved to `completed/`) and locally archived above. It is best-effort: a failure here is
   reported but never un-completes the plan.
 
-  1. Read `projects.<project>.qa.document_to` from `~/.claude/engineer-agent/engineer.yaml`.
+  1. Read `projects.<project>.qa.document_to` from `~/.local/share/engineer-agent/engineer.yaml`.
      - Empty or absent → skip silently (feature disabled).
      - `slite` → continue.
      - Any other value → print `unrecognized qa.document_to value '{value}'; skipping QA documentation` and skip.
@@ -169,9 +169,9 @@ After the three QA phases complete, update the file's frontmatter `status` to `c
 1. **Inline**: Ask the user what to change. Apply their feedback to the `## Draft Response` section using Edit. Then re-display and ask for approval again.
 2. **Editor**: Tell the user the file path and ask them to edit it in their editor. When they confirm they're done, re-read the file and ask for approval.
 
-**Reject** — Ask for a brief reason, then invoke the `execute-item` skill with `item` = the selected file, `decision` = `reject`, and `reason` = the reason. It records `rejected_reason`, sets `status: rejected`, and moves the file to `~/.claude/engineer-agent/queue/rejected/`.
+**Reject** — Ask for a brief reason, then invoke the `execute-item` skill with `item` = the selected file, `decision` = `reject`, and `reason` = the reason. It records `rejected_reason`, sets `status: rejected`, and moves the file to `~/.local/share/engineer-agent/queue/rejected/`.
 
-**Skip** — Leave the file in `~/.claude/engineer-agent/queue/drafts/` unchanged. Move to the next item.
+**Skip** — Leave the file in `~/.local/share/engineer-agent/queue/drafts/` unchanged. Move to the next item.
 
 ### 7. Loop
 

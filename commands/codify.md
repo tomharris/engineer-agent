@@ -21,14 +21,14 @@ queue. This converts one-off in-session discoveries into compounding, reusable a
 
 ### 1. Load Config
 
-Read `~/.claude/engineer-agent/engineer.yaml`. If missing, tell the user to run
+Read `~/.local/share/engineer-agent/engineer.yaml`. If missing, tell the user to run
 `/engineer-agent setup` and stop.
 
 ### 2. Generate Candidates
 
 Follow the `codify-learnings` skill behavior: scan the queue since the cutoff, cluster
 recurring signals into candidate learnings, and draft each as a `codify-candidate` queue item
-in `~/.claude/engineer-agent/queue/drafts/`.
+in `~/.local/share/engineer-agent/queue/drafts/`.
 
 ### 3. Report
 

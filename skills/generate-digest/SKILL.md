@@ -20,24 +20,24 @@ Create a comprehensive summary of all agent activity for the day, grouped by pro
 
 ### 1. Load Config
 
-Read `~/.claude/engineer-agent/engineer.yaml`. Extract the `projects` map and `agent.digest_channel`.
+Read `~/.local/share/engineer-agent/engineer.yaml`. Extract the `projects` map and `agent.digest_channel`.
 
 ### 2. Gather All Activity
 
 Scan all queue directories for items from the current day (or since the last digest):
 
-**Completed items** (`~/.claude/engineer-agent/queue/completed/`):
+**Completed items** (`~/.local/share/engineer-agent/queue/completed/`):
 - Count by type and by project (pr-review, slack-question, ticket, doc-review)
 - List each with title, source, and project
 
-**Rejected items** (`~/.claude/engineer-agent/queue/rejected/`):
+**Rejected items** (`~/.local/share/engineer-agent/queue/rejected/`):
 - Count and list with rejection reasons and project
 
-**Pending items** (`~/.claude/engineer-agent/queue/drafts/`):
+**Pending items** (`~/.local/share/engineer-agent/queue/drafts/`):
 - Count by type and project
 - Note any aging items (older than 24h)
 
-**Incoming items** (`~/.claude/engineer-agent/queue/incoming/`):
+**Incoming items** (`~/.local/share/engineer-agent/queue/incoming/`):
 - Count any unprocessed items (shouldn't normally be any)
 
 ### 3. Calculate Metrics
@@ -51,7 +51,7 @@ Scan all queue directories for items from the current day (or since the last dig
 
 ### 4. Write the Draft
 
-Create a queue item in `~/.claude/engineer-agent/queue/drafts/`:
+Create a queue item in `~/.local/share/engineer-agent/queue/drafts/`:
 
 **Filename:** `{YYYYMMDD-HHmmss}-digest.md`
 

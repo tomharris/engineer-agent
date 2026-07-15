@@ -104,7 +104,7 @@ handle_line() {
     --permission-mode acceptEdits \
     --allowedTools "${allowed_tools[@]}" \
     --max-budget-usd 0.50 \
-    "Run the engineer-agent execute command (commands/execute.md) for queue item '${item}' with decision '${decision}'. Read config from ~/.claude/engineer-agent/engineer.yaml. Be concise." \
+    "Run the engineer-agent execute command (commands/execute.md) for queue item '${item}' with decision '${decision}'. Read config from ${AGENT_DIR}/engineer.yaml. Be concise." \
     </dev/null >> "$LOG_FILE" 2>&1
 
   # Trust the filesystem, not claude -p's exit code (which is 0 whenever the CLI ran,

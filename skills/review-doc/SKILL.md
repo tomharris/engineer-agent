@@ -19,7 +19,7 @@ Generate a thorough review of a design document with brief inline comments.
 
 ## Input
 
-A queue item file in `~/.claude/engineer-agent/queue/incoming/` with type `doc-review`, containing the document content.
+A queue item file in `~/.local/share/engineer-agent/queue/incoming/` with type `doc-review`, containing the document content.
 
 ## Steps
 
@@ -27,7 +27,7 @@ A queue item file in `~/.claude/engineer-agent/queue/incoming/` with type `doc-r
 
 Read the queue item to get the full document content from the `## Context` section. Extract the `project` field from frontmatter.
 
-Read `~/.claude/engineer-agent/engineer.yaml` to find the project's path at `projects.<project>.path` for codebase cross-referencing.
+Read `~/.local/share/engineer-agent/engineer.yaml` to find the project's path at `projects.<project>.path` for codebase cross-referencing.
 
 ### 2. Understand the Scope
 
@@ -96,7 +96,7 @@ Update the queue item:
 - {anything important that's not covered}
 ```
 
-Update frontmatter `status` to `drafted` and move to `~/.claude/engineer-agent/queue/drafts/`.
+Update frontmatter `status` to `drafted` and move to `~/.local/share/engineer-agent/queue/drafts/`.
 
 ### 6. Report
 

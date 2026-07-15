@@ -17,7 +17,7 @@ Generate a hybrid QA test plan (runnable script + manual checklist) from ticket 
 
 ## Input
 
-A queue item file in `~/.claude/engineer-agent/queue/incoming/` with `type: qa-test-plan`. The `## Context` section contains:
+A queue item file in `~/.local/share/engineer-agent/queue/incoming/` with `type: qa-test-plan`. The `## Context` section contains:
 - Ticket details (acceptance criteria, testing notes, description)
 - PR description and testing notes (if a PR exists)
 - Full git diff of the branch changes
@@ -39,7 +39,7 @@ Read the queue item file. Extract from `## Context`:
 
 #### 1.2. Read Project Config
 
-Read `~/.claude/engineer-agent/engineer.yaml`. Extract for the queue item's `project`:
+Read `~/.local/share/engineer-agent/engineer.yaml`. Extract for the queue item's `project`:
 - `projects.<project>.qa.base_url` (required — if missing, use `http://localhost:3000` and flag a warning)
 - `projects.<project>.qa.console_command` (optional)
 - `projects.<project>.path` (project root path)
@@ -392,7 +392,7 @@ Run in `{console_command or "your project's REPL/console"}`:
 ### 5. Finalize
 
 1. Update the queue item's frontmatter `status` to `drafted`
-2. Move from `~/.claude/engineer-agent/queue/incoming/` to `~/.claude/engineer-agent/queue/drafts/` (write to new location, delete from old)
+2. Move from `~/.local/share/engineer-agent/queue/incoming/` to `~/.local/share/engineer-agent/queue/drafts/` (write to new location, delete from old)
 
 ### 6. Report
 

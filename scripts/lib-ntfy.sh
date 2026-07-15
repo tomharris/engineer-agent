@@ -5,8 +5,9 @@
 # resolve_ntfy_settings sets these globals (env vars override config):
 #   NTFY_SERVER, NTFY_TOPIC, NTFY_COMMAND_TOPIC, NTFY_AUTH_TOKEN
 
-EA_AGENT_DIR="${HOME}/.claude/engineer-agent"
-EA_CONFIG_FILE="${EA_AGENT_DIR}/engineer.yaml"
+# EA_AGENT_DIR / EA_CONFIG_FILE come from lib-paths.sh (single source of truth).
+# shellcheck source=lib-paths.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-paths.sh"
 
 # Read a scalar key from the agent.notify.ntfy block of the YAML config.
 # Dependency-free: finds the `ntfy:` line and reads the more-indented block under it.

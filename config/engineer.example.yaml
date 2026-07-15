@@ -1,5 +1,5 @@
 # Engineer Agent Configuration
-# Location: ~/.claude/engineer-agent/engineer.yaml
+# Location: ~/.local/share/engineer-agent/engineer.yaml
 # Run /engineer setup to create this file automatically.
 
 agent:

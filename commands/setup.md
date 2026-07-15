@@ -12,7 +12,7 @@ Initialize engineer-agent at the user level: create config, directories, install
 
 ### 1. Check for Existing Setup
 
-Read `~/.claude/engineer-agent/engineer.yaml`.
+Read `~/.local/share/engineer-agent/engineer.yaml`.
 
 If it exists, report:
 > Engineer-agent is already set up. Run `/engineer-agent add-project` to register another project, or `/engineer-agent status` to check health.
@@ -52,9 +52,9 @@ Detect the current project's details for the first project entry:
 
 Read `{PLUGIN_ROOT}/config/engineer.example.yaml`.
 
-Create `~/.claude/engineer-agent/` if it doesn't exist (use `mkdir -p` via Bash).
+Create `~/.local/share/engineer-agent/` if it doesn't exist (use `mkdir -p` via Bash).
 
-Write the template contents to `~/.claude/engineer-agent/engineer.yaml`, replacing the example project entry with the auto-detected project details:
+Write the template contents to `~/.local/share/engineer-agent/engineer.yaml`, replacing the example project entry with the auto-detected project details:
 - Replace the example slug key with the detected slug
 - Replace `path` with the current directory
 - Replace `owner` and `repos` with detected GitHub values
@@ -81,14 +81,14 @@ Display this summary:
 ```
 Engineer-agent setup complete!
 
-  Config:  ~/.claude/engineer-agent/engineer.yaml
-  Queue:   ~/.claude/engineer-agent/queue/{incoming,drafts,completed,rejected}
-  State:   ~/.claude/engineer-agent/state/last-poll.yaml
+  Config:  ~/.local/share/engineer-agent/engineer.yaml
+  Queue:   ~/.local/share/engineer-agent/queue/{incoming,drafts,completed,rejected}
+  State:   ~/.local/share/engineer-agent/state/last-poll.yaml
   Cron:    Polling every 15 minutes
   Project: {slug} ({path})
 
 Next steps:
-  1. Edit ~/.claude/engineer-agent/engineer.yaml with your Slack channels, Jira project, etc.
+  1. Edit ~/.local/share/engineer-agent/engineer.yaml with your Slack channels, Jira project, etc.
   2. For Slack: install the Spy CLI (https://github.com/tomharris/spy), sign in to the Slack
      desktop app, run `spy auth` to confirm, and set agent.slack.workspace in config.
   3. Run /engineer-agent add-project from other project directories to register them.
