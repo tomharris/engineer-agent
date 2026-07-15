@@ -172,10 +172,15 @@ from a run that failed silently):
 Both `cron-poll.sh` and `approval-listener.sh` resolve the Claude Code binary from `PATH` by default, but honor a `CLAUDE_BIN` env var override (a specific shim/wrapper/install path). Because cron, systemd, and launchd do not inherit the interactive shell environment, `install-cron.sh` and `install-listener.sh` capture `CLAUDE_BIN` when set at install time and bake it into the crontab entry / systemd `Environment=` / launchd `EnvironmentVariables` so the supervised runs use the same binary.
 
 Key invariant: **polling reads; only `execute-item` writes.** `cron-poll.sh` passes a deliberately
-read-only `--allowedTools` allowlist (`gh pr list/view/diff`, `gh issue list/view`, `spy read/thread`),
-so the poll can discover work and draft responses but *physically cannot* post. `gh pr create`,
-`gh pr review`, `gh issue create` and `spy send` are unmatched, as is `gh api` (`gh api -X POST`
-writes). This is what makes the approval gate structural rather than advisory: polling ingests
+read-only `--allowedTools` allowlist (`gh pr list/view/diff`, `gh issue list/view`, `spy read/thread`,
+and the read-only MCP verbs `mcp__atlassian__searchJiraIssuesUsingJql`/`getJiraIssue` and
+`mcp__slite__search-notes`/`get-note`/`get-note-children`), so the poll can discover work and draft
+responses but *physically cannot* post. `gh pr create`, `gh pr review`, `gh issue create` and
+`spy send` are unmatched, as is `gh api` (`gh api -X POST` writes); so are the Jira/Slite **write**
+MCP tools (`createJiraIssue`, `editJiraIssue`, `transitionJiraIssue`, `addComment*`, and every
+Slite create/edit/append tool). MCP tools are denied unless named explicitly, exactly like `gh` —
+so a poller that drives an MCP server (Jira, Slite) silently skips every run until its read verbs
+are added here. This is what makes the approval gate structural rather than advisory: polling ingests
 untrusted text (PR/issue bodies, Slack messages), so a prompt-injection payload must not be able
 to reach a write verb. Keep every posting capability in `execute-item`, behind the gate. When
 adding a source, give the poll its read verbs only.

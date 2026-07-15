@@ -59,10 +59,19 @@ STATE_BEFORE="$(state_fingerprint)"
 #   3. Path rules need `//abs` to anchor at the filesystem root; a single leading `/`
 #      anchors to the cwd instead. AGENT_DIR is already absolute, hence the extra slash
 #      in "Edit(/${AGENT_DIR}/**)".
+#   4. MCP tools are denied unless named explicitly, exactly like `gh`. The Jira and
+#      Slite pollers drive MCP servers (there is no read-only Bash verb for them), so
+#      without the entries below `poll-jira`/`poll-slite` silently skip every run —
+#      Jira tickets never get queued even though auth and everything else work. Only
+#      the READ verbs are listed (search + fetch); the write tools (createJiraIssue,
+#      editJiraIssue, transitionJiraIssue, addComment*, slite create/edit/append) stay
+#      unmatched, keeping posting behind the execute-item gate as with `gh`/`spy`.
 allowed_tools=(
   "Bash(gh pr list:*)" "Bash(gh pr view:*)" "Bash(gh pr diff:*)"
   "Bash(gh issue list:*)" "Bash(gh issue view:*)"
   "Bash(spy read:*)" "Bash(spy thread:*)"
+  mcp__atlassian__searchJiraIssuesUsingJql mcp__atlassian__getJiraIssue
+  mcp__slite__search-notes mcp__slite__get-note mcp__slite__get-note-children
   "Bash(${PLUGIN_ROOT}/scripts/notify.sh *)"
   "Bash(mv *)"
   Read Glob Grep
@@ -102,12 +111,18 @@ fi
 # Trust the filesystem, not the exit code (same principle as approval-listener.sh).
 if [ "$(state_fingerprint)" = "$STATE_BEFORE" ]; then
   echo "WARN: poll made no state progress (last-poll.yaml unchanged) — see $LOG_FILE" >> "$LOG_FILE"
+  # Surface the actual failure in the alert itself, not just the log. For a month the
+  # generic message hid the real cause (a misauthed CLI: "Not logged in", "command not
+  # found"). Grab the last recognizable error line from the log — falls back to "unknown"
+  # so the message is never empty.
+  LAST_ERR="$(grep -E 'Not logged in|command not found|No such file|Execution error|WARN: claude exited' "$LOG_FILE" 2>/dev/null | tail -1)"
+  LAST_ERR="${LAST_ERR:-unknown (see log)}"
   # --priority urgent, not "high": notify.sh maps engineer-agent priorities
   # (urgent|normal|low) onto ntfy's, and an unrecognized value silently becomes
   # "default" — which would quietly downgrade this very alert.
   "${PLUGIN_ROOT}/scripts/notify.sh" \
     --title 'engineer-agent: poll failed' \
-    --message 'Poll made no state progress. Check state/cron-poll.log.' \
+    --message "Poll made no state progress. Last error: ${LAST_ERR}. See state/cron-poll.log." \
     --priority urgent --tags warning --fyi >> "$LOG_FILE" 2>&1 || true
 fi
 
