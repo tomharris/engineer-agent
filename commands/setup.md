@@ -76,21 +76,16 @@ This script handles:
 
 `install-cron.sh` also prints a NOTE when no headless auth token is configured — see the next step.
 
-### 5b. Configure headless auth (macOS)
+### 5b. Headless auth caveat (macOS)
 
 The cron poll (and the ntfy approval listener) run **outside the GUI login session** and cannot
-read the macOS login keychain, so without a keychain-independent credential every poll fails with
-`Not logged in · Please run /login`. Set up a long-lived OAuth token once (requires a paid plan —
-`setup-token` refuses on Free):
-
-```bash
-claude setup-token   # interactive; copy the printed token
-printf 'CLAUDE_CODE_OAUTH_TOKEN=%s\n' '<token>' > ~/.local/share/engineer-agent/auth.env
-chmod 600 ~/.local/share/engineer-agent/auth.env
-```
-
-`scripts/lib-paths.sh` loads `auth.env` for every headless run (both cron and listener), so no
-crontab/service reinstall is needed. The token lives ~1 year; note the expiry.
+read the macOS login keychain, so a supervised run may fail with `Not logged in · Please run /login`.
+There is **no environment-credential workaround on a machine with a `forceLoginOrgUUID` managed
+policy** — such a policy rejects `ANTHROPIC_API_KEY`, `apiKeyHelper`, *and* a `claude setup-token`
+OAuth token, because org membership can't be verified for an environment credential (this was tried
+and removed). If the poll fails with a "Not logged in" or "Unable to verify organization" error,
+see the headless-auth section of `CLAUDE.md`; the only surviving paths (cloud-provider inference, or
+a machine/service-account exemption) require your org's IT.
 
 ### 6. Print Summary
 
@@ -109,8 +104,8 @@ Next steps:
   1. Edit ~/.local/share/engineer-agent/engineer.yaml with your Slack channels, Jira project, etc.
   2. For Slack: install the Spy CLI (https://github.com/tomharris/spy), sign in to the Slack
      desktop app, run `spy auth` to confirm, and set agent.slack.workspace in config.
-  3. macOS headless auth: run `claude setup-token` and write the token to
-     ~/.local/share/engineer-agent/auth.env (chmod 600), or the cron poll fails with "Not logged in".
+  3. macOS headless auth: cron cannot read the login keychain. On a forceLoginOrgUUID-managed
+     machine there is no environment-credential fix — see CLAUDE.md and work with your org's IT.
   4. Run /engineer-agent add-project from other project directories to register them.
   5. Run /engineer-agent status to verify everything is working.
 ```

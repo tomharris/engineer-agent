@@ -493,15 +493,7 @@ This installs a crontab entry that runs `scripts/cron-poll.sh`, which invokes Cl
 
 **The poll is read-only by construction.** It runs with an allowlist limited to read verbs (`gh pr list/view/diff`, `gh issue list/view`, `spy read/thread`), so it can find work and draft responses but cannot post anything. Every outbound action stays behind the approval gate.
 
-**Headless auth (macOS): set up an OAuth token, or the poll fails with "Not logged in."** On macOS the Claude credential lives in the login keychain, and cron (and a supervised listener) run *outside* your GUI login session, so they can't read it — even when everything else is configured. The fix is a keychain-independent token: run `claude setup-token` once (requires a paid plan — Free is refused), then store it in a mode-600 file:
-
-```bash
-claude setup-token   # interactive; copy the printed token
-printf 'CLAUDE_CODE_OAUTH_TOKEN=%s\n' '<token>' > ~/.local/share/engineer-agent/auth.env
-chmod 600 ~/.local/share/engineer-agent/auth.env
-```
-
-`scripts/lib-paths.sh` loads `auth.env` for every headless run (cron and ntfy listener alike), so no crontab/service reinstall is needed and the secret never appears in `crontab -l`. An already-set `CLAUDE_CODE_OAUTH_TOKEN` env var wins, and when no file exists interactive keychain auth is untouched. The token lives ~1 year — note the expiry. `install-cron.sh`/`install-listener.sh` print a NOTE when no token is configured.
+**Headless auth (macOS): a `forceLoginOrgUUID` managed policy has no environment-credential fix.** On macOS the Claude credential lives in the login keychain, and cron (and a supervised listener) run *outside* your GUI login session, so they can't read it. There is **no environment-credential workaround** on a machine whose org deploys a `forceLoginOrgUUID` managed policy (`/Library/Application Support/ClaudeCode/managed-settings.json`): such a policy rejects `ANTHROPIC_API_KEY`, `apiKeyHelper`, *and* a `claude setup-token` OAuth token — org membership can't be verified for an environment credential, so a freshly-minted, org-valid token still fails with `Unable to verify organization for the current authentication token`. (An `auth.env` / `CLAUDE_CODE_OAUTH_TOKEN` loader was tried and removed for exactly this reason.) The only documented headless paths that survive the policy are a cloud-provider inference path (Amazon Bedrock / Google Vertex / Microsoft Foundry) or an org/IT-provided machine exemption; both require your org's IT.
 
 Because `claude -p` exits 0 whenever the CLI ran — regardless of whether the poll actually happened — the cron doesn't trust the exit code. It mints a per-run id and requires the poll to write it back into `state/last-poll-receipt.yaml` as its final step; if that receipt is missing or stale the run failed silently, and the cron logs a `WARN` and — when ntfy is configured — sends you an urgent push. A poll that legitimately finds **zero items** writes a normal receipt (`status: ok`, `items_queued: 0`) and stays silent, and a **partial** failure (one source errored while others succeeded) is now surfaced too — something the previous state-fingerprint check could never detect.
 
@@ -617,7 +609,6 @@ config/
 ```
 ~/.local/share/engineer-agent/
   engineer.yaml                User config (all projects in one file)
-  auth.env                     (optional, mode 600) CLAUDE_CODE_OAUTH_TOKEN for headless runs
   queue/
     incoming/                  Newly detected items (all projects)
     drafts/                    Items with drafted responses

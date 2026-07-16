@@ -34,21 +34,14 @@ EA_CONFIG_FILE="${EA_AGENT_DIR}/engineer.yaml"
 export USER="${USER:-$(id -un)}"
 export LOGNAME="${LOGNAME:-$USER}"
 
-# Headless auth: on macOS the primary Anthropic credential lives in the login keychain, and a
-# cron/launchd job runs OUTSIDE the user's GUI (Aqua) login session, so it cannot read that
-# keychain -- the CLI then reports "Not logged in - Please run /login" even with USER correct
-# (this is a THIRD, distinct trigger of that message, after the remote-settings.json shim and
-# the USER fix above -- both of which were validated interactively, inside the GUI session, and
-# so never held under real cron). The supported headless path is a long-lived OAuth token from
-# `claude setup-token`, consumed via CLAUDE_CODE_OAUTH_TOKEN, which is keychain/session
-# independent. Load it from a mode-600 file so the secret stays out of the crontab. An
-# already-set env var wins (never clobbered), and when no file exists nothing changes -- so
-# interactive keychain auth is untouched. Only engineer-agent scripts source this file (not the
-# user's shell rc), so a human typing `claude` interactively is unaffected.
-EA_AUTH_FILE="${EA_AGENT_DIR}/auth.env"
-if [ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ] && [ -f "$EA_AUTH_FILE" ]; then
-  set -a; . "$EA_AUTH_FILE"; set +a
-fi
+# NOTE ON HEADLESS AUTH: an `auth.env` / CLAUDE_CODE_OAUTH_TOKEN loader used to live here so a
+# cron/launchd job (which runs OUTSIDE the GUI login session and cannot read the login keychain)
+# could authenticate. It was removed: a `forceLoginOrgUUID` managed policy rejects ALL environment
+# credentials -- including a freshly-minted `claude setup-token` OAuth token -- because org
+# membership can't be verified for one, so the token path is a confirmed dead end on any machine
+# with that policy. Do not re-add it. See the "headless `claude -p` run" section of CLAUDE.md for
+# the full failure analysis and the only surviving headless paths (cloud provider, or an IT
+# exemption).
 
 # Pre-relocation location, kept only so migrate-storage.sh and the setup/status commands
 # can detect an un-migrated install and say so.
