@@ -59,7 +59,8 @@ of truth for this location — source it rather than hardcoding the path.
 │   └── rejected/              — Rejected with reason
 ├── uat-plans/                 — Saved UAT checklists from /engineer-agent uat-plan (not part of the queue)
 └── state/
-    ├── last-poll.yaml         — Dedup timestamps and seen IDs (per project + per Jira project key)
+    ├── last-poll.yaml         — Dedup timestamps and seen IDs (per project, per Jira project key, per GitHub repo)
+    ├── last-poll-receipt.yaml — Liveness receipt from the last cron poll (run_id, status, item count, errors)
     └── ntfy-seen.yaml         — Processed ntfy command message IDs (remote-approval dedup)
 ```
 
@@ -68,8 +69,14 @@ of truth for this location — source it rather than hardcoding the path.
 Every skill and command that needs config should start by reading `~/.local/share/engineer-agent/engineer.yaml`. If missing, tell the user to run `/engineer-agent setup` and stop.
 
 The config has two top-level sections:
-- `agent` — global settings (branch_prefix, max_pr_files, channels, cron interval, `autonomy`, `notify`)
+- `agent` — global settings (branch_prefix, max_pr_files, `max_issue_age_days`, channels, cron interval, `autonomy`, `notify`)
 - `projects` — a map of project slugs to per-project integration config
+
+`agent.max_issue_age_days` (optional) caps how old an assigned GitHub issue may be to enter the
+queue: `poll-github-issues` drops issues whose `updatedAt` is older than that many days. `0` or
+absent ⇒ no age limit. This is the recency guard that keeps a multi-year assigned backlog in a
+shared tracker from flooding the queue (and exhausting the cron run's budget) on a first poll,
+without having to pre-seed `seen_issues`.
 
 Two `agent` subsections drive autonomy (both optional):
 - `agent.autonomy.auto_execute` — a list of action tiers allowed to run **without** an approval gate. Only `draft-pr` is supported (draft PRs merge nothing / request no review). Absent ⇒ empty ⇒ everything is gated.
@@ -224,7 +231,18 @@ from a run that failed silently):
   single leading `/` anchors to the cwd.
 - **Never trust the exit code.** `claude -p` exits 0 whenever the CLI ran, regardless of whether the
   work happened. Determine success from a real side effect: the listener checks that the item left
-  `queue/drafts/`; the cron checks that `last-poll.yaml` advanced, and pushes an ntfy alert if not.
+  `queue/drafts/`; the cron mints a `RUN_ID` only it knows and checks that the model echoed that
+  exact id back into `state/last-poll-receipt.yaml` as its final step, pushing an ntfy alert if the
+  receipt is missing or stale (and a lower-priority one if the receipt's `status` isn't `ok`).
+- **Prove liveness with a token the script controls, not with mutation of a file the model authors
+  for another purpose.** The cron used to fingerprint `last-poll.yaml` and warn if the hash was
+  unchanged — but that file is a *semantic dedup cutoff*, not a health signal, and overloading it
+  as one was wrong twice over: `poll-slack`'s `last_checked_ts` legitimately can't advance on a
+  zero-message poll (so a Slack-only config false-warned on every quiet poll), and the timestamps
+  are model-authored and were observed fabricated (a real run wrote a `last_checked` 40 minutes in
+  the future). Content-change is only a freshness signal if the content is reliably distinct per
+  run; a run-id echoed back is. Keep liveness and dedup state in separate files answering separate
+  questions.
 - **Redirect `</dev/null`** so the run doesn't block reading its parent's stdin.
 
 Both `cron-poll.sh` and `approval-listener.sh` resolve the Claude Code binary from `PATH` by default, but honor a `CLAUDE_BIN` env var override (a specific shim/wrapper/install path). Because cron, systemd, and launchd do not inherit the interactive shell environment, `install-cron.sh` and `install-listener.sh` capture `CLAUDE_BIN` when set at install time and bake it into the crontab entry / systemd `Environment=` / launchd `EnvironmentVariables` so the supervised runs use the same binary.

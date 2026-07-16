@@ -102,11 +102,16 @@ After creating queue items, for each new item in `incoming/`, invoke the **revie
 - Move the file from `incoming/` to `drafts/`
 - Update the frontmatter `status` to `drafted`
 
-#### 3d. Update State
+#### 3d. Update State (always, even for zero items)
+
+Run this step for **every project polled**, regardless of how many PRs steps 3a–3c found. A repo
+with no new PRs was still polled successfully, and its cutoff must move forward so the next poll
+doesn't rescan the same window.
 
 Update `~/.local/share/engineer-agent/state/last-poll.yaml` under `projects.<slug>.github` with:
-- `last_checked`: current ISO timestamp
-- `seen_prs`: append newly found PR source_ids
+- `last_checked`: the poll timestamp. If the caller supplied one (the cron passes an explicit
+  timestamp), use it verbatim rather than computing your own; otherwise use the current ISO time.
+- `seen_prs`: append newly found PR source_ids (nothing to append on a zero-item poll)
 
 ### 4. Report
 

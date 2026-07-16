@@ -85,9 +85,16 @@ doc_id: "{doc_id}"
 
 For each new item, invoke the **review-doc** skill behavior to generate review comments and move to `drafts/`.
 
-#### 3d. Update State
+#### 3d. Update State (always, even for zero items)
 
-Update `projects.<slug>.slite.last_checked` and append new doc IDs to `projects.<slug>.slite.seen_docs` in `~/.local/share/engineer-agent/state/last-poll.yaml`.
+Run this for **every project polled**, regardless of how many docs were found — a project with no
+new docs was still polled successfully and its cutoff must advance so the next poll doesn't rescan
+the same window. This matters more here than for PRs: this source *filters* on `last_checked`, so a
+stale cutoff re-surfaces old docs every cycle.
+
+Update `projects.<slug>.slite.last_checked` (use the caller-supplied poll timestamp verbatim if one
+was given — the cron passes one — otherwise the current ISO time) and append new doc IDs to
+`projects.<slug>.slite.seen_docs` in `~/.local/share/engineer-agent/state/last-poll.yaml`.
 
 ### 4. Report
 

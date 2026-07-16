@@ -120,6 +120,12 @@ For each new item, invoke the **answer-slack** skill behavior to generate a draf
 
 Update `projects.<slug>.slack.last_checked_ts` in `~/.local/share/engineer-agent/state/last-poll.yaml` to the highest message timestamp seen.
 
+**Zero-message polls are the exception to the "always advance the cutoff" rule.** Unlike the other
+sources, `last_checked_ts` is a Slack message timestamp, not a wall clock — when no messages were
+read there is no higher timestamp to advance to, so **leave it unchanged**. This is a *successful*
+poll that happened to find nothing, not a failure; do not stamp the current time here (a wall-clock
+value would skip every message posted before it).
+
 ### 4. Report
 
 Report: "Found N new Slack questions to answer across M projects."

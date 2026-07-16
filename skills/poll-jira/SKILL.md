@@ -190,11 +190,18 @@ This ticket will be implemented using Ralph Loop with:
 Approving this item will start a Ralph Loop session to implement the changes, then open a draft PR.
 ```
 
-### 7. Update State
+### 7. Update State (always, even for zero items)
+
+Run this for **every Jira project key queried**, regardless of how many tickets were found — a key
+with no new tickets was still polled successfully and its cutoff must advance so the next poll
+doesn't rescan the same window. This source *filters* on `last_checked` (the JQL uses
+`updated > "{last_checked}"`), so a stale cutoff silently re-surfaces the same backlog every cycle.
 
 Update `~/.local/share/engineer-agent/state/last-poll.yaml`:
 
-1. For each Jira project key queried, update `jira_projects.<key>.last_checked` to the current timestamp
+1. For each Jira project key queried, update `jira_projects.<key>.last_checked` to the poll timestamp
+   — use the caller-supplied timestamp verbatim if one was given (the cron passes one), otherwise the
+   current ISO time
 2. For each routed ticket, append the ticket key to `projects.<slug>.jira.seen_tickets`
 3. For unrouted tickets, do NOT add to any project's `seen_tickets` (they'll be checked again on next poll until assigned)
 

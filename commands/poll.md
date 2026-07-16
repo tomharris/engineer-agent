@@ -1,6 +1,6 @@
 ---
 description: "Poll configured sources for new work items"
-model: haiku
+model: sonnet
 argument-hint: "[github|slack|jira|github-issues|slite|all] [--project <slug>]"
 allowed-tools: ["Bash", "Read", "Write", "Glob", "Grep", "Agent", "mcp__atlassian__searchJiraIssuesUsingJql", "mcp__atlassian__getJiraIssue", "mcp__slite__search-notes", "mcp__slite__get-note", "mcp__slite__get-note-children", "mcp__slite__append-blocks"]
 ---

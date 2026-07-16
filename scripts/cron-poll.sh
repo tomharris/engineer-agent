@@ -20,15 +20,39 @@ mkdir -p "${AGENT_DIR}/state"
 
 echo "--- Poll started at $(date -u +%Y-%m-%dT%H:%M:%SZ) ---" >> "$LOG_FILE"
 
-# Fingerprint the state file so we can tell afterwards whether the poll actually did
-# anything. `claude -p` exits 0 whenever the CLI ran, regardless of whether the work
-# happened, so the exit code is worthless as a health signal — this script reported
-# success on every run for a month while every poll was being denied. Every successful
-# poll advances `last_checked` in last-poll.yaml, even one that finds no new items, so
-# an unchanged file means the poll made no progress.
-STATE_FILE="${AGENT_DIR}/state/last-poll.yaml"
-state_fingerprint() { sha256sum "$STATE_FILE" 2>/dev/null | cut -d' ' -f1 || echo missing; }
-STATE_BEFORE="$(state_fingerprint)"
+# LIVENESS, not dedup state. `claude -p` exits 0 whenever the CLI ran, regardless of
+# whether the work happened, so the exit code is worthless as a health signal — this
+# script reported success on every run for a month while every poll was being denied.
+# We prove the run reached its final step by making the model echo back a token only THIS
+# run knows: the script mints RUN_ID below and the prompt requires the model to copy it
+# verbatim into a receipt file. Freshness is proven by the id, not by content mutation.
+#
+# This replaced a sha256 fingerprint of last-poll.yaml, which was wrong twice over:
+#   - last-poll.yaml is a semantic dedup cutoff, not a health signal. poll-slack's
+#     last_checked_ts is the highest Slack message ts seen, so a legitimate zero-message
+#     poll CANNOT advance it — a Slack-only config false-warned on every quiet poll.
+#   - The values are model-authored and were observed fabricated (a real run wrote a
+#     last_checked 40 minutes in the future, rounded to the half hour). Content-change is
+#     only a freshness signal if the content is reliably distinct per run. It isn't.
+# Both files still matter — they answer different questions. Keep them separate.
+RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)-$$"
+RUN_TS="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+RECEIPT_FILE="${AGENT_DIR}/state/last-poll-receipt.yaml"
+
+# Dependency-free top-level scalar reader (same approach as lib-ntfy.sh's yaml_ntfy_get).
+# Deliberately NOT jq: cron-poll.sh has no jq dependency and install-cron.sh does not check
+# for one — only the separately-installed approval-listener.sh requires it. Single awk
+# process, no pipeline, so `set -euo pipefail` can't trip on SIGPIPE.
+receipt_field() {
+  [ -f "$RECEIPT_FILE" ] || return 0
+  awk -v k="$1" '
+    index($0, k ":") == 1 {
+      v = substr($0, length(k) + 2)
+      sub(/^ +/, "", v); sub(/ +$/, "", v)
+      gsub(/^"|"$/, "", v)
+      print v; exit
+    }' "$RECEIPT_FILE"
+}
 
 # Run claude headlessly with the poll command.
 #
@@ -99,7 +123,25 @@ POLL_STATUS=0
   --max-budget-usd 2.00 \
   "Execute now — do NOT enter plan mode, do NOT output a plan, do NOT ask questions. Perform the work directly and report the results when finished.
 
-Run the /engineer-agent poll command for all configured sources (equivalent to '/engineer-agent poll all'). Read config from ${AGENT_DIR}/engineer.yaml and follow commands/poll.md and the per-source poll skills. Iterate over all projects in the config. For each project, check all configured sources (GitHub, Slack, Jira, Slite) for new items since the last poll recorded in ${AGENT_DIR}/state/last-poll.yaml. For each new item, create a queue file in ${AGENT_DIR}/queue/incoming/ with the standard frontmatter format documented in CLAUDE.md (include the project slug in the frontmatter), then generate a draft and move it to ${AGENT_DIR}/queue/drafts/. For EACH newly drafted item, send a push notification by running: ${PLUGIN_ROOT}/scripts/notify.sh --title '<type>: <title>' --message '<project> — <short summary>' --priority '<priority from frontmatter>' --item-id '<the queue filename>' --source-url '<source_url from frontmatter>' --tags 'inbox_tray'. (notify.sh no-ops safely if ntfy is not configured, so always call it.) Update last-poll.yaml when done. Be concise." \
+You ARE the scheduled poll for this cycle, not an observer of it. Do NOT check whether a poll has already run, and do NOT skip a source because recent queue items or a recent last_checked suggest it was already covered. Poll every configured source yourself, now.
+
+Run the /engineer-agent poll command for all configured sources (equivalent to '/engineer-agent poll all'). Read config from ${AGENT_DIR}/engineer.yaml and follow commands/poll.md and the per-source poll skills. Iterate over all projects in the config. For each project, check all configured sources (GitHub, Slack, Jira, Slite) for new items since the last poll recorded in ${AGENT_DIR}/state/last-poll.yaml. For each new item, create a queue file in ${AGENT_DIR}/queue/incoming/ with the standard frontmatter format documented in CLAUDE.md (include the project slug in the frontmatter), then generate a draft and move it to ${AGENT_DIR}/queue/drafts/. For EACH newly drafted item, send a push notification by running: ${PLUGIN_ROOT}/scripts/notify.sh --title '<type>: <title>' --message '<project> — <short summary>' --priority '<priority from frontmatter>' --item-id '<the queue filename>' --source-url '<source_url from frontmatter>' --tags 'inbox_tray'. (notify.sh no-ops safely if ntfy is not configured, so always call it.)
+
+STATE: use exactly ${RUN_TS} as this poll's timestamp — do not compute or guess one. After polling each source, set that source's last_checked in ${AGENT_DIR}/state/last-poll.yaml to exactly ${RUN_TS}, WHETHER OR NOT it produced any items: a source that found zero items was still polled successfully and must have its cutoff advanced. (Exception: Slack's last_checked_ts tracks the highest Slack message timestamp actually seen — leave it unchanged when no messages were read.)
+
+FINAL STEP — do this last, always, even if you found zero items and even if some sources failed. Write ${AGENT_DIR}/state/last-poll-receipt.yaml, replacing any existing content, with exactly this shape:
+
+run_id: \"${RUN_ID}\"
+finished_at: \"${RUN_TS}\"
+status: ok
+items_queued: 0
+sources_polled:
+  - <project-slug>/<source>
+errors: []
+
+Rules: copy run_id verbatim — it is how the cron proves this receipt came from THIS run and not a previous one. status is 'ok' only if every configured source was queried without error, 'partial' if at least one source failed while others succeeded, 'error' if nothing could be polled. items_queued is the number of items you moved into drafts/ this run (0 is a normal, successful result). List a source under sources_polled ONLY if you actually issued its query in THIS run; if you did not poll it, it belongs in errors with a one-line reason. Never claim a source you did not query.
+
+Be concise." \
   </dev/null >> "$LOG_FILE" 2>&1 || POLL_STATUS=$?
 
 # A bare `[ ... ] && echo` would abort the script under `set -e` whenever the test is
@@ -109,12 +151,23 @@ if [ "$POLL_STATUS" -ne 0 ]; then
 fi
 
 # Trust the filesystem, not the exit code (same principle as approval-listener.sh).
-if [ "$(state_fingerprint)" = "$STATE_BEFORE" ]; then
-  echo "WARN: poll made no state progress (last-poll.yaml unchanged) — see $LOG_FILE" >> "$LOG_FILE"
-  # Surface the actual failure in the alert itself, not just the log. For a month the
-  # generic message hid the real cause (a misauthed CLI: "Not logged in", "command not
-  # found"). Grab the last recognizable error line from the log — falls back to "unknown"
-  # so the message is never empty.
+# The receipt is model-written, so it is an ATTESTATION, not a measurement: it cannot catch
+# a model that confidently lies. It reliably catches every mechanical failure — execution
+# error, plan mode, denied Edit, budget exhaustion, hard no-op — because all of them leave
+# no receipt or a stale run_id, and RUN_ID is a value only this run knows.
+FAIL_REASON=""
+if [ ! -f "$RECEIPT_FILE" ]; then
+  FAIL_REASON="no receipt written — the run never reached its final step"
+elif [ "$(receipt_field run_id)" != "$RUN_ID" ]; then
+  FAIL_REASON="receipt is stale (run_id '$(receipt_field run_id)', expected '${RUN_ID}') — this run wrote nothing"
+fi
+
+if [ -n "$FAIL_REASON" ]; then
+  echo "WARN: poll did not complete: ${FAIL_REASON} — see $LOG_FILE" >> "$LOG_FILE"
+  # Surface the underlying cause in the alert itself, not just the log. The receipt check tells
+  # us the run didn't finish; the actual reason (a misauthed CLI: "Not logged in", "command not
+  # found", budget exhaustion) is usually the last recognizable error line in the log. Grab it —
+  # falls back to "unknown" so the message is never empty.
   LAST_ERR="$(grep -E 'Not logged in|command not found|No such file|Execution error|WARN: claude exited' "$LOG_FILE" 2>/dev/null | tail -1)"
   LAST_ERR="${LAST_ERR:-unknown (see log)}"
   # --priority urgent, not "high": notify.sh maps engineer-agent priorities
@@ -122,8 +175,23 @@ if [ "$(state_fingerprint)" = "$STATE_BEFORE" ]; then
   # "default" — which would quietly downgrade this very alert.
   "${PLUGIN_ROOT}/scripts/notify.sh" \
     --title 'engineer-agent: poll failed' \
-    --message "Poll made no state progress. Last error: ${LAST_ERR}. See state/cron-poll.log." \
+    --message "Poll did not complete (${FAIL_REASON}). Last error: ${LAST_ERR}. See state/cron-poll.log." \
     --priority urgent --tags warning --fyi >> "$LOG_FILE" 2>&1 || true
+else
+  RECEIPT_STATUS="$(receipt_field status)"
+  echo "poll completed: status=${RECEIPT_STATUS:-unknown} items_queued=$(receipt_field items_queued)" >> "$LOG_FILE"
+  # A zero-item poll is a SUCCESS: fresh receipt, status ok -> silent. Partial failure (a
+  # source that errored while others succeeded) is something the old hash check could never
+  # detect — a real run advanced github state while skipping github_issues entirely and
+  # sailed through the fingerprint clean. A partial/error self-heals next cycle, so it goes
+  # out at --priority normal, not urgent — it shouldn't wake anyone.
+  if [ "$RECEIPT_STATUS" != "ok" ]; then
+    echo "WARN: poll reported status=${RECEIPT_STATUS:-unknown} — see $LOG_FILE" >> "$LOG_FILE"
+    "${PLUGIN_ROOT}/scripts/notify.sh" \
+      --title 'engineer-agent: poll incomplete' \
+      --message "Poll finished with status=${RECEIPT_STATUS:-unknown}. Check state/last-poll-receipt.yaml." \
+      --priority normal --tags warning --fyi >> "$LOG_FILE" 2>&1 || true
+  fi
 fi
 
 echo "--- Poll finished at $(date -u +%Y-%m-%dT%H:%M:%SZ) ---" >> "$LOG_FILE"

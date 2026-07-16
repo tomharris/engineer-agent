@@ -5,6 +5,9 @@
 agent:
   branch_prefix: "engineer-agent"
   max_pr_files: 50
+  max_issue_age_days: 30             # ignore GitHub issues whose last update is older than this
+                                     # many days (keeps a multi-year assigned backlog from flooding
+                                     # the queue). 0 or absent = no age limit.
   standup_channel: "C98765432"
   digest_channel: "C98765432"
   cron_interval_minutes: 15

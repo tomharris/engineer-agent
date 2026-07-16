@@ -51,6 +51,22 @@ Read `~/.local/share/engineer-agent/state/last-poll.yaml` if it exists. Display 
 
 If the file doesn't exist, report "No polls have run yet."
 
+### 3b. Last Poll Health
+
+Read `~/.local/share/engineer-agent/state/last-poll-receipt.yaml` if it exists — the liveness
+receipt the cron writes as the final step of each run. Report `finished_at`, `status`,
+`items_queued`, and any `errors`:
+
+```
+Last poll: 2026-07-15T20:31:45Z — status: ok, 0 items queued
+```
+
+`status: ok` with `items_queued: 0` is **healthy** — it means the poll ran and legitimately found
+nothing. Flag `status: partial` / `status: error` (a source failed) and any `errors` entries. If the
+file is missing, report "No poll has completed since the liveness receipt was introduced." (Note:
+this is distinct from §3's per-source `last_checked` timestamps — those are dedup cutoffs, this is
+whether the last run actually finished.)
+
 ### 4. Slack (Spy) Health
 
 If any project has a `slack` section configured, verify the Spy CLI is usable:

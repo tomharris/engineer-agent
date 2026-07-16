@@ -77,9 +77,14 @@ For each issue returned from Phase 1:
 
 #### 5a. Check Global Dedup
 
+- **Recency filter:** if `agent.max_issue_age_days` is set and greater than 0, exclude issues whose
+  `updatedAt` is older than that many days before now. This structurally ignores a multi-year
+  assigned backlog (e.g. hundreds of stale issues in a shared tracker) rather than requiring
+  `seen_issues` to be pre-seeded — a first poll against such a repo would otherwise queue the entire
+  backlog and can exhaust the run's budget. Absent or `0` ⇒ no age limit (all issues considered).
 - Exclude issues whose `source_id` (e.g. `"myorg/my-app#45"`) already exists in any queue file (check all queue directories via Glob)
 - Exclude issues whose `source_id` is already in **every** watching project's `projects.<slug>.github_issues.seen_issues`
-- Include issues that were previously seen but have `updatedAt` newer than the repo's `last_checked` (re-queue for updated context)
+- Include issues that were previously seen but have `updatedAt` newer than the repo's `last_checked` (re-queue for updated context) — provided they also pass the recency filter above
 
 #### 5b. Route
 
@@ -185,10 +190,23 @@ This ticket will be implemented using Ralph Loop with:
 Approving this item will start a Ralph Loop session to implement the changes, then open a draft PR.
 ```
 
-#### 3e. Update State
+### 7. Update State (always, even for zero items)
 
-Update `projects.<slug>.github_issues.last_checked` and append new issue source_ids to `projects.<slug>.github_issues.seen_issues` in `~/.local/share/engineer-agent/state/last-poll.yaml`.
+Run this for **every repo queried**, regardless of how many issues were found — a repo with no new
+issues was still polled successfully and its cutoff must advance so the next poll doesn't rescan the
+same window. This source *filters* on `last_checked` (Phase 1 uses it as the query floor), so a
+stale cutoff silently re-surfaces the same backlog every cycle.
 
-### 4. Report
+Update `~/.local/share/engineer-agent/state/last-poll.yaml`:
 
-Report: "Found N new GitHub issues across M projects."
+1. For each repo queried, update `github_repos.<owner>/<repo>.last_checked` to the poll timestamp —
+   use the caller-supplied timestamp verbatim if one was given (the cron passes one), otherwise the
+   current ISO time
+2. For each routed issue, append its `source_id` to `projects.<slug>.github_issues.seen_issues`
+3. For unrouted issues, do NOT add to any project's `seen_issues` (they'll be checked again on next poll until assigned)
+
+### 8. Report
+
+Report: "Found N new GitHub issues across M repos. R routed, U unrouted."
+
+If there are unrouted items: "Run `/engineer-agent review-queue` to assign unrouted issues to projects."
