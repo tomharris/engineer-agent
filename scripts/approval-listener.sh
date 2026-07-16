@@ -23,6 +23,9 @@ source "${SCRIPT_DIR}/lib-ntfy.sh"
 # CLAUDE_BIN can be set in the environment to select a specific Claude Code binary
 # (e.g. a version shim or non-standard install path); otherwise discover it on PATH.
 CLAUDE_BIN="${CLAUDE_BIN:-$(command -v claude || echo "${HOME}/.local/bin/claude")}"
+# NOTIFY_BIN can be overridden (e.g. by tests) to point at a stub notifier;
+# otherwise use the plugin's notify.sh. Mirrors the CLAUDE_BIN override above.
+NOTIFY_BIN="${NOTIFY_BIN:-${PLUGIN_ROOT}/scripts/notify.sh}"
 
 AGENT_DIR="${EA_AGENT_DIR}"
 STATE_DIR="${AGENT_DIR}/state"
@@ -32,6 +35,15 @@ SINCE_FILE="${STATE_DIR}/ntfy-listener.since"
 
 mkdir -p "$STATE_DIR"
 log() { echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] $*" | tee -a "$LOG_FILE" >&2; }
+
+# push_ack — best-effort acknowledgement back to the user's outbound ntfy topic.
+# Never fails the caller: an ntfy hiccup must not crash or stall the listen loop.
+# priority is engineer-agent vocabulary (urgent|normal|low); notify.sh maps it.
+push_ack() {
+  local priority="$1" message="$2"
+  "$NOTIFY_BIN" --fyi --title "engineer-agent" --priority "$priority" --message "$message" \
+    </dev/null >>"$LOG_FILE" 2>&1 || true
+}
 
 command -v jq >/dev/null 2>&1 || { log "FATAL: jq is required but not found on PATH"; exit 1; }
 command -v "$CLAUDE_BIN" >/dev/null 2>&1 || { log "FATAL: claude CLI not found (CLAUDE_BIN='${CLAUDE_BIN}')"; exit 1; }
@@ -80,6 +92,7 @@ handle_line() {
   log "executing: ${decision} ${item} (msg ${id})"
   echo "- \"${id}\"" >> "$SEEN_FILE"           # record before acting: at-most-once
   [ -n "$mtime" ] && echo "$mtime" > "$SINCE_FILE"
+  push_ack low "📨 Received: ${decision} ${item} — working…"
 
   # Pin --permission-mode so this headless run never inherits the user's global
   # `permissions.defaultMode` (e.g. "plan"): in plan mode claude -p just prints a plan
@@ -113,22 +126,28 @@ handle_line() {
   # authoritative done/failed signal.
   if [ ! -e "${AGENT_DIR}/queue/drafts/${item}" ]; then
     log "done: ${decision} ${item}"
+    push_ack normal "✅ Done: ${decision} ${item}"
   else
     log "WARN: ${decision} ${item} did not complete (still in drafts/); see log above. Re-run after fixing."
+    push_ack urgent "⚠️ Failed: ${decision} ${item} — still queued, re-run"
   fi
 }
 
 # Reconnect loop with capped backoff. Dedup makes replays on reconnect harmless.
-BACKOFF=2
-while true; do
-  SINCE="$(cat "$SINCE_FILE" 2>/dev/null || echo now)"
-  STREAM_URL="${NTFY_SERVER}/${NTFY_COMMAND_TOPIC}/json?since=${SINCE}"
-  while IFS= read -r line; do
-    [ -n "$line" ] && handle_line "$line"
-    BACKOFF=2   # reset backoff once we are receiving data
-  done < <(curl -sN "${AUTH_ARGS[@]}" "$STREAM_URL" 2>>"$LOG_FILE")
+# Guarded so the script can be sourced by tests (which drive handle_line directly)
+# without launching the stream.
+if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
+  BACKOFF=2
+  while true; do
+    SINCE="$(cat "$SINCE_FILE" 2>/dev/null || echo now)"
+    STREAM_URL="${NTFY_SERVER}/${NTFY_COMMAND_TOPIC}/json?since=${SINCE}"
+    while IFS= read -r line; do
+      [ -n "$line" ] && handle_line "$line"
+      BACKOFF=2   # reset backoff once we are receiving data
+    done < <(curl -sN "${AUTH_ARGS[@]}" "$STREAM_URL" 2>>"$LOG_FILE")
 
-  log "stream closed; reconnecting in ${BACKOFF}s"
-  sleep "$BACKOFF"
-  BACKOFF=$(( BACKOFF < 60 ? BACKOFF * 2 : 60 ))
-done
+    log "stream closed; reconnecting in ${BACKOFF}s"
+    sleep "$BACKOFF"
+    BACKOFF=$(( BACKOFF < 60 ? BACKOFF * 2 : 60 ))
+  done
+fi
