@@ -491,7 +491,9 @@ To customize the interval or reinstall manually:
 
 This installs a crontab entry that runs `scripts/cron-poll.sh`, which invokes Claude headlessly to poll all sources for all projects. Logs are written to `~/.local/share/engineer-agent/state/cron-poll.log`.
 
-**The poll is read-only by construction.** It runs with an allowlist limited to read verbs (`gh pr list/view/diff`, `gh issue list/view`, `spy read/thread`), so it can find work and draft responses but cannot post anything. Every outbound action stays behind the approval gate. If a poll can't make progress, it logs a `WARN` and — when ntfy is configured — sends you an urgent push, rather than failing silently.
+**The poll is read-only by construction.** It runs with an allowlist limited to read verbs (`gh pr list/view/diff`, `gh issue list/view`, `spy read/thread`), so it can find work and draft responses but cannot post anything. Every outbound action stays behind the approval gate.
+
+Because `claude -p` exits 0 whenever the CLI ran — regardless of whether the poll actually happened — the cron doesn't trust the exit code. It mints a per-run id and requires the poll to write it back into `state/last-poll-receipt.yaml` as its final step; if that receipt is missing or stale the run failed silently, and the cron logs a `WARN` and — when ntfy is configured — sends you an urgent push. A poll that legitimately finds **zero items** writes a normal receipt (`status: ok`, `items_queued: 0`) and stays silent, and a **partial** failure (one source errored while others succeeded) is now surfaced too — something the previous state-fingerprint check could never detect.
 
 **Upgrading from a version before runtime data moved?** Data used to live in `~/.claude/engineer-agent/`, which Claude Code guards as sensitive — headless runs (cron, ntfy listener) couldn't write there, so they silently did nothing. Migrate with:
 
@@ -608,6 +610,7 @@ config/
     rejected/                  Rejected with reason
   state/
     last-poll.yaml             Dedup timestamps and seen IDs (per project + per Jira project key)
+    last-poll-receipt.yaml     Liveness receipt from the last cron poll (run_id, status, item count, errors)
     ntfy-seen.yaml             Processed ntfy command message IDs (remote-approval dedup)
     ntfy-listener.since        Last-seen ntfy command timestamp (listener stream resume point)
     approval-listener.log      Listener activity log
