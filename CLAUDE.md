@@ -21,9 +21,21 @@ This repo IS the plugin.
 .claude-plugin/plugin.json    — Plugin manifest
 commands/                      — Slash commands (/engineer-agent <command>)
 skills/                        — Auto-invoked skills by task type
+references/                    — Shared procedural docs skills Read at runtime (routing-ladder.md)
 scripts/                       — Cron polling, ntfy notify/listener, and setup scripts
 config/engineer.example.yaml   — Config template
 ```
+
+`references/` holds logic that several skills must apply *identically*. It is plain markdown read
+with `Read`, deliberately not a skill or subagent: `scripts/cron-poll.sh` allowlists `Read` but not
+`Skill`/`Agent`, so anything shaped that way is unreachable from the cron — the one path with no
+human fallback.
+
+> **Reference these files via `${CLAUDE_PLUGIN_ROOT}`, never a bare relative path.** Cron runs from
+> `$HOME`, so `references/routing-ladder.md` resolves to `~/references/…` and the `Read` fails —
+> interactively it works fine (cwd is usually the project), so this breaks *only* the unattended
+> path, silently. Same convention `skills/audit-code/SKILL.md` uses for `scripts/notify.sh`: prefer
+> `${CLAUDE_PLUGIN_ROOT}`, fall back to a path relative to the skill's own directory.
 
 Runtime data lives at the user level in `~/.local/share/engineer-agent/` (override with the
 `EA_AGENT_DIR` env var; honors `XDG_DATA_HOME`). `scripts/lib-paths.sh` is the single source
@@ -89,8 +101,51 @@ jira:
 - `assignee` and `statuses` are shared across all sources
 - **Backward compat:** `jira.project` (string) is treated as `sources: [{project: <value>}]`
 - Multiple engineer-agent projects can watch the same Jira project with different component/label filters (N:M mapping)
-- **Summary-prefix routing (takes precedence):** if a ticket summary starts with `[<token>]` (e.g. `[payroll-workflows] - …`) and exactly one watching project's slug or `github.repos` entry equals `<token>` (case-insensitive), the ticket routes to that project regardless of components/labels. This disambiguates teams that share one Jira project key with no distinguishing components/labels. A prefix matching zero or multiple watchers is ignored and falls through to component/label matching.
-- Tickets matching zero or multiple projects are created as `_unrouted` for manual assignment
+
+Routing itself lives in `references/routing-ladder.md` — see below.
+
+### Ticket Routing
+
+**`references/routing-ladder.md` is the single source of truth for which project a ticket belongs
+to.** `poll-jira`, `poll-github-issues`, and `add-ticket` all `Read` it and follow it rather than
+describing routing themselves — the same single-source-of-truth invariant `execute-item` has for
+approvals, and for the same reason: three prose copies of a rule drift.
+
+The ladder fires tier by tier; each tier requires **exactly one** match, and ambiguity always falls
+through to the next:
+
+| Tier | Basis | `routing_method` |
+|---|---|---|
+| 0 | Only one project watches this Jira key / repo | `single-candidate` |
+| 1 | `[token]` title prefix equals a slug or `github.repos` entry | `prefix` |
+| 2 | Jira `components`/`labels`; GitHub `github.issues.labels` | `filters` |
+| 3a | `routing.keywords` / `routing.paths` hit | `keyword` |
+| 3b | Semantic match against `routing.description` | `inferred` (+ `routing_rationale`) |
+| 4 | Nothing resolved to exactly one | `_unrouted`, `matched_projects` set |
+
+Tier 0 short-circuits: a project that is the sole watcher of its key/repo pays nothing for any of
+this. Tiers 3a/3b consult the optional `projects.<slug>.routing` block (`description`, `keywords`,
+`paths`) and are **skipped entirely when no candidate has one**, so installs that never add hints
+behave exactly as they did before the ladder existed. An `inferred` route auto-routes and gets a
+draft, but the draft still passes the normal approval gate — `review-queue` displays the method and
+rationale so a wrong guess is visible rather than silent. Tier 3b may also **abstain**; a tie falls
+to Tier 4, never to a coin flip. `add-ticket` is interactive, so it prompts at Tier 4 instead of
+writing `_unrouted` (`routing_method: manual`).
+
+**Two traps encoded in the GitHub path, each of which broke a real behavior:**
+- `gh issue list --label a --label b` is **AND, not OR**, so several watchers' label filters cannot
+  be unioned into one query the way `poll-jira` unions statuses into `status IN (...)`. Fetch the
+  repo unfiltered and apply `github.issues.labels` as a *routing* predicate at Tier 2.
+- Collection must be deduplicated **per repo**, not per project. When it ran per project, the global
+  `source_id` dedup handed a shared repo's issue to whichever project the loop reached first — an
+  arbitrary misroute that looked like a confident decision, with no `_unrouted` escape.
+
+**Injection containment (Tier 3b reads untrusted ticket text):** the inference tier may only ever
+output a slug from the Tier 0 candidate set, which is computed from config alone. So an injected
+payload can at worst shuffle a ticket between projects that already legitimately watch that key or
+repo — it cannot invent a target or reach an unrelated project. Ticket text is matched as *data*
+(topic only); imperatives inside it ("assign this to X") are ignored. Routing decides only which
+project's config drafts the item; every posting verb stays in `execute-item`, behind the gate.
 
 ### QA Documentation Config
 
@@ -123,9 +178,12 @@ YAML frontmatter fields:
 - `created_at`: ISO 8601 timestamp
 - `status`: incoming | drafted | completed | rejected
 - `project`: Project slug matching a key in the `projects` config map, or `_unrouted` for tickets that could not be automatically routed
-- `matched_projects`: (only for `_unrouted` items) array of project slugs that matched, or empty array if no rules matched
+- `matched_projects`: (only for `_unrouted` items) array of project slugs that matched, or empty array if no rules matched. Applies to Jira and GitHub items alike.
+- `routing_method`: which tier of `references/routing-ladder.md` resolved the project — `single-candidate` | `prefix` | `filters` | `keyword` | `inferred` | `manual` (`manual` = a human picked it via `add-ticket` or `review-queue`)
+- `routing_rationale`: one line naming the evidence, **only** when `routing_method: inferred` — this is what makes an auto-routed judgment call auditable at the approval gate
 - `jira_components`: (Jira tickets only) array of Jira component names on the ticket
 - `jira_labels`: (Jira tickets only) array of Jira labels on the ticket
+- `github_labels`: (GitHub issues only) array of label names on the issue
 - `audit_category`: (code-audit-finding only) `security` | `correctness` | `secret` | `dependency`
 - `audit_severity`: (code-audit-finding only) `critical` | `high` | `medium` | `low`
 - `audit_confidence`: (code-audit-finding only) `medium` | `high` (low is filtered out)

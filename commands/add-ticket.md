@@ -59,18 +59,17 @@ Do **not** consult `completed/`, `rejected/`, or the `seen_tickets`/`seen_issues
 
 **If `--project <slug>` was supplied:** validate that the slug exists in the `projects` map. If not, error and list available slugs. Otherwise use it.
 
-**Else for Jira:** fetch the ticket first (Step 5) so summary/components/labels are known, then apply the routing logic from `skills/poll-jira/SKILL.md`:
+**Otherwise:** fetch the ticket first (Step 5) so title/body/components/labels are known, then read the routing ladder and apply it. Resolve its path from `${CLAUDE_PLUGIN_ROOT}/references/routing-ladder.md`, falling back to `{plugin-root}/references/routing-ladder.md` if that env var is unset — not a bare relative path, which won't resolve unless the cwd happens to be the plugin root. Inputs per tracker:
 
-- **Summary prefix (takes precedence, Step 5b):** parse a leading `[<token>]` from the ticket summary. Among watchers where `source.project == ticket.jira_project_key`, if exactly one project slug equals `<token>` (case-insensitive) or has a `github.repos` entry equal to `<token>` (case-insensitive), use it and skip the component/label matching below.
-- **Component/label (Step 5c):** otherwise collect every `(slug, source)` pair where `source.project == ticket.jira_project_key`, then filter by `source.components` (case-insensitive intersection with the ticket's components) and/or `source.labels` (case-insensitive intersection with the ticket's labels). A source with neither filter is a catch-all match. Deduplicate matched slugs.
+- **Jira:** `ticket.title` = summary, `ticket.body` = description, `ticket.labels`, `ticket.components`, `ticket.jira_key` = the ticket's Jira project key. Tier 0 candidates = every `(slug, source)` where `source.project == ticket.jira_key`.
+- **GitHub:** `ticket.title` = issue title, `ticket.body` = issue body, `ticket.labels` = the issue's label names, `ticket.components` = empty, `ticket.owner` / `ticket.repo` from the parsed ref. Tier 0 candidates = every slug where `github.owner == owner` AND `github.repos` contains `repo`.
 
-- **Exactly 1 match:** use it.
-- **0 or 2+ matches:** call `AskUserQuestion` with one question listing all configured project slugs whose tracker resolves to `jira` as options. If there were 2+ matches, prefix matched slugs with `(matched) ` in the option label so the user can see which ones the routing logic picked. Use the user's selection.
+Then:
 
-**Else for GitHub:** collect candidate slugs where `projects.<slug>.github.owner == owner` AND `projects.<slug>.github.repos` contains `repo`.
+- **Ladder routed it:** use that slug. Record the `routing_method` (and `routing_rationale` when `inferred`) in the queue item, same as a polled item.
+- **Ladder returned `_unrouted` (Tier 4):** this command is interactive, so ask instead of parking the item. Call `AskUserQuestion` with one question listing all configured project slugs whose tracker resolves to the ticket's tracker (`jira` or `github-issues`) as options. If the ladder's `matched_projects` is non-empty, prefix those slugs with `(matched) ` in the option label so the user can see which candidates it considered. Use the user's selection and set `routing_method: manual`.
 
-- **Exactly 1 candidate:** use it.
-- **0 or 2+ candidates:** call `AskUserQuestion` with all configured project slugs (matched ones prefixed `(matched) ` if there were 2+). Use the user's selection.
+Because the ladder now resolves prefixes, filters, keywords, and inference before giving up, the prompt only appears when it genuinely cannot tell — which should be rare.
 
 The resolved `project` is always a real slug from config — this command never writes `_unrouted`.
 
@@ -106,7 +105,7 @@ Compute the current timestamp `YYYYMMDD-HHmmss` (local time, same as polling ski
 
 **Filename:** `{YYYYMMDD-HHmmss}-ticket-{ticket_key}.md`
 
-**Content:** Use the format from `skills/poll-jira/SKILL.md` (Step 5c "Queue Item Format" / lines 124–166):
+**Content:** Use the "Queue Item Format" block from `skills/poll-jira/SKILL.md`:
 
 ```yaml
 ---
@@ -123,6 +122,8 @@ ticket_key: "{ticket_key}"
 jira_status: "{ticket_status}"
 jira_components: ["{component1}", "..."]
 jira_labels: ["{label1}", "..."]
+routing_method: "{single-candidate|prefix|filters|keyword|inferred|manual}"
+routing_rationale: "{one line}"   # only when routing_method is "inferred"
 ---
 
 ## Context
@@ -133,6 +134,7 @@ jira_labels: ["{label1}", "..."]
 **Components:** {comma-separated or "none"}
 **Labels:** {comma-separated or "none"}
 **Project:** {resolved_slug}
+**Routing:** {routing_method}{" — " + routing_rationale if inferred}
 
 ### Description
 {ticket_description}
@@ -150,7 +152,7 @@ Do NOT include `matched_projects` — that field is only for `_unrouted` items.
 
 **Filename:** `{YYYYMMDD-HHmmss}-ticket-gh-{number}.md`
 
-**Content:** Use the format from `skills/poll-github-issues/SKILL.md` (Step 3c / lines 60–97):
+**Content:** Use the "Queue Item Format" block from `skills/poll-github-issues/SKILL.md`:
 
 ```yaml
 ---
@@ -164,6 +166,9 @@ created_at: "{current_iso_timestamp}"
 status: incoming
 project: "{resolved_slug}"
 ticket_key: "#{number}"
+github_labels: ["{label1}", "..."]
+routing_method: "{single-candidate|prefix|filters|keyword|inferred|manual}"
+routing_rationale: "{one line}"   # only when routing_method is "inferred"
 ---
 
 ## Context
@@ -172,6 +177,8 @@ ticket_key: "#{number}"
 **Status:** Open
 **Priority:** {mapped_priority}
 **Project:** {resolved_slug}
+**Labels:** {comma-separated label names or "none"}
+**Routing:** {routing_method}{" — " + routing_rationale if inferred}
 **URL:** {issue_url}
 
 ### Description
@@ -190,7 +197,7 @@ If `--no-draft` was passed, skip this step entirely (the file stays in `incoming
 
 Otherwise, follow the draft-generation step from the matching poll skill:
 - Jira: `skills/poll-jira/SKILL.md` Step 6
-- GitHub: `skills/poll-github-issues/SKILL.md` Step 3d (derive a branch slug from the title: lowercase, replace non-alphanumeric with `-`, truncate to 40 chars, strip trailing hyphens)
+- GitHub: `skills/poll-github-issues/SKILL.md` Step 6 (derive a branch slug from the title: lowercase, replace non-alphanumeric with `-`, truncate to 40 chars, strip trailing hyphens)
 
 Append a `## Draft Response` section with the implementation plan, then move the file from `incoming/` to `drafts/` and update `status: drafted` in the frontmatter.
 

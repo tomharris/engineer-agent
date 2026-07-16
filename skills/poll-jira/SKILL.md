@@ -1,19 +1,19 @@
 ---
 name: poll-jira
 description: "Poll Jira for new or updated tickets assigned to the user. Use this skill when checking Jira for work, or during an engineer-agent poll cycle."
-version: 2.0.0
+version: 3.0.0
 model: haiku
 ---
 
 # Poll Jira for Assigned Tickets
 
-Check Jira for tickets assigned to configured users that need implementation. Supports multiple Jira projects per engineer-agent project with component/label-based routing.
+Check Jira for tickets assigned to configured users that need implementation. Supports multiple Jira projects per engineer-agent project, with routing via `references/routing-ladder.md`.
 
 ## Tools Needed
 
 - `mcp__atlassian__searchJiraIssuesUsingJql` — search for tickets by JQL
 - `mcp__atlassian__getJiraIssue` — fetch individual ticket details
-- `Read` — read config and state
+- `Read` — read config, state, and the routing ladder
 - `Write` — create queue items
 - `Glob` — check for existing queue items
 
@@ -80,59 +80,33 @@ For each ticket returned from Phase 1:
 
 - Exclude tickets whose `source_id` already exists in any queue file (check all queue directories via Glob)
 
-#### 5b. Route via Summary Prefix (takes precedence)
+Also skip tickets already in `projects.<slug>.jira.seen_tickets` for **every** watcher of this Jira project key (unless the ticket has new comments or status changes since the last poll).
 
-Many teams share a single Jira project key (e.g. `WIRE`) across several engineer-agent
-projects with no distinguishing components/labels, and prefix the ticket summary with the
-target repo, e.g. `[payroll-workflows] - Add void paycycle endpoint`. Check this first:
+#### 5b. Route
 
-1. Parse a leading `[<token>]` from the ticket summary (the bracketed text at the very
-   start, trimmed of whitespace). If absent, skip to 5c.
-2. Among the watchers for this Jira project key, find any whose engineer-agent project
-   slug equals `<token>` (case-insensitive) **or** whose `projects.<slug>.github.repos`
-   contains an entry equal to `<token>` (case-insensitive).
-3. If **exactly one** watcher matches, route the ticket to that project — this takes
-   precedence; skip 5c entirely and treat it as a single match in 5d.
-4. If the prefix matches zero or multiple watchers, ignore the prefix and fall through to
-   5c (component/label/catch-all matching).
+Read the routing ladder and apply it. Resolve its path from `${CLAUDE_PLUGIN_ROOT}` (set by the
+harness when this skill runs) — `${CLAUDE_PLUGIN_ROOT}/references/routing-ladder.md` — falling back
+to the directory containing this skill if the env var is unset
+(`{this-skill-dir}/../../references/routing-ladder.md`). **Do not use a bare relative path:** the
+cron runs from `$HOME`, where `references/…` does not exist.
 
-#### 5c. Route via Component/Label Matching
+Apply it with:
+- `ticket.title` = ticket summary, `ticket.body` = ticket description
+- `ticket.labels` = the ticket's labels, `ticket.components` = the ticket's components
+- `ticket.jira_key` = the ticket's Jira project key
+- the Tier 0 candidate set = this Jira project key's `watchers` from the query map
 
-1. Extract the ticket's Jira project key, components list, and labels list
-2. Look up all watchers for this Jira project key from the query map
-3. For each watcher (engineer-agent project slug + source entry):
-   - Check if the ticket key is already in `projects.<slug>.jira.seen_tickets` — if so, skip (unless ticket has new comments or status changes since last poll)
-   - Apply source filters:
-     - If source has `components` defined: ticket must have at least one component matching a value in the source's `components` list (case-insensitive)
-     - If source has `labels` defined: ticket must have at least one label matching a value in the source's `labels` list (case-insensitive)
-     - If source has both `components` and `labels`: ticket must match at least one component AND at least one label
-     - If source has neither `components` nor `labels`: automatic match (catch-all)
-4. Collect all matching engineer-agent project slugs (deduplicated)
+The ladder returns either a routed slug with a `routing_method` (and `routing_rationale` when the
+method is `inferred`), or `_unrouted` with `matched_projects`.
 
-#### 5d. Create Queue Items Based on Match Count
+#### 5c. Create Queue Items Based on the Ladder's Result
 
-**Exactly 1 match** — Route to that project:
+**Routed** — create a file in `~/.local/share/engineer-agent/queue/incoming/` with `project: "{slug}"` and the `routing_method` the ladder returned, then proceed to generate a draft (see Step 6).
 
-Create a file in `~/.local/share/engineer-agent/queue/incoming/` and proceed to generate a draft (see Step 6).
-
-Set `project: "{matched_slug}"` in frontmatter.
-
-**0 matches** — Unrouted (no rules matched):
-
-Create a file in `~/.local/share/engineer-agent/queue/incoming/` with:
+**Unrouted** — create a file in `~/.local/share/engineer-agent/queue/incoming/` with:
 ```yaml
 project: "_unrouted"
-matched_projects: []
-```
-
-Do NOT generate a draft. The item stays in `incoming/` until the user assigns a project via `/engineer-agent review-queue`.
-
-**2+ matches** — Unrouted (ambiguous):
-
-Create a file in `~/.local/share/engineer-agent/queue/incoming/` with:
-```yaml
-project: "_unrouted"
-matched_projects: ["slug-a", "slug-b"]
+matched_projects: ["slug-a", "slug-b"]   # [] if no rules matched
 ```
 
 Do NOT generate a draft. The item stays in `incoming/` until the user assigns a project via `/engineer-agent review-queue`.
@@ -157,6 +131,8 @@ ticket_key: "{ticket_key}"
 jira_status: "{ticket_status}"
 jira_components: ["{component1}", "{component2}"]
 jira_labels: ["{label1}", "{label2}"]
+routing_method: "{single-candidate|prefix|filters|keyword|inferred}"
+routing_rationale: "{one line}"            # only when routing_method is "inferred"
 matched_projects: ["{slug1}", "{slug2}"]   # only for _unrouted items
 ---
 
@@ -168,6 +144,7 @@ matched_projects: ["{slug1}", "{slug2}"]   # only for _unrouted items
 **Components:** {comma-separated list or "none"}
 **Labels:** {comma-separated list or "none"}
 **Project:** {slug or "_unrouted"}
+**Routing:** {routing_method}{" — " + routing_rationale if inferred}
 
 ### Description
 {ticket_description}

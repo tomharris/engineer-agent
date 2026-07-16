@@ -42,6 +42,28 @@ Ask the user to confirm or customize:
 
 For each integration the user wants to configure, ask for the required fields. For integrations they skip, omit that section from the project entry.
 
+**Routing hints — ask only when this registration creates ambiguity.**
+
+After the tracker is configured, check whether the Jira project key(s) or the `owner/repo` being
+registered are **already watched by another project** in the config:
+
+- Jira: any existing project with a `jira.sources` entry whose `project` equals one of the new keys.
+- GitHub Issues: any existing project whose `github.owner` matches and whose `github.repos` contains
+  one of the new repos.
+
+**If nothing else watches them, skip this — do not ask.** A sole watcher gets every ticket for that
+key/repo unambiguously, and hints would never be consulted.
+
+**If something does**, say which project it collides with and explain that tickets will now have to
+be told apart, then ask (both optional, Enter to skip):
+
+- **Description** — one line on what this project covers, e.g. "Paycycle scheduling, voids, and approvals"
+- **Keywords** — comma-separated terms that signal this project, e.g. "paycycle, void, payroll"
+
+Write them as a `routing` block on the new entry. Also point out that the colliding project probably
+wants hints too — without them, the ladder has nothing to compare against and ambiguous tickets will
+land in `_unrouted` for manual assignment. That is a safe outcome, just a manual one.
+
 **Jira source loop** (when user selects Jira as tracker):
 
 1. Ask "Which Jira project(s) should this project watch?"
@@ -64,6 +86,10 @@ The new entry should follow this structure:
   {slug}:
     path: "{absolute_path}"
     tracker: "{github-issues|jira|none}"
+    # Include routing only if hints were collected (i.e. this repo/Jira key is shared)
+    routing:
+      description: "{description}"
+      keywords: ["{keyword1}", "{keyword2}"]
     github:
       owner: "{owner}"
       repos: ["{repo}"]
@@ -116,6 +142,14 @@ Only include sections for integrations the user configured. Include `github_issu
 ```yaml
 jira_projects:
   {JIRA_KEY}:
+    last_checked: "1970-01-01T00:00:00Z"
+```
+
+3. If tracker is `github-issues`, add entries to the top-level `github_repos` section for each `{owner}/{repo}` (if not already present). This is the per-repo collection boundary `poll-github-issues` uses, mirroring `jira_projects`:
+
+```yaml
+github_repos:
+  {owner}/{repo}:
     last_checked: "1970-01-01T00:00:00Z"
 ```
 
