@@ -50,6 +50,20 @@ projects:
   my-api:                                # short slug — used in queue items and state
     path: "/home/you/Projects/my-api"    # absolute path to the project root
     tracker: "jira"                      # "jira" | "github-issues" | "none" (default: inferred from config sections)
+
+    # Routing hints — OPTIONAL, and only useful when several engineer-agent projects share one
+    # Jira project key or one GitHub repo. With a single watcher the ticket routes to it
+    # unambiguously and none of this is consulted.
+    #
+    # When a ticket can't be resolved by summary prefix, Jira components/labels, or GitHub
+    # labels, the poll falls back to these hints before giving up and marking it `_unrouted`:
+    # `keywords`/`paths` are matched literally, then `description` is matched semantically.
+    # Omit the whole block and that fallback is skipped — routing behaves exactly as it did
+    # before hints existed. See references/routing-ladder.md for the full ladder.
+    routing:
+      description: "Paycycle scheduling, voids, and approval workflows"
+      keywords: ["paycycle", "void", "payroll"]   # whole-word match on ticket title + body
+      paths: ["app/payroll/**"]                   # matched against file paths named in the ticket
     github:
       owner: "myorg"
       repos: ["my-api"]
@@ -57,7 +71,10 @@ projects:
       ignore_labels: ["wip", "draft"]
       # issues:                          # only when tracker: github-issues
       #   assignee: "my-username"
-      #   labels: []                     # optional: filter to issues with these labels
+      #   labels: []                     # optional: only match issues carrying these labels.
+      #                                  # Also routes: when several projects watch this repo,
+      #                                  # labels decide which one an issue belongs to. Empty
+      #                                  # or absent = catch-all for the repo.
     slack:
       channels: ["C12345678"]
       keywords: ["@myname"]
@@ -93,7 +110,7 @@ projects:
   #     ignore_labels: ["wip", "draft"]
   #     issues:
   #       assignee: "my-username"
-  #       labels: []                     # optional: filter to issues with these labels
+  #       labels: []                     # optional: match/route by label (see my-api above)
   #   slack:
   #     channels: ["C12345678"]
   #     keywords: ["@myname"]

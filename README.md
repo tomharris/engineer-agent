@@ -127,9 +127,13 @@ projects:
 
 Only configure the integrations you use per project — the agent skips unconfigured integrations.
 
-### Multi-Jira Project Routing
+### Ticket Routing
 
-Each engineer-agent project can watch multiple Jira projects, and multiple engineer-agent projects can watch the same Jira project with different filters (N:M mapping). Routing uses Jira components and labels:
+One Jira project key or one GitHub repo often spans several engineer-agent projects (a shared team
+board, a monorepo). Routing decides which project a ticket belongs to. It works the same way for
+Jira and GitHub Issues.
+
+Each engineer-agent project can watch multiple Jira projects, and multiple engineer-agent projects can watch the same Jira project with different filters (N:M mapping):
 
 ```yaml
 projects:
@@ -154,13 +158,50 @@ projects:
       statuses: ["To Do", "In Progress"]
 ```
 
-When polling, tickets are routed by summary prefix first, then by Jira components and labels:
-- **Summary prefix (takes precedence):** if a summary starts with `[<token>]` (e.g. `[payroll-workflows] - …`) and exactly one watching project's slug or `github.repos` entry equals `<token>` (case-insensitive), the ticket routes there regardless of components/labels — useful when several projects share one Jira project key. A prefix matching zero or multiple watchers is ignored and falls through to component/label routing.
-- A ticket matching exactly one project is routed automatically
-- A ticket matching zero or multiple projects is marked as **unrouted** and appears in the review queue for manual assignment
-- Sources with no `components` or `labels` act as catch-alls for that Jira project
+#### How a ticket finds its project
+
+Tickets run through a ladder of tiers. Each tier needs **exactly one** match — anything ambiguous
+falls through to the next, and the last tier is always you:
+
+| Tier | Basis |
+|---|---|
+| **Single candidate** | Only one project watches this Jira key / repo → route. Nothing below runs. |
+| **Title prefix** | A summary starting `[<token>]` (e.g. `[payroll-workflows] - …`) where `<token>` equals exactly one watcher's slug or `github.repos` entry, case-insensitively. |
+| **Filters** | Jira `components`/`labels`; GitHub `github.issues.labels`. A source with no filters is a catch-all. |
+| **Keywords** | `routing.keywords` / `routing.paths` hints (below). |
+| **Inference** | Semantic match of the ticket against `routing.description` hints (below). |
+| **Unrouted** | Nothing resolved to one project → marked **unrouted** and parked in the review queue for you to assign. |
+
+#### Routing hints (optional)
+
+When the rules above can't tell projects apart — a shared board with no distinguishing components,
+a monorepo where labels aren't used consistently — describe what each project covers and let the
+agent work it out:
+
+```yaml
+projects:
+  payroll-workflows:
+    routing:
+      description: "Paycycle scheduling, voids, and approval workflows"
+      keywords: ["paycycle", "void", "payroll"]   # whole-word match on title + body
+      paths: ["app/payroll/**"]                   # matched against paths named in the ticket
+```
+
+- **Entirely opt-in.** Omit the block and those two tiers are skipped — routing behaves exactly as
+  it did before hints existed. Only worth adding to projects that share a key or repo.
+- **An inferred route is auto-routed and drafted, but never posted unattended.** `review-queue`
+  shows you that it was inferred and why (`payroll-workflows (inferred — mentions void paycycle
+  approval)`), so a wrong guess costs a rejected draft, not an external action.
+- **The agent can abstain.** A genuine tie goes to *unrouted*, not a coin flip.
+- `/engineer-agent add-ticket` is interactive, so it asks you at the last tier rather than parking
+  the item.
 
 **Backward compatibility:** The legacy `jira.project: "ENG"` format still works and is treated as a catch-all source.
+
+**Note on `github.issues.labels`:** these labels now decide *which* watching project owns an issue,
+not just which issues get fetched. If two projects share a repo and one has no labels set, it is a
+catch-all — so issues both projects could claim will correctly show up as **unrouted** rather than
+being silently assigned to whichever project happened to be polled first.
 
 ## Usage
 
@@ -208,7 +249,7 @@ Manually add a Jira ticket or GitHub issue to the implementation queue, bypassin
 /engineer-agent add-ticket ENG-789 --no-draft                       # Queue without generating a draft
 ```
 
-The command fetches the ticket, resolves a project (using the same component/label routing as polling for Jira; matching `github.owner` + `github.repos` for GitHub), and writes a queue item identical in shape to a polled one. Ambiguous routing prompts you to pick a project. Active-queue dedup blocks adding a ticket already sitting in `incoming/` or `drafts/`, but completed/rejected tickets and `seen_tickets`/`seen_issues` state are bypassed so you can re-queue manually.
+The command fetches the ticket, resolves a project using the same routing ladder as polling (see [Ticket Routing](#ticket-routing)), and writes a queue item identical in shape to a polled one. Because it's interactive, it prompts you to pick a project instead of marking the ticket unrouted — but only where the ladder genuinely can't tell, which should be rare. Active-queue dedup blocks adding a ticket already sitting in `incoming/` or `drafts/`, but completed/rejected tickets and `seen_tickets`/`seen_issues` state are bypassed so you can re-queue manually.
 
 ### `/engineer-agent review-queue [filter] [--project <slug>]`
 
@@ -541,6 +582,8 @@ skills/
   audit-gaps/SKILL.md          Pipeline gap auditing
   generate-qa/SKILL.md         QA test plan generation
   execute-item/SKILL.md        Shared approve/reject action logic (terminal + remote)
+references/
+  routing-ladder.md            Shared ticket→project routing logic (poll-jira, poll-github-issues, add-ticket)
 scripts/
   cron-poll.sh                 Cron polling script
   install-cron.sh              Cron setup script

@@ -61,25 +61,33 @@ Whenever you use `AskUserQuestion`, it must have **at least 2 options** — a on
 
 If the selected item has `project: _unrouted` in its frontmatter, run the assignment flow before proceeding:
 
-1. Show the ticket context: description, Jira components (`jira_components` frontmatter), Jira labels (`jira_labels` frontmatter), and source URL
-2. Check `matched_projects` in frontmatter:
+1. Show the ticket context: description, Jira components (`jira_components` frontmatter), Jira/GitHub labels (`jira_labels` / `github_labels` frontmatter), and source URL
+2. Determine the item's tracker from its `source` frontmatter field: `jira` → `jira`, `github` → `github-issues`.
+3. Check `matched_projects` in frontmatter:
    - If non-empty (multi-match): "This ticket matched multiple projects: {list}. Which should it be assigned to?" — present the matched projects as options
-   - If empty (no match): "No routing rules matched this ticket. Which project should it be assigned to?" — list all projects in config where `tracker` resolves to `jira`
-3. User selects a project slug
-4. Update the queue item frontmatter:
+   - If empty (no match): "No routing rules matched this ticket. Which project should it be assigned to?" — list all projects in config **whose tracker resolves to the item's tracker from step 2**. Do not assume Jira: a GitHub issue must be offered `github-issues` projects, not Jira ones.
+4. User selects a project slug
+5. Update the queue item frontmatter:
    - Set `project` to the selected slug
+   - Set `routing_method: manual`
    - Remove the `matched_projects` field
-5. Generate a draft for the ticket:
+6. Generate a draft for the ticket:
    - Read `projects.<selected_slug>` config for repo info
-   - Create the `## Draft Response` section with implementation plan (same as poll-jira step 6)
+   - Create the `## Draft Response` section with implementation plan (same as poll-jira step 6 for Jira items, poll-github-issues step 6 for GitHub items)
    - Update `status` to `drafted`
    - Move the file from `incoming/` to `drafts/`
-6. Continue to Step 5a (Show Full Draft) with the now-drafted item
+7. Continue to Step 5a (Show Full Draft) with the now-drafted item
 
 ### 5a. Show Full Draft
 
 Read the selected file completely and display:
 - The `project` field
+- **How the item was routed**, from `routing_method`. When it is `inferred`, say so explicitly and
+  show `routing_rationale` — e.g. `Project: payroll-workflows (inferred — mentions void paycycle
+  approval, matches its routing description)`. An `inferred` route was a judgment call made against
+  a shared Jira key or repo, not a config rule, so the human approving the draft is the check on it:
+  make it visible rather than letting a wrong guess ride through as if a rule had matched. For every
+  other method, one word is enough (`single-candidate`, `prefix`, `filters`, `keyword`, `manual`).
 - The `## Context` section with source details
 - The `## Draft Response` section with the full proposed content
 - The source URL for reference
