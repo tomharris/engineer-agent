@@ -281,7 +281,7 @@ Headlessly approve or reject a single queue item. This is primarily the entry po
 /engineer-agent execute 20260525-130000-slack-question-abc.md reject "not relevant"
 ```
 
-It resolves the item against `queue/drafts/` (a no-op if already handled), runs `execute-item`, and pushes a confirmation back via ntfy. See [Push Notifications & Remote Approval](#push-notifications--remote-approval).
+It resolves the item against `queue/drafts/` (a no-op if already handled) and runs `execute-item`. On the remote-approval path the approval listener wraps this call and pushes receipt and outcome confirmations back to your phone. See [Push Notifications & Remote Approval](#push-notifications--remote-approval).
 
 ### `/engineer-agent status`
 
@@ -529,7 +529,7 @@ cron-poll → drafts item → notify.sh ──ntfy push (Approve / Reject / Open
 
 1. After each poll, every new draft is pushed to your `topic` with **Approve**, **Reject**, and **Open** buttons.
 2. Tapping Approve/Reject POSTs a command (`approve|<item>` / `reject|<item>`) to your `command_topic`.
-3. `scripts/approval-listener.sh` — a long-running service on your machine — reads the command topic and runs `/engineer-agent execute` headlessly to perform the action, then pushes a confirmation back.
+3. `scripts/approval-listener.sh` — a long-running service on your machine — reads the command topic and runs `/engineer-agent execute` headlessly to perform the action. It confirms each tap on your phone: a **receipt** notification ("📨 Received…") the instant the tap lands, then an **outcome** notification once the run finishes — "✅ Done…" on success or "⚠️ Failed…" if the item still needs a re-run. (Malformed or duplicate taps are ignored silently.)
 
 **Install the listener** (after configuring `agent.notify.ntfy` and installing `jq`):
 
