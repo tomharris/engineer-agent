@@ -46,5 +46,19 @@ echo "  Interval: every ${INTERVAL} minutes"
 echo "  Script: ${PLUGIN_ROOT}/scripts/cron-poll.sh"
 echo "  Log: ${AGENT_DIR}/state/cron-poll.log"
 echo ""
+
+# Headless auth check: a cron job runs outside the GUI login session and cannot read the macOS
+# login keychain, so the poll will fail with "Not logged in" unless a keychain-independent
+# credential is available. Point the user at the supported fix rather than letting the first
+# poll silently fail. (See scripts/lib-paths.sh for how auth.env is consumed.)
+if [ ! -f "${AGENT_DIR}/auth.env" ] && [ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]; then
+  echo "NOTE: no headless auth token found. On macOS, cron cannot read the login keychain, so"
+  echo "      the poll will fail with 'Not logged in'. Run 'claude setup-token' (paid plan"
+  echo "      required), then write the token to a mode-600 file:"
+  echo "        printf 'CLAUDE_CODE_OAUTH_TOKEN=%s\\n' '<token>' > ${AGENT_DIR}/auth.env"
+  echo "        chmod 600 ${AGENT_DIR}/auth.env"
+  echo ""
+fi
+
 echo "To verify: crontab -l | grep engineer-agent"
 echo "To remove: crontab -l | grep -v engineer-agent | crontab -"

@@ -52,6 +52,7 @@ of truth for this location — source it rather than hardcoding the path.
 ```
 ~/.local/share/engineer-agent/
 ├── engineer.yaml              — User config (one file for all projects)
+├── auth.env                   — (optional, mode 600) CLAUDE_CODE_OAUTH_TOKEN for headless runs (see "Notifications & Remote Approval")
 ├── queue/
 │   ├── incoming/              — Newly detected items
 │   ├── drafts/                — Items with drafted responses
@@ -251,6 +252,19 @@ from a run that failed silently):
   shim; a CLI update made credential resolution depend on `$USER`, which silently broke every
   cron poll. `lib-paths.sh` (sourced by both scripts, directly and via `lib-ntfy.sh`) derives it
   with `export USER="${USER:-$(id -un)}"`, so the fix needs no crontab/service reinstall.
+- **Provide a keychain-independent credential — the deepest cause of "Not logged in."** On macOS
+  the primary Anthropic credential lives in the **login keychain**, and a cron/launchd job runs
+  *outside* the user's GUI (Aqua) login session, so it cannot read that keychain — the CLI then
+  reports "Not logged in" even with `$USER` correct. This is a THIRD, distinct trigger of that
+  identical message (after the `remote-settings.json` shim and the `USER` fix), and it hid behind
+  the other two because both were only ever verified from an interactive terminal, which *is* in
+  the GUI session. The supported headless path is a long-lived OAuth token from `claude setup-token`
+  consumed via `CLAUDE_CODE_OAUTH_TOKEN`, which is keychain/session-independent. `lib-paths.sh`
+  loads it from a mode-600 `auth.env` file (kept out of `crontab -l`) when the env var is unset —
+  so the fix, like the `USER` one, needs no crontab/service reinstall, and interactive keychain
+  auth is left untouched when no file exists. A missing token is not silently fatal: the receipt
+  check still fires, and `install-cron.sh`/`install-listener.sh` print a setup NOTE when neither
+  the file nor the env var is present.
 
 Both `cron-poll.sh` and `approval-listener.sh` resolve the Claude Code binary from `PATH` by default, but honor a `CLAUDE_BIN` env var override (a specific shim/wrapper/install path). Because cron, systemd, and launchd do not inherit the interactive shell environment, `install-cron.sh` and `install-listener.sh` capture `CLAUDE_BIN` when set at install time and bake it into the crontab entry / systemd `Environment=` / launchd `EnvironmentVariables` so the supervised runs use the same binary.
 

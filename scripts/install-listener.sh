@@ -28,6 +28,17 @@ if ! grep -q "command_topic" "${AGENT_DIR}/engineer.yaml" 2>/dev/null; then
   echo "  The listener will exit immediately until you configure it (see /engineer-agent setup)." >&2
 fi
 
+# Headless auth: like the cron poll, a supervised listener (systemd/nohup) runs outside the GUI
+# login session and cannot read the macOS login keychain, so approvals will fail with "Not
+# logged in". A launchd LaunchAgent runs in the GUI session but still fails if the keychain
+# locks. A keychain-independent OAuth token (loaded from auth.env by lib-paths.sh) covers all
+# cases. Warn if neither the file nor an env token is present.
+if [ ! -f "${AGENT_DIR}/auth.env" ] && [ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]; then
+  echo "NOTE: no headless auth token found. A supervised run may fail with 'Not logged in' (it" >&2
+  echo "      cannot read the login keychain). Run 'claude setup-token' (paid plan required)," >&2
+  echo "      then: printf 'CLAUDE_CODE_OAUTH_TOKEN=%s\\n' '<token>' > ${AGENT_DIR}/auth.env && chmod 600 ${AGENT_DIR}/auth.env" >&2
+fi
+
 # cron/systemd/launchd do not inherit the interactive shell environment. If CLAUDE_BIN
 # is set at install time, bake it into the service definition so the listener resolves the
 # same binary override when it runs supervised. Each block carries its own trailing newline
