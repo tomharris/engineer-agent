@@ -74,6 +74,11 @@ UNIT
 
   systemctl --user daemon-reload
   systemctl --user enable --now "${SERVICE_NAME}.service"
+  # enable --now is a no-op on an already-running unit, so a re-install after a code
+  # change would otherwise leave the OLD script running. Force a restart so the
+  # supervised process always picks up the current approval-listener.sh (the macOS
+  # branch below already reloads via `kickstart -k`).
+  systemctl --user restart "${SERVICE_NAME}.service"
 
   echo "Engineer-agent approval listener installed as a systemd user service:"
   echo "  Unit:   ${UNIT_DIR}/${SERVICE_NAME}.service"
