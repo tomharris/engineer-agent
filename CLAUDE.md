@@ -244,6 +244,13 @@ from a run that failed silently):
   run; a run-id echoed back is. Keep liveness and dedup state in separate files answering separate
   questions.
 - **Redirect `</dev/null`** so the run doesn't block reading its parent's stdin.
+- **Export `USER`.** cron/launchd/systemd hand the run a minimal environment — macOS cron sets
+  `LOGNAME` but *not* `USER` — and the CLI keys its credential lookup on `$USER`, so a missing
+  `USER` reads as `Not logged in · Please run /login` even when valid credentials are present and
+  work interactively. This is not the same as the older `remote-settings.json` failure and its
+  shim; a CLI update made credential resolution depend on `$USER`, which silently broke every
+  cron poll. `lib-paths.sh` (sourced by both scripts, directly and via `lib-ntfy.sh`) derives it
+  with `export USER="${USER:-$(id -un)}"`, so the fix needs no crontab/service reinstall.
 
 Both `cron-poll.sh` and `approval-listener.sh` resolve the Claude Code binary from `PATH` by default, but honor a `CLAUDE_BIN` env var override (a specific shim/wrapper/install path). Because cron, systemd, and launchd do not inherit the interactive shell environment, `install-cron.sh` and `install-listener.sh` capture `CLAUDE_BIN` when set at install time and bake it into the crontab entry / systemd `Environment=` / launchd `EnvironmentVariables` so the supervised runs use the same binary.
 
