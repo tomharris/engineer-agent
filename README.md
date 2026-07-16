@@ -539,6 +539,10 @@ cron-poll → drafts item → notify.sh ──ntfy push (Approve / Reject / Open
 
 This registers a supervised service (`engineer-agent-listener`) that restarts on failure and survives reboots: a **systemd user service** on Linux (run `loginctl enable-linger $USER` so it keeps running while you're logged out) or a **launchd LaunchAgent** on macOS (starts at login, restarts on crash — no extra steps). On hosts with neither it falls back to a `nohup` background process. Logs go to `~/.local/share/engineer-agent/state/approval-listener.log`.
 
+**After updating the plugin, re-run `install-listener.sh`** (or `systemctl --user restart engineer-agent-listener`) so the running service loads the new code — a supervised daemon keeps executing whatever it parsed at launch. As a backstop the listener also re-execs itself when its own file changes, at the next stream reconnect.
+
+By default the listener caps each headless approval at **$2.00**, or **$8.00** for `ticket` items (which run a full implementation). Tune via the `EA_EXECUTE_BUDGET_USD` / `EA_TICKET_BUDGET_USD` environment variables.
+
 As with cron, set `CLAUDE_BIN` to pick a specific Claude Code binary — e.g. `CLAUDE_BIN=/opt/claude/bin/claude scripts/install-listener.sh`. Since the supervised service does not inherit your shell environment, the installer bakes the install-time value into the systemd unit (`Environment=`) or launchd plist (`EnvironmentVariables`).
 
 **Hands-free draft PRs:** with `agent.autonomy.auto_execute: ["draft-pr"]`, draft-PR creation after a ticket is implemented runs without an approval gate — a draft PR merges nothing and requests no review, and you still review it on GitHub. Every other action (Slack posts, PR approve/request-changes, issue creation, non-draft PRs) always requires explicit approval.

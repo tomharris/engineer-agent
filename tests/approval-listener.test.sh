@@ -35,10 +35,14 @@ exit 0
 EOF
   chmod +x "$NOTIFY_BIN"
 
-  # Stub claude: on success empty drafts/ (simulating execute-item), else no-op.
+  # Stub claude: record args (to assert the chosen --max-budget-usd), and on success
+  # empty drafts/ (simulating execute-item), else no-op.
+  export CLAUDE_ARGS_LOG="$TMP/claude-args.log"
+  : > "$CLAUDE_ARGS_LOG"
   export CLAUDE_BIN="$TMP/fake-claude"
   cat > "$CLAUDE_BIN" <<'EOF'
 #!/bin/bash
+printf '%s\n' "$*" >> "$CLAUDE_ARGS_LOG"
 [ "${FAKE_SUCCEED:-0}" = "1" ] && rm -f "$EA_AGENT_DIR"/queue/drafts/*
 exit 0
 EOF
@@ -101,9 +105,41 @@ test_invalid() {
   teardown
 }
 
+# --- Case 4: ticket type selects the generous ticket budget ---
+test_ticket_budget() {
+  echo "test_ticket_budget:"
+  setup
+  local item="20260716-000000-ticket-gh-1.md"
+  printf 'type: ticket\n' > "$EA_AGENT_DIR/queue/drafts/$item"
+  export FAKE_SUCCEED=1
+  handle_line "$(msg_event id-ticket "approve|$item")"
+
+  grep -qF -- "--max-budget-usd $TICKET_BUDGET_USD" "$CLAUDE_ARGS_LOG" \
+    && ok "ticket uses ticket budget ($TICKET_BUDGET_USD)" \
+    || bad "ticket budget not applied (args: $(cat "$CLAUDE_ARGS_LOG"))"
+  teardown
+}
+
+# --- Case 5: unknown/missing type falls back to the default budget ---
+test_default_budget() {
+  echo "test_default_budget:"
+  setup
+  local item="20260716-000000-pr-review-ghi.md"
+  touch "$EA_AGENT_DIR/queue/drafts/$item"   # empty file -> no type frontmatter
+  export FAKE_SUCCEED=1
+  handle_line "$(msg_event id-default "approve|$item")"
+
+  grep -qF -- "--max-budget-usd $DEFAULT_BUDGET_USD" "$CLAUDE_ARGS_LOG" \
+    && ok "unknown type uses default budget ($DEFAULT_BUDGET_USD)" \
+    || bad "default budget not applied (args: $(cat "$CLAUDE_ARGS_LOG"))"
+  teardown
+}
+
 test_success
 test_failure
 test_invalid
+test_ticket_budget
+test_default_budget
 
 echo "-----"
 echo "PASS=$PASS FAIL=$FAIL"

@@ -20,12 +20,30 @@ PLUGIN_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 # shellcheck source=lib-ntfy.sh
 source "${SCRIPT_DIR}/lib-ntfy.sh"
 
+# Self-reexec guard: remember our own path + mtime at startup. The reconnect loop
+# (below) re-execs the script when this file changes on disk, so a code deploy that
+# isn't followed by a service restart can't keep running stale — which once left the
+# daemon silently missing the whole acknowledgement feature. Portable across Linux
+# (stat -c) and macOS (stat -f).
+SELF="${SCRIPT_DIR}/$(basename "${BASH_SOURCE[0]}")"
+script_mtime() { stat -c %Y "$1" 2>/dev/null || stat -f %m "$1" 2>/dev/null || echo 0; }
+SELF_MTIME="$(script_mtime "$SELF")"
+
 # CLAUDE_BIN can be set in the environment to select a specific Claude Code binary
 # (e.g. a version shim or non-standard install path); otherwise discover it on PATH.
 CLAUDE_BIN="${CLAUDE_BIN:-$(command -v claude || echo "${HOME}/.local/bin/claude")}"
 # NOTIFY_BIN can be overridden (e.g. by tests) to point at a stub notifier;
 # otherwise use the plugin's notify.sh. Mirrors the CLAUDE_BIN override above.
 NOTIFY_BIN="${NOTIFY_BIN:-${PLUGIN_ROOT}/scripts/notify.sh}"
+
+# Per-item-type spend cap for the headless execute run. Implementing a ticket
+# (implement-ticket runs a full Ralph Loop) costs far more than posting a review or
+# an answer, so `ticket` gets a generous cap and everything else a modest default.
+# A flat 0.50 was too low even for some PR reviews and aborted every ticket approval
+# with "Exceeded USD budget", stranding the item in drafts/. Tune to your appetite;
+# an unknown/missing type falls back to the default.
+DEFAULT_BUDGET_USD="${EA_EXECUTE_BUDGET_USD:-2.00}"
+TICKET_BUDGET_USD="${EA_TICKET_BUDGET_USD:-8.00}"
 
 AGENT_DIR="${EA_AGENT_DIR}"
 STATE_DIR="${AGENT_DIR}/state"
@@ -94,6 +112,20 @@ handle_line() {
   [ -n "$mtime" ] && echo "$mtime" > "$SINCE_FILE"
   push_ack low "📨 Received: ${decision} ${item} — working…"
 
+  # Choose the execute spend cap by item type, read straight from the draft
+  # frontmatter (the listener is plain bash, not subject to the claude allowlist).
+  # Defensive: a missing file or unknown type falls back to the default, and only
+  # `ticket` unlocks the higher cap — so untrusted frontmatter can at worst pick
+  # between two fixed values, never inflate spend past TICKET_BUDGET_USD.
+  local item_type budget
+  item_type="$(grep -m1 '^type:' "${AGENT_DIR}/queue/drafts/${item}" 2>/dev/null \
+    | sed 's/^type:[[:space:]]*//; s/["'\'' ]//g')"
+  case "$item_type" in
+    ticket) budget="$TICKET_BUDGET_USD" ;;
+    *)      budget="$DEFAULT_BUDGET_USD" ;;
+  esac
+  log "execute budget for ${item} (type=${item_type:-unknown}): \$${budget}"
+
   # Pin --permission-mode so this headless run never inherits the user's global
   # `permissions.defaultMode` (e.g. "plan"): in plan mode claude -p just prints a plan
   # and exits 0 without executing, silently leaving the item in drafts/.
@@ -116,7 +148,7 @@ handle_line() {
     --model sonnet \
     --permission-mode acceptEdits \
     --allowedTools "${allowed_tools[@]}" \
-    --max-budget-usd 0.50 \
+    --max-budget-usd "$budget" \
     "Run the engineer-agent execute command (commands/execute.md) for queue item '${item}' with decision '${decision}'. Read config from ${AGENT_DIR}/engineer.yaml. Be concise." \
     </dev/null >> "$LOG_FILE" 2>&1
 
@@ -139,6 +171,14 @@ handle_line() {
 if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
   BACKOFF=2
   while true; do
+    # Reload guard: if this script changed on disk since startup, exec the new copy.
+    # The top of the reconnect loop is the only point guaranteed to be *between*
+    # executes, so no in-flight approval is interrupted. The supervisor (systemd /
+    # launchd / nohup) keeps tracking the re-exec'd process.
+    if [ -s "$SELF" ] && [ "$(script_mtime "$SELF")" != "$SELF_MTIME" ]; then
+      log "listener script changed on disk — re-executing to load new code"
+      exec "$SELF"
+    fi
     SINCE="$(cat "$SINCE_FILE" 2>/dev/null || echo now)"
     STREAM_URL="${NTFY_SERVER}/${NTFY_COMMAND_TOPIC}/json?since=${SINCE}"
     while IFS= read -r line; do

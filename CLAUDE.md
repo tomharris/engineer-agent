@@ -254,6 +254,23 @@ from a run that failed silently):
 
 Both `cron-poll.sh` and `approval-listener.sh` resolve the Claude Code binary from `PATH` by default, but honor a `CLAUDE_BIN` env var override (a specific shim/wrapper/install path). Because cron, systemd, and launchd do not inherit the interactive shell environment, `install-cron.sh` and `install-listener.sh` capture `CLAUDE_BIN` when set at install time and bake it into the crontab entry / systemd `Environment=` / launchd `EnvironmentVariables` so the supervised runs use the same binary.
 
+> **A supervised daemon runs whatever it parsed at launch — editing the script on disk
+> does not reload it.** `install-listener.sh`'s `systemctl --user enable --now` is a no-op on an
+> already-running unit, so before this was fixed a code deploy could leave the *old* listener
+> running silently (it once ran ~28h past a commit and never emitted the newly-added acks). Two
+> guards: `install-listener.sh` now `systemctl --user restart`s on every re-install (matching the
+> macOS `kickstart -k` path), **and** `approval-listener.sh` re-execs itself at the top of its
+> reconnect loop when its own mtime changes — the one point guaranteed to be *between* executes,
+> so no in-flight approval is interrupted.
+
+The listener's headless execute is capped with `--max-budget-usd`, chosen **per item type** from
+the draft's `type:` frontmatter: `ticket` items (which run the full `implement-ticket` Ralph Loop)
+get `TICKET_BUDGET_USD` (default `8.00`); everything else gets `DEFAULT_BUDGET_USD` (default
+`2.00`). Override either via the `EA_TICKET_BUDGET_USD` / `EA_EXECUTE_BUDGET_USD` env vars. A flat
+`0.50` used to abort every ticket approval with "Exceeded USD budget", stranding it in `drafts/`.
+Only `ticket` unlocks the higher cap, so untrusted frontmatter can at worst pick between two fixed
+values — never inflate spend.
+
 Key invariant: **polling reads; only `execute-item` writes.** `cron-poll.sh` passes a deliberately
 read-only `--allowedTools` allowlist (`gh pr list/view/diff`, `gh issue list/view`, `spy read/thread`,
 and the read-only MCP verbs `mcp__atlassian__searchJiraIssuesUsingJql`/`getJiraIssue` and
