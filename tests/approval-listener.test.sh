@@ -43,6 +43,14 @@ EOF
   cat > "$CLAUDE_BIN" <<'EOF'
 #!/bin/bash
 printf '%s\n' "$*" >> "$CLAUDE_ARGS_LOG"
+# FAKE_TICKET_RECONCILE simulates the real confined-worktree behavior: the run writes the
+# completed/ record but CANNOT delete the drafts/ original, leaving a stub for the listener
+# to reconcile. FAKE_SUCCEED simulates a clean move (drafts emptied). Neither => no-op.
+if [ "${FAKE_TICKET_RECONCILE:-0}" = "1" ]; then
+  mkdir -p "$EA_AGENT_DIR/queue/completed"
+  for f in "$EA_AGENT_DIR"/queue/drafts/*.md; do cp "$f" "$EA_AGENT_DIR/queue/completed/"; done
+  exit 0   # drafts/ left in place on purpose
+fi
 [ "${FAKE_SUCCEED:-0}" = "1" ] && rm -f "$EA_AGENT_DIR"/queue/drafts/*
 exit 0
 EOF
@@ -175,6 +183,27 @@ test_ticket_confined_run() {
   teardown
 }
 
+# --- Case 4a: reconciliation — confined run wrote completed/ but left the drafts/ stub ---
+test_ticket_reconciles_stub() {
+  echo "test_ticket_reconciles_stub:"
+  setup
+  write_ticket_config with-allowlist
+  install_fake_git
+  local item="20260716-000000-ticket-gh-9.md"
+  printf 'type: ticket\nproject: wayfinder-api\n' > "$EA_AGENT_DIR/queue/drafts/$item"
+  export FAKE_TICKET_RECONCILE=1   # completed/ written, drafts/ deliberately left behind
+  handle_line "$(msg_event id-reconcile "approve|$item")"
+
+  [ -e "$EA_AGENT_DIR/queue/completed/$item" ] \
+    && ok "completed/ record present" || bad "completed/ record missing"
+  [ ! -e "$EA_AGENT_DIR/queue/drafts/$item" ] \
+    && ok "listener reconciled away the stale drafts/ stub" || bad "drafts/ stub not reconciled"
+  grep -q "Done" "$NOTIFY_LOG" && ! grep -q "Failed" "$NOTIFY_LOG" \
+    && ok "Done ack sent (not a false Failed)" || bad "wrong ack (log: $(cat "$NOTIFY_LOG"))"
+  unset FAKE_TICKET_RECONCILE
+  teardown
+}
+
 # --- Case 4b: deny-by-default — a ticket for a project with no exec.allowed_commands ---
 test_ticket_refused_without_allowlist() {
   echo "test_ticket_refused_without_allowlist:"
@@ -217,6 +246,7 @@ test_success
 test_failure
 test_invalid
 test_ticket_confined_run
+test_ticket_reconciles_stub
 test_ticket_refused_without_allowlist
 test_default_budget
 
