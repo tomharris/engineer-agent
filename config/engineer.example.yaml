@@ -67,6 +67,19 @@ projects:
       description: "Paycycle scheduling, voids, and approval workflows"
       keywords: ["paycycle", "void", "payroll"]   # whole-word match on ticket title + body
       paths: ["app/payroll/**"]                   # matched against file paths named in the ticket
+    # Confined headless ticket implementation — OPTIONAL, and ONLY consulted when you approve
+    # a `ticket` item remotely (an ntfy Approve tap from your phone). Approving a ticket that
+    # way runs the full implement-ticket coding session (branch → Ralph Loop → draft PR)
+    # unattended, inside a throwaway git worktree of this repo. `allowed_commands` is the
+    # allowlist of build/test command prefixes that session may run — each becomes a
+    # `Bash(<cmd> *)` permission. Keep it TIGHT: it is the security boundary for code driven
+    # off (untrusted) issue text. List only your build/test tools, never a shell or a
+    # network/file-mangling command. DENY-BY-DEFAULT: omit this block (or leave it empty) and
+    # remote ticket approval is *refused* rather than run unconfined — you'll get a "⚠️ Failed"
+    # push telling you to configure it, and you implement the ticket interactively instead.
+    # (The interactive terminal path never uses this list — a human is present to approve.)
+    exec:
+      allowed_commands: ["bin/rails", "bin/rspec", "bin/srb", "bundle"]  # e.g. Rails; adjust per repo
     github:
       owner: "myorg"
       repos: ["my-api"]

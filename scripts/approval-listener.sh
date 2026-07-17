@@ -63,6 +63,134 @@ push_ack() {
     </dev/null >>"$LOG_FILE" 2>&1 || true
 }
 
+# run_generic_execute — the read/post path for every non-ticket type (and any reject).
+# Runs the shared execute-item skill via commands/execute.md with the allowlist that
+# posts a review/answer/issue but physically cannot run a coding session.
+#
+# Pin --permission-mode so this headless run never inherits the user's global
+# `permissions.defaultMode` (e.g. "plan"): in plan mode claude -p just prints a plan and
+# exits 0 without executing, silently leaving the item in drafts/.
+#
+# Use acceptEdits + a tight --allowedTools allowlist rather than bypassPermissions:
+# execute-item reads UNTRUSTED draft-body content (Slack/Jira/GitHub text), so a
+# prompt-injection payload must not be able to run arbitrary commands. The allowlist is
+# exactly what execute-item / execute.md legitimately need — gh, spy, mv, the plugin's
+# notify.sh, the file-editing tools, and the slite/atlassian MCP tools. Anything else is
+# denied; under acceptEdits a denied tool fails non-interactively, which the drafts/
+# check surfaces as a WARN (no longer a silent no-op).
+# Redirect stdin from /dev/null so claude doesn't try to read the listener's curl stream.
+run_generic_execute() {
+  local item="$1" decision="$2" budget="$3"
+  local allowed_tools=(
+    "Bash(gh *)" "Bash(spy *)" "Bash(mv *)" "Bash(${PLUGIN_ROOT}/scripts/notify.sh *)"
+    Read Edit Write Glob Grep
+    "mcp__slite__append-blocks" "mcp__slite__create-note" "mcp__atlassian__createJiraIssue"
+  )
+  "$CLAUDE_BIN" -p \
+    --plugin-dir "$PLUGIN_ROOT" \
+    --model sonnet \
+    --permission-mode acceptEdits \
+    --allowedTools "${allowed_tools[@]}" \
+    --max-budget-usd "$budget" \
+    "Run the engineer-agent execute command (commands/execute.md) for queue item '${item}' with decision '${decision}'. Read config from ${EA_CONFIG_FILE}. Be concise." \
+    </dev/null >> "$LOG_FILE" 2>&1
+}
+
+# run_ticket_implementation — confined headless implementation of an approved `ticket`.
+# A ticket is the one item type whose execution WRITES CODE in the target repo, so it
+# cannot use the read/post allowlist above. Confinement (the "medium" posture) is three
+# layers, and the two that define the sandbox are decided HERE in bash — before claude
+# starts — so untrusted ticket text can influence code inside the sandbox but never the
+# shape of the sandbox:
+#   1. Path isolation — a throwaway git worktree checked out at the base branch, run as
+#      cwd. The user's real checkout is never the target. Removed when done.
+#   2. Narrow allowlist — build/test commands come from projects.<slug>.exec.allowed_commands,
+#      each expanded to a Bash(<cmd> *) rule. DENY-BY-DEFAULT: no list => we refuse rather
+#      than fall back to an unconfined session. Never Bash(*) / bypassPermissions.
+#   3. (downstream) the output is a DRAFT PR the human reviews before merge.
+# Honest limit: Claude Code Bash() rules are command-prefix matches, not cwd-scoped, so
+# Bash(git *) also permits `git -C /elsewhere`. The worktree bounds the default target and
+# the command set is curated; that prefix-vs-path gap is why this is "medium," not airtight.
+#
+# Returns 1 (refuses to start) when the project/path/allowlist can't be resolved — the item
+# then stays in drafts/ and the caller's drafts/ check emits the ⚠️ Failed ack with the
+# reason logged. Returns 0 once it has launched the run (success is judged by drafts/).
+run_ticket_implementation() {
+  local item="$1" budget="$2" draft="${AGENT_DIR}/queue/drafts/${item}"
+  local project project_path base wt c
+
+  project="$(grep -m1 '^project:' "$draft" 2>/dev/null | sed 's/^project:[[:space:]]*//; s/["'\'' ]//g')"
+  if [ -z "$project" ] || [ "$project" = "_unrouted" ]; then
+    log "WARN: ticket ${item} has no routable project ('${project:-}'); cannot implement headlessly"
+    return 1
+  fi
+  project_path="$(yaml_project_scalar "$project" path)"
+  if [ -z "$project_path" ] || [ ! -d "$project_path" ]; then
+    log "WARN: project '${project}' path unresolved or missing ('${project_path:-}'); cannot implement ${item}"
+    return 1
+  fi
+
+  # Narrow allowlist: expand each configured build command into a Bash(cmd *) rule.
+  # Config is trusted, but validate each entry against a safe charset as defense in depth —
+  # an allowlist rule is security-load-bearing, so a stray metacharacter must not widen it.
+  local build_rules=()
+  while IFS= read -r c; do
+    [ -n "$c" ] || continue
+    if [[ "$c" =~ ^[A-Za-z0-9._/-]+$ ]]; then
+      build_rules+=( "Bash(${c} *)" )
+    else
+      log "WARN: ignoring unsafe exec.allowed_commands entry '${c}' for project '${project}'"
+    fi
+  done < <(yaml_project_list "$project" exec allowed_commands)
+
+  if [ ${#build_rules[@]} -eq 0 ]; then
+    log "WARN: project '${project}' has no valid exec.allowed_commands; refusing headless ticket implementation. Set projects.${project}.exec.allowed_commands in ${EA_CONFIG_FILE}."
+    return 1
+  fi
+
+  # Path isolation: throwaway worktree at the base branch (detached HEAD).
+  base="$(git -C "$project_path" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null | sed 's@^origin/@@')"
+  base="${base:-main}"
+  wt="${AGENT_DIR}/worktrees/${item%.md}-$(date +%s)"
+  mkdir -p "$(dirname "$wt")"
+  git -C "$project_path" fetch --quiet origin "$base" >>"$LOG_FILE" 2>&1 || true
+  if ! git -C "$project_path" worktree add --detach "$wt" "origin/${base}" >>"$LOG_FILE" 2>&1; then
+    if ! git -C "$project_path" worktree add --detach "$wt" "$base" >>"$LOG_FILE" 2>&1; then
+      log "WARN: could not create worktree for ${item} at ${wt}; cannot implement"
+      return 1
+    fi
+  fi
+  log "implementing ticket ${item} in isolated worktree ${wt} (project ${project}, base ${base}); build tools: ${build_rules[*]}"
+
+  # Confined tool set: file edits + git + the narrow build rules + gh (draft PR) + mv
+  # (queue move) + notify (draft-pr FYI). No spy/slite/atlassian — a ticket implementation
+  # posts nowhere but GitHub, and only a DRAFT PR at that.
+  local allowed_tools=(
+    Read Edit Write Glob Grep
+    "Bash(git *)" "${build_rules[@]}"
+    "Bash(gh *)" "Bash(mv *)" "Bash(${PLUGIN_ROOT}/scripts/notify.sh *)"
+  )
+  local prompt="Implement the engineer-agent ticket in queue item '${item}' (approved). \
+The current working directory is an isolated git worktree of the target repo, checked out on a detached HEAD at the base branch. \
+Read config from ${EA_CONFIG_FILE}. Follow skills/implement-ticket/SKILL.md: create the ticket branch HERE (stay inside this worktree — do not cd elsewhere), implement via Ralph Loop, push the branch, open a DRAFT pull request, and move the queue item ${item} to completed/. \
+Operate ONLY inside this working directory. Be concise."
+
+  ( cd "$wt" && "$CLAUDE_BIN" -p \
+      --plugin-dir "$PLUGIN_ROOT" \
+      --model sonnet \
+      --permission-mode acceptEdits \
+      --allowedTools "${allowed_tools[@]}" \
+      --max-budget-usd "$budget" \
+      "$prompt" \
+      </dev/null ) >> "$LOG_FILE" 2>&1
+
+  # Tear down the worktree regardless of outcome. The branch and any pushed commits / draft
+  # PR persist in the repo; only the working copy is disposable.
+  git -C "$project_path" worktree remove --force "$wt" >>"$LOG_FILE" 2>&1 || true
+  git -C "$project_path" worktree prune >>"$LOG_FILE" 2>&1 || true
+  return 0
+}
+
 command -v jq >/dev/null 2>&1 || { log "FATAL: jq is required but not found on PATH"; exit 1; }
 command -v "$CLAUDE_BIN" >/dev/null 2>&1 || { log "FATAL: claude CLI not found (CLAUDE_BIN='${CLAUDE_BIN}')"; exit 1; }
 
@@ -126,31 +254,16 @@ handle_line() {
   esac
   log "execute budget for ${item} (type=${item_type:-unknown}): \$${budget}"
 
-  # Pin --permission-mode so this headless run never inherits the user's global
-  # `permissions.defaultMode` (e.g. "plan"): in plan mode claude -p just prints a plan
-  # and exits 0 without executing, silently leaving the item in drafts/.
-  #
-  # Use acceptEdits + a tight --allowedTools allowlist rather than bypassPermissions:
-  # execute-item reads UNTRUSTED draft-body content (Slack/Jira/GitHub text), so a
-  # prompt-injection payload must not be able to run arbitrary commands. The allowlist is
-  # exactly what execute-item / execute.md legitimately need — gh, spy, mv, the plugin's
-  # notify.sh, the file-editing tools, and the slite/atlassian MCP tools. Anything else is
-  # denied; under acceptEdits a denied tool fails non-interactively, which the drafts/
-  # check below surfaces as a WARN (no longer a silent no-op).
-  # Redirect stdin from /dev/null so claude doesn't try to read the listener's curl stream.
-  local allowed_tools=(
-    "Bash(gh *)" "Bash(spy *)" "Bash(mv *)" "Bash(${PLUGIN_ROOT}/scripts/notify.sh *)"
-    Read Edit Write Glob Grep
-    "mcp__slite__append-blocks" "mcp__slite__create-note" "mcp__atlassian__createJiraIssue"
-  )
-  "$CLAUDE_BIN" -p \
-    --plugin-dir "$PLUGIN_ROOT" \
-    --model sonnet \
-    --permission-mode acceptEdits \
-    --allowedTools "${allowed_tools[@]}" \
-    --max-budget-usd "$budget" \
-    "Run the engineer-agent execute command (commands/execute.md) for queue item '${item}' with decision '${decision}'. Read config from ${AGENT_DIR}/engineer.yaml. Be concise." \
-    </dev/null >> "$LOG_FILE" 2>&1
+  # Dispatch by type. An approved `ticket` runs a CONFINED implementation — isolated
+  # worktree + a narrow, config-driven build allowlist (see run_ticket_implementation),
+  # because it is the one type that writes code. Every other type, and any reject, goes
+  # through the shared execute-item path with the read/post allowlist that cannot run a
+  # coding session (see run_generic_execute). Both judge success by the drafts/ check below.
+  if [ "$decision" = "approve" ] && [ "$item_type" = "ticket" ]; then
+    run_ticket_implementation "$item" "$budget" || true
+  else
+    run_generic_execute "$item" "$decision" "$budget"
+  fi
 
   # Trust the filesystem, not claude -p's exit code (which is 0 whenever the CLI ran,
   # regardless of whether execute-item actually performed the action). execute-item moves
