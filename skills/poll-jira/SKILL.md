@@ -182,12 +182,10 @@ The `## Draft Response` section for tickets:
 - {file_path} — {what changes}
 
 ### Implementation Method
-This ticket will be implemented using Ralph Loop with:
-- Max iterations: 10
-- Completion promise: "All acceptance criteria met and tests pass"
+This ticket will be implemented iteratively in-session (plan → edit → test → fix), up to ~10 passes, done when all acceptance criteria are met and tests pass.
 
 ### Action on Approval
-Approving this item will start a Ralph Loop session to implement the changes, then open a draft PR.
+Approving this item implements the changes on a feature branch, then opens a draft PR.
 ```
 
 ### 7. Update State (always, even for zero items)
