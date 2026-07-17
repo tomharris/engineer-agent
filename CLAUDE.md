@@ -314,7 +314,13 @@ text can influence code *inside* the sandbox but never the *shape* of it:
    (detached at the base branch) under `~/.local/share/engineer-agent/worktrees/` and runs the
    headless session with that as cwd, so the user's real checkout is never the target. The
    worktree is torn down (`git worktree remove --force`) when the run ends, pass or fail; the
-   branch and any pushed commits / draft PR persist.
+   branch and any pushed commits / draft PR persist. Because that cwd cannot reach outside
+   itself, the confined run *writes* `queue/completed/<item>` but cannot delete the
+   `queue/drafts/<item>` original — so the listener **reconciles the move in plain bash after
+   the run** (removes the stale `drafts/` copy when the `completed/` copy exists). The
+   queue-move, like worktree creation, is a privileged step kept on the listener's side of the
+   sandbox boundary; without it a shipped PR false-flagged as `⚠️ Failed` because the drafts/
+   copy lingered.
 2. **Narrow allowlist.** Build/test commands come from `projects.<slug>.exec.allowed_commands`
    in config; the listener validates each against `^[A-Za-z0-9._/-]+$` and expands it to a
    `Bash(<cmd> *)` rule, added to `Read/Edit/Write/Glob/Grep`, `Bash(git *)`, `Bash(gh *)`,

@@ -172,8 +172,9 @@ run_ticket_implementation() {
   )
   local prompt="Implement the engineer-agent ticket in queue item '${item}' (approved). \
 The current working directory is an isolated git worktree of the target repo, checked out on a detached HEAD at the base branch. \
-Read config from ${EA_CONFIG_FILE}. Follow skills/implement-ticket/SKILL.md: create the ticket branch HERE (stay inside this worktree — do not cd elsewhere), implement via Ralph Loop, push the branch, open a DRAFT pull request, and move the queue item ${item} to completed/. \
-Operate ONLY inside this working directory. Be concise."
+Read config from ${EA_CONFIG_FILE}. Follow skills/implement-ticket/SKILL.md: create the ticket branch HERE (stay inside this worktree — do not cd elsewhere), implement via Ralph Loop, push the branch, and open a DRAFT pull request. \
+To finalize the queue item, WRITE the completed record to ${AGENT_DIR}/queue/completed/${item} (status: completed). You do NOT need to delete the drafts/ original — the listener reconciles that afterward; do not spend effort trying to remove it. \
+Operate ONLY inside this working directory (plus writing that one completed/ queue file). Be concise."
 
   ( cd "$wt" && "$CLAUDE_BIN" -p \
       --plugin-dir "$PLUGIN_ROOT" \
@@ -188,6 +189,18 @@ Operate ONLY inside this working directory. Be concise."
   # PR persist in the repo; only the working copy is disposable.
   git -C "$project_path" worktree remove --force "$wt" >>"$LOG_FILE" 2>&1 || true
   git -C "$project_path" worktree prune >>"$LOG_FILE" 2>&1 || true
+
+  # Reconcile the queue move on the privileged side of the sandbox boundary. The confined
+  # run writes completed/<item> (the terminal record) but CANNOT delete the drafts/<item>
+  # original: that path is outside the worktree cwd and the narrow allowlist grants it no
+  # delete, so the run leaves a stub behind. The move succeeded in intent — finish it here
+  # in plain bash so the caller's "drafts/ empty?" success check reflects the shipped PR
+  # instead of false-flagging it. Guarded on completed/<item> existing, so we never remove a
+  # drafts item that wasn't actually completed. (The draft PR is the real review gate; this
+  # move grants no new capability.)
+  if [ -e "${AGENT_DIR}/queue/completed/${item}" ] && [ -e "$draft" ]; then
+    rm -f "$draft" && log "reconciled: removed stale drafts/${item} (completed/ copy present after implementation)"
+  fi
   return 0
 }
 
