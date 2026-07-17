@@ -492,11 +492,15 @@ To customize the interval or reinstall manually:
 /path/to/engineer-agent/scripts/install-cron.sh 30
 ```
 
-This installs a crontab entry that runs `scripts/cron-poll.sh`, which invokes Claude headlessly to poll all sources for all projects. Logs are written to `~/.local/share/engineer-agent/state/cron-poll.log`.
+This installs a scheduled job that runs `scripts/cron-poll.sh`, which invokes Claude headlessly to poll all sources for all projects. On **macOS** it registers a **launchd LaunchAgent** (`engineer-agent-poll`) — required for headless auth, see below; on **Linux** it installs a **crontab entry**. Logs are written to `~/.local/share/engineer-agent/state/cron-poll.log`.
+
+On macOS you can confine polling to specific clock hours (e.g. business hours, to cap spend on a first poll over a large backlog) by setting `EA_POLL_HOURS` (comma-separated, 0–23) and optionally `EA_POLL_MINUTE` at install time — e.g. `EA_POLL_HOURS=9,10,11,13,14,15,16 EA_POLL_MINUTE=3 scripts/install-cron.sh`. Without them the poll runs every N minutes.
 
 **The poll is read-only by construction.** It runs with an allowlist limited to read verbs (`gh pr list/view/diff`, `gh issue list/view`, `spy read/thread`), so it can find work and draft responses but cannot post anything. Every outbound action stays behind the approval gate.
 
-**Headless auth (macOS): a `forceLoginOrgUUID` managed policy has no environment-credential fix.** On macOS the Claude credential lives in the login keychain, and cron (and a supervised listener) run *outside* your GUI login session, so they can't read it. There is **no environment-credential workaround** on a machine whose org deploys a `forceLoginOrgUUID` managed policy (`/Library/Application Support/ClaudeCode/managed-settings.json`): such a policy rejects `ANTHROPIC_API_KEY`, `apiKeyHelper`, *and* a `claude setup-token` OAuth token — org membership can't be verified for an environment credential, so a freshly-minted, org-valid token still fails with `Unable to verify organization for the current authentication token`. (An `auth.env` / `CLAUDE_CODE_OAUTH_TOKEN` loader was tried and removed for exactly this reason.) The only documented headless paths that survive the policy are a cloud-provider inference path (Amazon Bedrock / Google Vertex / Microsoft Foundry) or an org/IT-provided machine exemption; both require your org's IT.
+**Headless auth (macOS): why the poll runs under launchd, not cron.** On macOS the Claude credential lives in the login keychain, which only unlocks *inside* your GUI login session. A **crontab** job runs outside that session and can't read it, so a cron poll fails with `Not logged in` even though the same credentials work interactively. A **launchd LaunchAgent** bootstrapped into your GUI session *can* read the keychain — so `install-cron.sh` installs the poll as a LaunchAgent on macOS (the approval-listener already uses this path). No token on disk; the tradeoff is that it only polls while you're logged in. On Linux there's no per-user GUI-keychain split, so crontab is fine.
+
+**Separately — a `forceLoginOrgUUID` managed policy blocks *all* headless auth.** If your org deploys a `forceLoginOrgUUID` managed policy (`/Library/Application Support/ClaudeCode/managed-settings.json`), Claude Code rejects `ANTHROPIC_API_KEY`, `apiKeyHelper`, *and* a `claude setup-token` OAuth token — org membership can't be verified for an environment credential, so a freshly-minted, org-valid token still fails with `Unable to verify organization for the current authentication token`, and no scheduler choice (cron or launchd) helps. (An `auth.env` / `CLAUDE_CODE_OAUTH_TOKEN` loader was tried and removed for exactly this reason — don't re-add it.) The only documented headless paths that survive the policy are a cloud-provider inference path (Amazon Bedrock / Google Vertex / Microsoft Foundry) or an org/IT-provided machine exemption; both require your org's IT. If the policy is present, don't delete or shim around it — it's an intentional security control.
 
 Because `claude -p` exits 0 whenever the CLI ran — regardless of whether the poll actually happened — the cron doesn't trust the exit code. It mints a per-run id and requires the poll to write it back into `state/last-poll-receipt.yaml` as its final step; if that receipt is missing or stale the run failed silently, and the cron logs a `WARN` and — when ntfy is configured — sends you an urgent push. A poll that legitimately finds **zero items** writes a normal receipt (`status: ok`, `items_queued: 0`) and stays silent, and a **partial** failure (one source errored while others succeeded) is now surfaced too — something the previous state-fingerprint check could never detect.
 
@@ -508,14 +512,17 @@ Because `claude -p` exits 0 whenever the CLI ran — regardless of whether the p
 
 It copies everything to `~/.local/share/engineer-agent/`, never overwrites, and leaves the old tree intact for you to delete. Set `EA_AGENT_DIR` to choose a different location (`XDG_DATA_HOME` is honored).
 
-By default the scripts resolve the `claude` binary from `PATH`. To use a specific Claude Code binary (a version shim, wrapper, or non-standard install path), set the `CLAUDE_BIN` env var — e.g. `CLAUDE_BIN=/opt/claude/bin/claude scripts/install-cron.sh 30`. Because cron does not inherit your interactive shell environment, the installer bakes the value set at install time into the crontab entry so the scheduled run uses the same binary.
+By default the scripts resolve the `claude` binary from `PATH`. To use a specific Claude Code binary (a version shim, wrapper, or non-standard install path), set the `CLAUDE_BIN` env var — e.g. `CLAUDE_BIN=/opt/claude/bin/claude scripts/install-cron.sh 30`. Because the scheduled run doesn't inherit your interactive shell environment, the installer bakes the value set at install time into the launchd plist (`EnvironmentVariables`, macOS) or crontab entry (Linux) so the scheduled run uses the same binary.
 
 ```bash
-# Verify cron is running
-crontab -l | grep engineer-agent
+# macOS (launchd)
+launchctl print gui/$(id -u)/engineer-agent-poll   # verify / status
+launchctl kickstart -k gui/$(id -u)/engineer-agent-poll   # run one poll now
+launchctl bootout gui/$(id -u)/engineer-agent-poll; rm ~/Library/LaunchAgents/engineer-agent-poll.plist   # remove
 
-# Remove automated polling
-crontab -l | grep -v engineer-agent | crontab -
+# Linux (crontab)
+crontab -l | grep engineer-agent            # verify
+crontab -l | grep -v engineer-agent | crontab -   # remove
 ```
 
 ## Push Notifications & Remote Approval

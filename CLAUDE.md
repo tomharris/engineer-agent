@@ -251,37 +251,42 @@ from a run that failed silently):
   shim; a CLI update made credential resolution depend on `$USER`, which silently broke every
   cron poll. `lib-paths.sh` (sourced by both scripts, directly and via `lib-ntfy.sh`) derives it
   with `export USER="${USER:-$(id -un)}"`, so the fix needs no crontab/service reinstall.
-- **The keychain is unreadable outside the GUI session — the deepest cause of "Not logged in" —
-  and under a `forceLoginOrgUUID` managed policy there is NO environment-credential workaround.** On
-  macOS the primary Anthropic credential lives in the **login keychain**, and a cron/launchd job
-  runs *outside* the user's GUI (Aqua) login session, so it cannot read that keychain — the CLI
-  reports "Not logged in" even with `$USER` correct. This is a THIRD distinct trigger of that
-  identical message (after the `remote-settings.json` shim and the `USER` fix), and it hid behind
-  the other two because both were only ever verified from an interactive terminal, which *is* in
-  the GUI session. A long-lived `claude setup-token` OAuth token consumed via
-  `CLAUDE_CODE_OAUTH_TOKEN` (loaded from a mode-600 `auth.env`) was added to solve this and then
-  **removed**, because it does not survive an org-enforcement policy — a FOURTH, categorically
-  different failure. When an org deploys a root-owned
-  `/Library/Application Support/ClaudeCode/managed-settings.json` with `forceLoginMethod: claudeai`
-  + `forceLoginOrgUUID: <uuid>`, Claude Code restricts login to that org, **exits at startup if the
-  active credential isn't a verified member**, and per the official docs *blocks all environment
-  credentials* (`ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `apiKeyHelper`, and
-  `CLAUDE_CODE_OAUTH_TOKEN`) "since organization membership can't be verified for an environment
-  credential." It surfaces as `Unable to verify organization for the current authentication token.
-  This machine requires organization <uuid> but the token could not be validated` and `claude`
-  exits 1. Unlike the first three triggers (all "token not *found*") this is "token *found* and
-  *rejected*": a **freshly-minted, org-valid `claude setup-token` still fails identically** because
-  it is an environment credential regardless of which org minted it (verified 2026-07-16). The
-  interactive GUI session's keychain login *does* pass the policy, but the cron cannot read that
-  keychain (the very problem the token was meant to solve), so the two constraints are mutually
-  exclusive and there is **no code fix — do NOT re-add an `auth.env`/`CLAUDE_CODE_OAUTH_TOKEN`
-  loader.** The only headless paths that survive `forceLoginOrgUUID` are (a) a cloud-provider
-  inference path (Bedrock/Vertex/Foundry, via `CLAUDE_CODE_USE_BEDROCK`/`_VERTEX`/`_FOUNDRY`), which
-  the docs explicitly exempt, or (b) an org/IT-provided exemption or supported org-scoped headless
-  credential. Do **not** delete or shim around the root-owned `managed-settings.json` — it is an
-  intentional corporate security control.
+- **The login keychain is readable only from *inside* the GUI session — so schedule headless runs
+  in-session (launchd LaunchAgent), not out-of-session (crontab).** On macOS the primary Anthropic
+  credential lives in the **login keychain**, which only unlocks within the user's GUI (Aqua) login
+  session. A **crontab** job runs *outside* that session and cannot read it, so every cron poll dies
+  with "Not logged in" even when `$USER` is correct and credentials work interactively. But a
+  **launchd LaunchAgent bootstrapped into `gui/$UID`** runs *in* the session and reads the keychain
+  fine — **verified 2026-07-17**: a throwaway gui-session LaunchAgent authenticated and exited 0
+  running the exact binary a sibling crontab run failed on, and the `approval-listener` has always
+  used this path. So on macOS `install-cron.sh` installs the poll as a **LaunchAgent**
+  (`engineer-agent-poll`, mirroring `install-listener.sh`), not a crontab entry; Linux keeps crontab
+  (no per-user GUI-keychain split there). An earlier note lumped "cron/launchd" together as both
+  failing the keychain — that was wrong; only *out-of-session* schedulers fail. The tradeoff of the
+  in-session agent: it only polls while the user is logged into the GUI. This is why we **do NOT
+  re-add the reverted `auth.env`/`CLAUDE_CODE_OAUTH_TOKEN` loader** — the launchd path keeps no
+  long-lived secret on disk.
+- **`forceLoginOrgUUID` is a separate, orthogonal wall that blocks *all* headless auth — keychain
+  and env-token alike — so no scheduler choice helps while it is present.** When an org deploys a
+  root-owned `/Library/Application Support/ClaudeCode/managed-settings.json` with
+  `forceLoginMethod: claudeai` + `forceLoginOrgUUID: <uuid>`, Claude Code restricts login to that
+  org, **exits at startup if the active credential isn't a verified member**, and per the official
+  docs *blocks all environment credentials* (`ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`,
+  `apiKeyHelper`, `CLAUDE_CODE_OAUTH_TOKEN`) "since organization membership can't be verified for an
+  environment credential." It surfaces as `Unable to verify organization for the current
+  authentication token. This machine requires organization <uuid> but the token could not be
+  validated` and `claude` exits 1 — a **freshly-minted, org-valid `claude setup-token` still fails
+  identically** (verified 2026-07-16), because it is an environment credential regardless of which
+  org minted it. Under this policy the interactive GUI keychain login passes but a scheduler can't
+  reach it, so a token on disk was a genuine dead end. **This policy was removed from this machine
+  on 2026-07-17**; with it gone, the residual "Not logged in" was purely the out-of-session keychain
+  problem above, fixed by the launchd migration. If the policy is ever re-deployed, the only
+  surviving headless paths are (a) a cloud-provider inference path (Bedrock/Vertex/Foundry, via
+  `CLAUDE_CODE_USE_BEDROCK`/`_VERTEX`/`_FOUNDRY`), which the docs exempt, or (b) an org/IT exemption
+  or org-scoped headless credential. If a root-owned `managed-settings.json` is present, do **not**
+  delete or shim around it — it is an intentional corporate security control.
 
-Both `cron-poll.sh` and `approval-listener.sh` resolve the Claude Code binary from `PATH` by default, but honor a `CLAUDE_BIN` env var override (a specific shim/wrapper/install path). Because cron, systemd, and launchd do not inherit the interactive shell environment, `install-cron.sh` and `install-listener.sh` capture `CLAUDE_BIN` when set at install time and bake it into the crontab entry / systemd `Environment=` / launchd `EnvironmentVariables` so the supervised runs use the same binary.
+Both `cron-poll.sh` and `approval-listener.sh` resolve the Claude Code binary from `PATH` by default, but honor a `CLAUDE_BIN` env var override (a specific shim/wrapper/install path). Because cron, systemd, and launchd do not inherit the interactive shell environment, `install-cron.sh` and `install-listener.sh` capture `CLAUDE_BIN` when set at install time and bake it into the launchd `EnvironmentVariables` (macOS) / systemd `Environment=` (Linux listener) / crontab entry (Linux poll) so the supervised runs use the same binary. On macOS `install-cron.sh` also accepts `EA_POLL_HOURS` (comma-separated clock hours) + `EA_POLL_MINUTE` to emit a `StartCalendarInterval` schedule confined to business hours instead of the default `StartInterval` every-N-minutes; this caps how much a first poll on a large assigned backlog can spend.
 
 > **A supervised daemon runs whatever it parsed at launch — editing the script on disk
 > does not reload it.** `install-listener.sh`'s `systemctl --user enable --now` is a no-op on an

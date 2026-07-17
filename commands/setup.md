@@ -72,20 +72,25 @@ This script handles:
 - Creating `queue/{incoming,drafts,completed,rejected}` directories
 - Creating `state/` directory
 - Initializing `state/last-poll.yaml` with empty projects map
-- Installing crontab entry (default 15-minute interval)
+- Installing the scheduled poll: a **launchd LaunchAgent** (`engineer-agent-poll`) on macOS, or a
+  **crontab entry** on Linux (default 15-minute interval)
 
-`install-cron.sh` also prints a NOTE when no headless auth token is configured — see the next step.
+If the user runs a non-default `claude` binary, pass `CLAUDE_BIN=/abs/path bash …/install-cron.sh`
+so it's baked into the LaunchAgent/crontab. On macOS, to confine polling to business hours (caps
+first-poll spend on a large backlog), pass `EA_POLL_HOURS=9,10,11,13,14,15,16 EA_POLL_MINUTE=3`.
 
-### 5b. Headless auth caveat (macOS)
+### 5b. Headless auth (macOS): launchd, not cron
 
-The cron poll (and the ntfy approval listener) run **outside the GUI login session** and cannot
-read the macOS login keychain, so a supervised run may fail with `Not logged in · Please run /login`.
-There is **no environment-credential workaround on a machine with a `forceLoginOrgUUID` managed
-policy** — such a policy rejects `ANTHROPIC_API_KEY`, `apiKeyHelper`, *and* a `claude setup-token`
-OAuth token, because org membership can't be verified for an environment credential (this was tried
-and removed). If the poll fails with a "Not logged in" or "Unable to verify organization" error,
-see the headless-auth section of `CLAUDE.md`; the only surviving paths (cloud-provider inference, or
-a machine/service-account exemption) require your org's IT.
+On macOS the Claude credential lives in the login keychain, which only unlocks *inside* the GUI
+login session. A **crontab** poll runs outside that session and fails with `Not logged in`; a
+**launchd LaunchAgent** in your GUI session reads the keychain fine — which is why `install-cron.sh`
+uses a LaunchAgent on macOS. No token on disk; it only polls while you're logged in.
+
+Separately, if this machine has a `forceLoginOrgUUID` managed policy
+(`/Library/Application Support/ClaudeCode/managed-settings.json`), it blocks *all* headless auth —
+`ANTHROPIC_API_KEY`, `apiKeyHelper`, and `claude setup-token` alike — and no scheduler choice helps;
+the only paths (cloud-provider inference, or an IT exemption) require your org's IT. Do **not** re-add
+an `auth.env`/`CLAUDE_CODE_OAUTH_TOKEN` loader. See the headless-auth section of `CLAUDE.md`.
 
 ### 6. Print Summary
 
