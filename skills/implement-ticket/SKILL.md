@@ -55,6 +55,16 @@ Read `~/.local/share/engineer-agent/engineer.yaml` and extract:
 
 ### 2. Set Up Branch
 
+**First decide where to work.** The remote (ntfy) approval path runs you *inside a prepared
+isolated git worktree* of the target repo (see CLAUDE.md → "Confined headless ticket
+implementation"): the working copy already exists, checked out on a detached HEAD at the base
+branch, and its prompt tells you explicitly to stay inside it. Detect that situation with
+`git rev-parse --is-inside-work-tree` — if it returns `true`, you are **already inside the target
+repo's worktree**, so create the branch *right here* and **do NOT `cd` anywhere** (a worktree's
+top level is not `projects.<project>.path`, so do not compare against that path — comparing would
+wrongly send you out of the worktree). Only when you are *not* already inside a checkout (the
+interactive path, started from the plugin dir) do you navigate to the repo:
+
 Navigate to the project's working directory using `projects.<project>.path` from config.
 
 Determine the tracker type for this project:
@@ -72,7 +82,7 @@ Create the branch based on tracker type. The `{branch_prefix}` placeholder below
 - Branch name: `{branch_prefix}/{ticket_key}`
 
 ```bash
-cd {projects.<project>.path}
+cd {projects.<project>.path}   # skip this line if already inside the repo worktree (see above)
 git checkout -b {branch_name}
 ```
 
@@ -160,6 +170,13 @@ gate. Decide based on `agent.autonomy.auto_execute` (read in Step 1):
   PR only when the human approves it via `/engineer-agent review-queue`.
 
 Look up `projects.<project>.github.owner` and the repo from config.
+
+**Push the branch first.** `gh pr create` on a branch with no remote tracking branch will try
+to push interactively — a prompt, which is a silent denial on the headless remote-approval path.
+Push explicitly before creating the PR:
+```bash
+git push -u origin {branch_name}
+```
 
 **PR body composition.** Lead the body with the **Intent block** from Step 1, then the changes
 summary and test results, then the **Findings & Disposition** ledger from the Implementation

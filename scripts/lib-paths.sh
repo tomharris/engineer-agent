@@ -46,3 +46,75 @@ export LOGNAME="${LOGNAME:-$USER}"
 # Pre-relocation location, kept only so migrate-storage.sh and the setup/status commands
 # can detect an un-migrated install and say so.
 EA_LEGACY_AGENT_DIR="${HOME}/.claude/engineer-agent"
+
+# --- Per-project config readers (dependency-free, indent-aware awk) -----------------
+# Used by approval-listener.sh to prepare a confined headless ticket implementation:
+# it needs the project's checkout path and its allow-listed build commands, both read
+# from the YAML in plain bash (the listener is deliberately NOT subject to the claude
+# allowlist, so these privileged inputs are resolved before `claude -p` starts). The
+# awk mirrors yaml_ntfy_get()'s block-scoping: enter `projects:`, descend into the
+# `<slug>:` header at +2, then read the requested field. Config is user-authored and
+# trusted; the caller still validates each command against a safe charset as defense
+# in depth (an allowlist rule is security-load-bearing).
+
+# yaml_project_scalar <slug> <key> — a scalar directly under projects.<slug>
+# (e.g. `path`). Prints the unquoted value, or nothing if absent.
+yaml_project_scalar() {
+  local slug="$1" key="$2"
+  [ -f "$EA_CONFIG_FILE" ] || return 0
+  awk -v slug="$slug" -v key="$key" '
+    !inproj && $1=="projects:" { inproj=1; match($0,/^ */); pbase=RLENGTH; next }
+    inproj {
+      match($0,/^ */); ind=RLENGTH
+      if (length($0)==0) next
+      if (ind<=pbase) exit
+      line=$0; sub(/^ +/,"",line)
+      if (!inslug) { if (ind==pbase+2 && line==slug":") { inslug=1; sbase=ind } ; next }
+      if (ind<=sbase) exit
+      if (ind==sbase+2) {
+        k=line; sub(/:.*/,"",k)
+        if (k==key) {
+          v=substr(line,index(line,":")+1); sub(/^[ \t]+/,"",v)
+          print yaml_scalar(v); exit
+        }
+      }
+    }
+    function yaml_scalar(s,   q) {
+      # Extract a YAML scalar: quoted ("..."/@apos) -> content between quotes;
+      # unquoted -> value up to an inline " #" comment, whitespace-trimmed.
+      if (substr(s,1,1)=="\"") { s=substr(s,2); q=index(s,"\""); return (q>0)?substr(s,1,q-1):s }
+      if (substr(s,1,1)=="\x27") { s=substr(s,2); q=index(s,"\x27"); return (q>0)?substr(s,1,q-1):s }
+      sub(/[ \t]+#.*$/,"",s); sub(/[ \t]+$/,"",s); return s
+    }
+  ' "$EA_CONFIG_FILE"
+}
+
+# yaml_project_list <slug> <parent> <listkey> — items of the list at
+# projects.<slug>.<parent>.<listkey> (e.g. exec.allowed_commands). One item per line,
+# unquoted, `- ` stripped.
+yaml_project_list() {
+  local slug="$1" parent="$2" listkey="$3"
+  [ -f "$EA_CONFIG_FILE" ] || return 0
+  awk -v slug="$slug" -v parent="$parent" -v listkey="$listkey" '
+    !inproj && $1=="projects:" { inproj=1; match($0,/^ */); pbase=RLENGTH; next }
+    inproj {
+      match($0,/^ */); ind=RLENGTH
+      if (length($0)==0) next
+      if (ind<=pbase) exit
+      line=$0; sub(/^ +/,"",line)
+      if (!inslug) { if (ind==pbase+2 && line==slug":") { inslug=1; sbase=ind } ; next }
+      if (ind<=sbase) exit
+      if (ind==sbase+2) { inparent=(line==parent":"); inlist=0; next }
+      if (inparent && ind==sbase+4) { k=line; sub(/:.*/,"",k); inlist=(k==listkey); next }
+      if (inparent && inlist && ind>=sbase+6 && substr(line,1,1)=="-") {
+        item=line; sub(/^-[ \t]*/,"",item); item=yaml_scalar(item)
+        if (length(item)) print item
+      }
+    }
+    function yaml_scalar(s,   q) {
+      if (substr(s,1,1)=="\"") { s=substr(s,2); q=index(s,"\""); return (q>0)?substr(s,1,q-1):s }
+      if (substr(s,1,1)=="\x27") { s=substr(s,2); q=index(s,"\x27"); return (q>0)?substr(s,1,q-1):s }
+      sub(/[ \t]+#.*$/,"",s); sub(/[ \t]+$/,"",s); return s
+    }
+  ' "$EA_CONFIG_FILE"
+}

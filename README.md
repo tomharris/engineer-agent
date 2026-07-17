@@ -110,6 +110,9 @@ projects:
       console_command: ""                # e.g. "rails console", "python manage.py shell", "node" (optional)
       document_to: ""                    # where to document completed QA plans: "slite" | "" (empty/absent disables)
       document_parent: ""                # Slite channel/note id for the QA doc; empty → user's private (personal) channel
+    exec:                                 # optional — only for remote (ntfy) ticket approval
+      allowed_commands: ["bin/rails", "bin/rspec", "bin/srb", "bundle"]  # build/test allowlist for the
+                                          # confined headless coding session; omit ⇒ remote ticket approval refused
 
   # Example: project using GitHub Issues
   my-frontend:
@@ -544,6 +547,14 @@ This registers a supervised service (`engineer-agent-listener`) that restarts on
 **After updating the plugin, re-run `install-listener.sh`** (or `systemctl --user restart engineer-agent-listener`) so the running service loads the new code — a supervised daemon keeps executing whatever it parsed at launch. As a backstop the listener also re-execs itself when its own file changes, at the next stream reconnect.
 
 By default the listener caps each headless approval at **$2.00**, or **$8.00** for `ticket` items (which run a full implementation). Tune via the `EA_EXECUTE_BUDGET_USD` / `EA_TICKET_BUDGET_USD` environment variables.
+
+**Approving a `ticket` from your phone** is special: it runs the whole `implement-ticket` coding session (branch → Ralph Loop → draft PR) unattended, so it gets its own confined execution path instead of the read/post one every other type uses:
+
+- The listener creates a throwaway **git worktree** of the target repo and runs the session inside it, so your real checkout is never touched. The worktree is removed when the run finishes; the branch and draft PR persist.
+- The build/test commands that session may run come from a per-project allowlist, **`projects.<slug>.exec.allowed_commands`** — each becomes a `Bash(<cmd> *)` permission (e.g. `["bin/rails", "bin/rspec", "bin/srb", "bundle"]` for a Rails repo). This is the security boundary for code driven off issue text, so keep it to build/test tools only.
+- **Deny-by-default:** a project with no `exec.allowed_commands` has remote ticket approval *refused* — you get a `⚠️ Failed` push telling you to configure it, and you implement the ticket interactively instead. Nothing runs unconfined. (The interactive terminal path never consults this list — you're present to approve.)
+
+Claude Code's `Bash()` permissions match on command prefix, not working directory, so this is defense-in-depth ("medium" isolation), not a hard jail — keep `allowed_commands` tight and treat your `command_topic` as a password (below).
 
 As with cron, set `CLAUDE_BIN` to pick a specific Claude Code binary — e.g. `CLAUDE_BIN=/opt/claude/bin/claude scripts/install-listener.sh`. Since the supervised service does not inherit your shell environment, the installer bakes the install-time value into the systemd unit (`Environment=`) or launchd plist (`EnvironmentVariables`).
 

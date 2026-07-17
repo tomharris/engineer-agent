@@ -105,18 +105,96 @@ test_invalid() {
   teardown
 }
 
-# --- Case 4: ticket type selects the generous ticket budget ---
-test_ticket_budget() {
-  echo "test_ticket_budget:"
+# Ticket-path helpers: a project config with a checkout path + build allowlist, and a
+# fake `git` on PATH so worktree add/remove touch nothing real (they just mkdir the
+# worktree dir so the confined `claude` run has a cwd).
+write_ticket_config() {
+  # $1 = "with-allowlist" | "no-allowlist"
+  mkdir -p "$TMP/repo"
+  {
+    printf 'agent:\n  branch_prefix: "x"\n'
+    printf 'projects:\n  wayfinder-api:\n    path: "%s"\n' "$TMP/repo"
+    if [ "$1" = "with-allowlist" ]; then
+      # Inline comments + quotes on purpose: real configs have them, and the reader must
+      # strip them (a prior version leaked `bin/rails"  # ...` and failed the charset check).
+      printf '    exec:\n      allowed_commands:\n        - "bin/rails"   # migrations, db:migrate\n        - "bundle"      # gem exec\n'
+    fi
+    printf '    github:\n      owner: "futuresinc"\n'
+  } > "$EA_CONFIG_FILE"
+}
+install_fake_git() {
+  export GIT_LOG="$TMP/git.log"; : > "$GIT_LOG"
+  mkdir -p "$TMP/bin"
+  cat > "$TMP/bin/git" <<'EOF'
+#!/bin/bash
+printf 'git %s\n' "$*" >> "$GIT_LOG"
+args=("$@")
+for ((i=0;i<${#args[@]};i++)); do
+  case "${args[i]}" in
+    symbolic-ref) echo "origin/main"; exit 0;;
+    fetch) exit 0;;
+    worktree)
+      if [ "${args[i+1]}" = "add" ]; then
+        for ((j=i+2;j<${#args[@]};j++)); do
+          [ "${args[j]}" = "--detach" ] && { mkdir -p "${args[j+1]}"; break; }
+        done
+      fi
+      exit 0;;
+  esac
+done
+exit 0
+EOF
+  chmod +x "$TMP/bin/git"
+  export PATH="$TMP/bin:$PATH"
+}
+
+# --- Case 4: approved ticket runs the CONFINED path (worktree + narrow allowlist) ---
+test_ticket_confined_run() {
+  echo "test_ticket_confined_run:"
   setup
+  write_ticket_config with-allowlist
+  install_fake_git
   local item="20260716-000000-ticket-gh-1.md"
-  printf 'type: ticket\n' > "$EA_AGENT_DIR/queue/drafts/$item"
+  printf 'type: ticket\nproject: wayfinder-api\n' > "$EA_AGENT_DIR/queue/drafts/$item"
   export FAKE_SUCCEED=1
   handle_line "$(msg_event id-ticket "approve|$item")"
 
   grep -qF -- "--max-budget-usd $TICKET_BUDGET_USD" "$CLAUDE_ARGS_LOG" \
     && ok "ticket uses ticket budget ($TICKET_BUDGET_USD)" \
     || bad "ticket budget not applied (args: $(cat "$CLAUDE_ARGS_LOG"))"
+  grep -qF -- "Bash(bin/rails *)" "$CLAUDE_ARGS_LOG" && grep -qF -- "Bash(bundle *)" "$CLAUDE_ARGS_LOG" \
+    && ok "narrow build allowlist expanded from config" \
+    || bad "build allowlist missing (args: $(cat "$CLAUDE_ARGS_LOG"))"
+  grep -qF -- "Bash(git *)" "$CLAUDE_ARGS_LOG" \
+    && ok "git allowed for the coding session" || bad "git not allowed"
+  grep -qF -- "Bash(spy *)" "$CLAUDE_ARGS_LOG" \
+    && bad "spy leaked into the confined ticket allowlist" || ok "confined allowlist excludes spy/slite (not the generic path)"
+  grep -q "worktree add" "$GIT_LOG" && grep -q "worktree remove" "$GIT_LOG" \
+    && ok "worktree created and torn down" || bad "worktree lifecycle missing (git log: $(cat "$GIT_LOG"))"
+  grep -q "Done" "$NOTIFY_LOG" && ok "Done ack after successful implementation" || bad "missing Done ack"
+  teardown
+}
+
+# --- Case 4b: deny-by-default — a ticket for a project with no exec.allowed_commands ---
+test_ticket_refused_without_allowlist() {
+  echo "test_ticket_refused_without_allowlist:"
+  setup
+  write_ticket_config no-allowlist
+  install_fake_git
+  local item="20260716-000000-ticket-gh-2.md"
+  printf 'type: ticket\nproject: wayfinder-api\n' > "$EA_AGENT_DIR/queue/drafts/$item"
+  export FAKE_SUCCEED=1   # even if claude were called it would "succeed"; it must NOT be called
+  handle_line "$(msg_event id-refuse "approve|$item")"
+
+  [ ! -s "$CLAUDE_ARGS_LOG" ] \
+    && ok "claude never launched without a build allowlist" \
+    || bad "claude ran despite deny-by-default (args: $(cat "$CLAUDE_ARGS_LOG"))"
+  grep -q "worktree add" "$GIT_LOG" 2>/dev/null \
+    && bad "worktree created before the allowlist check" || ok "no worktree created (refused before setup)"
+  [ -e "$EA_AGENT_DIR/queue/drafts/$item" ] \
+    && ok "item left in drafts/ for the human to fix config" || bad "item wrongly left drafts/"
+  grep -q "Failed" "$NOTIFY_LOG" && grep -q "urgent" "$NOTIFY_LOG" \
+    && ok "urgent Failed ack sent" || bad "missing Failed ack"
   teardown
 }
 
@@ -138,7 +216,8 @@ test_default_budget() {
 test_success
 test_failure
 test_invalid
-test_ticket_budget
+test_ticket_confined_run
+test_ticket_refused_without_allowlist
 test_default_budget
 
 echo "-----"

@@ -83,8 +83,20 @@ read `projects.<project>.tracker`, or infer from `source` frontmatter (`github` 
   spy send {channel_id} "{reply_text}" --thread {message_ts} -w {workspace} --json
   ```
 
-- **ticket** — create a **draft** PR. (See "Auto-execute: draft-pr" below for when this is
-  allowed to run without a human approval.) Look up `projects.<project>.github.owner` and repo.
+- **ticket** — create a **draft** PR **from an already-implemented, pushed branch**. This case
+  is the *finisher*: it assumes the branch already exists on the remote (a human ran
+  `implement-ticket`, or the branch was pushed some other way). It does **not** write code.
+  > **The remote (ntfy) approval path does not reach this case.** For a `ticket`,
+  > `scripts/approval-listener.sh` runs the full `implement-ticket` flow inside an isolated,
+  > allowlist-confined git worktree (see CLAUDE.md → "Confined headless ticket implementation"),
+  > and *that* flow creates the branch, pushes it, opens the draft PR, and moves the item to
+  > `completed/` itself. So on the phone path a `ticket` never returns here — this branch is for
+  > the interactive terminal and manual `/engineer-agent execute` invocations, where the branch
+  > is expected to exist. If the `--head` branch is missing, `gh` errors and the item stays in
+  > `drafts/` (Step 5's failure rule) — surface it so the human can implement first.
+
+  (See "Auto-execute: draft-pr" below for when this is allowed to run without a human approval.)
+  Look up `projects.<project>.github.owner` and repo.
   - tracker `github-issues` (extract issue number from `ticket_key` stripping `#`; slug =
     title lowercased, non-alphanumeric → hyphens, truncated to 40 chars, trailing hyphens
     stripped):

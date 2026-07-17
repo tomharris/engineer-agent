@@ -86,7 +86,7 @@ Slack access uses the Spy CLI (`agent.slack`, optional):
 - `agent.slack.bin` — path to the `spy` binary. Effective binary = `agent.slack.bin` ?? `spy` (on PATH).
 - `agent.slack.workspace` — default Slack workspace. Effective workspace = `projects.<slug>.slack.workspace` ?? `agent.slack.workspace` ?? Spy's own default. Pass it as `-w <workspace>` on every `spy` call (Spy errors when multiple workspaces are signed in and no default is set).
 
-To find config for a specific project, look up `projects.<slug>`. Each project entry has `path`, `tracker`, `github`, `slack`, `jira`, `slite`, and `qa` subsections. The `tracker` field (`"jira"` | `"github-issues"` | `"none"`) determines which ticket tracker a project uses. If absent, it's inferred: `jira` section present → `"jira"`, `github.issues` section present → `"github-issues"`, neither → `"none"`.
+To find config for a specific project, look up `projects.<slug>`. Each project entry has `path`, `tracker`, `github`, `slack`, `jira`, `slite`, `qa`, and (optional) `exec` subsections. `exec.allowed_commands` is the build/test command allowlist for confined headless ticket implementation — see "Confined headless ticket implementation" under Notifications & Remote Approval. The `tracker` field (`"jira"` | `"github-issues"` | `"none"`) determines which ticket tracker a project uses. If absent, it's inferred: `jira` section present → `"jira"`, `github.issues` section present → `"github-issues"`, neither → `"none"`.
 
 ### Jira Multi-Source Config
 
@@ -214,7 +214,7 @@ Body sections:
 ntfy turns the approval gate into a remote, async one without a custom server. Both directions are ntfy topics:
 
 - **Outbound** (`topic`): after a poll, `cron-poll.sh` calls `scripts/notify.sh` to push each new draft with **Approve / Reject / Open** action buttons.
-- **Inbound** (`command_topic`): the Approve/Reject buttons are ntfy `http` actions that POST `approve|<item-id>` / `reject|<item-id>` back to the command topic. `scripts/approval-listener.sh` (a long-running service installed by `scripts/install-listener.sh`) streams that topic and runs `/engineer-agent execute <item-id> <decision>` headlessly. After validating a command the listener also pushes two best-effort acknowledgements back to the outbound `topic` via `notify.sh --fyi`: a **receipt** ack (low priority, "📨 Received…") the moment the tap lands, and an **outcome** ack after the run — "✅ Done…" (normal) when the item leaves `queue/drafts/`, or "⚠️ Failed…" (urgent) when it did not. Invalid or already-seen commands are not acknowledged (avoids noise and confirming a live listener to a prober). The ack adds no posting capability — it is an outbound notification only, so the "polling reads; only execute-item writes" invariant is untouched.
+- **Inbound** (`command_topic`): the Approve/Reject buttons are ntfy `http` actions that POST `approve|<item-id>` / `reject|<item-id>` back to the command topic. `scripts/approval-listener.sh` (a long-running service installed by `scripts/install-listener.sh`) streams that topic and runs `/engineer-agent execute <item-id> <decision>` headlessly (an approved `ticket` takes the separate confined-implementation path instead — see "Confined headless ticket implementation"). After validating a command the listener also pushes two best-effort acknowledgements back to the outbound `topic` via `notify.sh --fyi`: a **receipt** ack (low priority, "📨 Received…") the moment the tap lands, and an **outcome** ack after the run — "✅ Done…" (normal) when the item leaves `queue/drafts/`, or "⚠️ Failed…" (urgent) when it did not. Invalid or already-seen commands are not acknowledged (avoids noise and confirming a live listener to a prober). The ack adds no posting capability — it is an outbound notification only, so the "polling reads; only execute-item writes" invariant is untouched.
 
 **Writing a headless `claude -p` run** (both scripts do this; the rules below were each learned
 from a run that failed silently):
@@ -300,6 +300,37 @@ get `TICKET_BUDGET_USD` (default `8.00`); everything else gets `DEFAULT_BUDGET_U
 Only `ticket` unlocks the higher cap, so untrusted frontmatter can at worst pick between two fixed
 values — never inflate spend.
 
+### Confined headless ticket implementation
+
+A `ticket` is the one item type whose *execution writes code* — approving it runs the full
+`implement-ticket` flow (branch → Ralph Loop → migrations/typecheck → draft PR), not a single
+`gh` call. That cannot run under the read/post allowlist the other types use, so the listener
+gives `ticket` a **separate, deliberately confined execution path** (`run_ticket_implementation`
+in `approval-listener.sh`). It is the one place untrusted issue text can steer code, so the two
+things that define the sandbox are decided in **plain bash, before `claude` starts** — untrusted
+text can influence code *inside* the sandbox but never the *shape* of it:
+
+1. **Path isolation.** The listener creates a throwaway `git worktree` of the target repo
+   (detached at the base branch) under `~/.local/share/engineer-agent/worktrees/` and runs the
+   headless session with that as cwd, so the user's real checkout is never the target. The
+   worktree is torn down (`git worktree remove --force`) when the run ends, pass or fail; the
+   branch and any pushed commits / draft PR persist.
+2. **Narrow allowlist.** Build/test commands come from `projects.<slug>.exec.allowed_commands`
+   in config; the listener validates each against `^[A-Za-z0-9._/-]+$` and expands it to a
+   `Bash(<cmd> *)` rule, added to `Read/Edit/Write/Glob/Grep`, `Bash(git *)`, `Bash(gh *)`,
+   `Bash(mv *)`, and `notify.sh`. **Deny-by-default:** a project with no (valid) list has remote
+   ticket approval *refused* — the item stays in `drafts/`, a `⚠️ Failed` push tells the user to
+   set the list, and no unconfined session ever runs. It is never `Bash(*)` / `bypassPermissions`.
+3. **Draft-PR review gate** (downstream, unchanged): the output is a draft PR the human reviews.
+
+**Honest limit — this is "medium," not airtight.** Claude Code `Bash()` rules are command-prefix
+matches, *not* cwd-scoped, so `Bash(git *)` also permits `git -C /elsewhere`. The worktree bounds
+the *default* target and the command *set* is curated, but that prefix-vs-path gap is the residual
+risk. Mitigating it: the command set is small and build-only, the source is an issue routed to the
+user's own project, and the output is draft-only. `implement-ticket` is worktree-aware (Step 2: it
+creates the branch in place when already inside the repo checkout, and pushes before `gh pr
+create` so the headless run never hits an interactive push prompt).
+
 Key invariant: **polling reads; only `execute-item` writes.** `cron-poll.sh` passes a deliberately
 read-only `--allowedTools` allowlist (`gh pr list/view/diff`, `gh issue list/view`, `spy read/thread`,
 and the read-only MCP verbs `mcp__atlassian__searchJiraIssuesUsingJql`/`getJiraIssue` and
@@ -314,7 +345,7 @@ untrusted text (PR/issue bodies, Slack messages), so a prompt-injection payload 
 to reach a write verb. Keep every posting capability in `execute-item`, behind the gate. When
 adding a source, give the poll its read verbs only.
 
-Key invariant: **`/engineer-agent review-queue` (terminal) and `/engineer-agent execute` (remote) both delegate to the shared `execute-item` skill** — the single source of truth for what approving an item does. `qa-test-plan` is interactive-only and is refused on the remote path. (The `generate-qa` skill, when the app is reachable at `qa.base_url`, also runs its generated script and fixes failing scripted tests in place — fixing test defects but leaving genuine code-bug failures as reported findings, never demoting them to the manual checklist; best-effort, it skips execution and reports when the app is unreachable.) `scripts/lib-ntfy.sh` is the shared config reader sourced by `notify.sh` and `approval-listener.sh`.
+Key invariant: **`/engineer-agent review-queue` (terminal) and `/engineer-agent execute` (remote) both delegate to the shared `execute-item` skill** — the single source of truth for what approving an item does. Two typed exceptions: `qa-test-plan` is interactive-only and is refused on the remote path; and an approved `ticket` on the remote path is handled by the listener's confined worktree implementation (above) rather than by `execute-item` — `implement-ticket` opens the draft PR itself. `execute-item`'s own `ticket` case is the *finisher* for the interactive/manual path, creating a draft PR from an **already-implemented, pushed branch** (it writes no code). (The `generate-qa` skill, when the app is reachable at `qa.base_url`, also runs its generated script and fixes failing scripted tests in place — fixing test defects but leaving genuine code-bug failures as reported findings, never demoting them to the manual checklist; best-effort, it skips execution and reports when the app is unreachable.) `scripts/lib-ntfy.sh` is the shared config reader sourced by `notify.sh` and `approval-listener.sh`.
 
 **Security:** on public `ntfy.sh` a topic name is effectively a password (the `command_topic` can trigger Slack posts / PR creation). Use high-entropy names, set `auth_token`, and/or self-host via `server`. The listener also defends in depth: it only accepts `approve`/`reject`, only item ids matching `^[A-Za-z0-9._-]+$`, and only acts on items still in `queue/drafts/` (idempotent via `state/ntfy-seen.yaml`).
 
