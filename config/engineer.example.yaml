@@ -69,7 +69,7 @@ projects:
       paths: ["app/payroll/**"]                   # matched against file paths named in the ticket
     # Confined headless ticket implementation — OPTIONAL, and ONLY consulted when you approve
     # a `ticket` item remotely (an ntfy Approve tap from your phone). Approving a ticket that
-    # way runs the full implement-ticket coding session (branch → Ralph Loop → draft PR)
+    # way runs the full implement-ticket coding session (branch → iterative implementation → draft PR)
     # unattended, inside a throwaway git worktree of this repo. `allowed_commands` is the
     # allowlist of build/test command prefixes that session may run — each becomes a
     # `Bash(<cmd> *)` permission. Keep it TIGHT: it is the security boundary for code driven

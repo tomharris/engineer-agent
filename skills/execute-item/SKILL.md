@@ -192,7 +192,7 @@ review, so it is the one action safe to take without a human approval gate. Beha
 
 - When this skill is invoked for an explicit human approval (interactive queue or remote
   approve), execute normally.
-- When an automated caller (e.g. `implement-ticket` after Ralph Loop) wants to skip the
+- When an automated caller (e.g. `implement-ticket` after implementation) wants to skip the
   gate, it should only do so when `draft-pr` is present in `agent.autonomy.auto_execute`.
   This skill itself always performs the action it is asked to; the *gating decision* lives
   with the caller, and `auto_execute` is the shared signal both honor.

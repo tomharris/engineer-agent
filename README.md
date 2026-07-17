@@ -423,7 +423,7 @@ discoveries become compounding, reusable assets. Review via `/engineer-agent rev
 The end-to-end loop these commands are designed to chain into, per ticket:
 
 ```
-/engineer-agent:implement-ticket <ticket>   # branch, implement (Ralph Loop), draft PR
+/engineer-agent:implement-ticket <ticket>   # branch, implement iteratively, draft PR
         │  (in parallel)
         └─ /security-review                  # security pass on the diff
 /engineer-agent:qa <ticket>                  # generate + run QA test plan
@@ -548,7 +548,7 @@ This registers a supervised service (`engineer-agent-listener`) that restarts on
 
 By default the listener caps each headless approval at **$2.00**, or **$8.00** for `ticket` items (which run a full implementation). Tune via the `EA_EXECUTE_BUDGET_USD` / `EA_TICKET_BUDGET_USD` environment variables.
 
-**Approving a `ticket` from your phone** is special: it runs the whole `implement-ticket` coding session (branch → Ralph Loop → draft PR) unattended, so it gets its own confined execution path instead of the read/post one every other type uses:
+**Approving a `ticket` from your phone** is special: it runs the whole `implement-ticket` coding session (branch → inline iterative implementation → draft PR) unattended, so it gets its own confined execution path instead of the read/post one every other type uses:
 
 - The listener creates a throwaway **git worktree** of the target repo and runs the session inside it, so your real checkout is never touched. The worktree is removed when the run finishes; the branch and draft PR persist.
 - The build/test commands that session may run come from a per-project allowlist, **`projects.<slug>.exec.allowed_commands`** — each becomes a `Bash(<cmd> *)` permission (e.g. `["bin/rails", "bin/rspec", "bin/srb", "bundle"]` for a Rails repo). This is the security boundary for code driven off issue text, so keep it to build/test tools only.

@@ -1,16 +1,16 @@
 ---
 name: implement-ticket
-description: "Implement a ticket (Jira or GitHub Issue) by creating a branch, writing code using Ralph Loop, and preparing a PR. Use this skill when a ticket queue item is approved for implementation."
+description: "Implement a ticket (Jira or GitHub Issue) by creating a branch, writing the code iteratively, and preparing a PR. Use this skill when a ticket queue item is approved for implementation."
 version: 1.0.0
 ---
 
 # Implement a Ticket
 
-Implement the code changes described in a ticket using iterative development via Ralph Loop.
+Implement the code changes described in a ticket through iterative, in-session development (plan → edit → test → fix → repeat).
 
 ## Tools Needed
 
-- `Bash` — git operations, run tests, Ralph Loop invocation, `gh pr create`
+- `Bash` — git operations, run tests, build/typecheck commands, `gh pr create`
 - `Read`, `Write`, `Edit` — code changes and reading repo files
 - `Glob`, `Grep` — codebase navigation
 
@@ -45,7 +45,7 @@ reuse it verbatim rather than regenerating):
 
 If the ticket lacks enough detail to fill **Goal** or **Definition of done**, do not invent
 intent — fall back to the "Ticket too vague" edge case below (draft "Needs clarification",
-priority `urgent`, do not start Ralph Loop).
+priority `urgent`, do not start implementing).
 
 Read `~/.local/share/engineer-agent/engineer.yaml` and extract:
 - `agent.branch_prefix` — MUST be read from config. There is no fallback default. If the key is missing or empty, tell the user to set `agent.branch_prefix` in `~/.local/share/engineer-agent/engineer.yaml` and stop. Use the literal string from the yaml file verbatim — do not substitute any other value.
@@ -86,38 +86,42 @@ cd {projects.<project>.path}   # skip this line if already inside the repo workt
 git checkout -b {branch_name}
 ```
 
-### 3. Start Ralph Loop
+### 3. Implement Iteratively (inline)
 
-Invoke Ralph Loop to iteratively implement the ticket. Construct the prompt from the queue item:
+Implement the ticket **yourself, iteratively, in this session** — plan → edit → run the tests
+→ read failures → fix → repeat. Treat "up to ~10 passes" and "done when all acceptance criteria
+are met and the tests pass" as your own stopping condition; there is no external loop driving you.
 
-```
-/ralph-loop "Implement ticket {ticket_key}: {title}
+> **Do NOT invoke `/ralph-loop` here.** Ralph Loop is an *interactive, human-typed* convenience: the
+> command is hidden from the SlashCommand tool (a model literally cannot call it), its setup writes
+> state under `.claude/` (write-guarded — see CLAUDE.md), and its whole mechanism is a `Stop` hook
+> that re-feeds the prompt across interactive turns. None of that exists in a skill/model-driven or
+> headless `claude -p` run — so a `/ralph-loop` call there just errors and the work stalls. Anything
+> that leans on interactive-session machinery (hooks, hidden slash commands, cross-turn state) is
+> unreachable this way, exactly like `Skill`/`Agent` are from the cron. Do the loop inline instead.
+> (A human running `/engineer-agent implement-ticket` who *wants* the visible Ralph mechanism can
+> type `/ralph-loop` themselves before/around this skill — but the skill must never depend on it.)
 
-## Intent
-{the Intent block synthesized in Step 1 — Goal / Key constraints / Definition of done / Non-goals}
+Drive the work from the queue item:
 
-## Acceptance Criteria
-{acceptance_criteria}
+- **Goal / constraints / done / non-goals** — the Intent block synthesized in Step 1.
+- **Acceptance criteria** — from the item's `## Context`.
+- **Implementation plan** — from the item's `## Draft Response`.
+- Implement the changes; write or update tests to cover the new behavior; run the test suite after
+  each change and fix what it surfaces; follow the patterns and conventions in the repo's CLAUDE.md;
+  keep changes focused on the ticket scope — do not refactor unrelated code.
 
-## Implementation Plan
-{implementation_plan}
+Stop when the acceptance criteria are met and tests pass, or when you have made your best iterations
+and something genuinely blocks completion (record that as partial in the next step — do not loop
+forever or fabricate completion).
 
-## Instructions
-- Implement the changes described above
-- Write or update tests to cover the new behavior
-- Run the test suite after each change
-- Follow the patterns and conventions in CLAUDE.md
-- Keep changes focused on the ticket scope — do not refactor unrelated code
-" --max-iterations 10 --completion-promise "All acceptance criteria met and tests pass"
-```
+### 4. After Implementation
 
-### 4. After Ralph Loop Completes
-
-When Ralph Loop finishes (either by fulfilling the promise or hitting max iterations):
+When the iterative implementation finishes (acceptance criteria met, or blocked/partial):
 
 1. Check the outcome:
-   - If promise was fulfilled: implementation is complete
-   - If max iterations hit: implementation may be partial
+   - If the acceptance criteria are met and tests pass: implementation is complete
+   - If you stopped blocked or out of iterations: implementation may be partial
 
 2. Gather results:
    - Run `git diff --stat` to list changed files
@@ -132,7 +136,6 @@ When Ralph Loop finishes (either by fulfilling the promise or hitting max iterat
 **Status:** {complete | partial}
 **Branch:** {branch_prefix}/{ticket_key}
 **Project:** {project}
-**Iterations used:** {N} of 10
 
 ### Changes Made
 {git diff --stat output}
@@ -200,6 +203,6 @@ Move the queue item to `~/.local/share/engineer-agent/queue/completed/` with `st
 
 ## Edge Cases
 
-- **Ticket too vague:** If acceptance criteria are missing or unclear, set the draft to say "Needs clarification" and set priority to `urgent`. Do not start Ralph Loop.
-- **Tests won't pass:** If Ralph Loop hits max iterations with failing tests, report partial progress and let the human decide whether to continue manually.
+- **Ticket too vague:** If acceptance criteria are missing or unclear, set the draft to say "Needs clarification" and set priority to `urgent`. Do not start implementing.
+- **Tests won't pass:** If you exhaust your iterations with failing tests, report partial progress and let the human decide whether to continue manually.
 - **Wrong repo:** If the target repo can't be determined, ask in the draft for the human to specify it.
