@@ -67,6 +67,7 @@ yaml_project_scalar() {
     inproj {
       match($0,/^ */); ind=RLENGTH
       if (length($0)==0) next
+      if ($0 ~ /^[ \t]*#/) next   # full-line comment: skip (a col-0 "#" is NOT a dedent)
       if (ind<=pbase) exit
       line=$0; sub(/^ +/,"",line)
       if (!inslug) { if (ind==pbase+2 && line==slug":") { inslug=1; sbase=ind } ; next }
@@ -100,6 +101,7 @@ yaml_project_list() {
     inproj {
       match($0,/^ */); ind=RLENGTH
       if (length($0)==0) next
+      if ($0 ~ /^[ \t]*#/) next   # full-line comment: skip (a col-0 "#" is NOT a dedent)
       if (ind<=pbase) exit
       line=$0; sub(/^ +/,"",line)
       if (!inslug) { if (ind==pbase+2 && line==slug":") { inslug=1; sbase=ind } ; next }
