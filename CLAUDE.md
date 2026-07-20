@@ -303,12 +303,14 @@ get `TICKET_BUDGET_USD` (default `8.00`); everything else gets `DEFAULT_BUDGET_U
 `2.00`). Override either via the `EA_TICKET_BUDGET_USD` / `EA_EXECUTE_BUDGET_USD` env vars. A flat
 `0.50` used to abort every ticket approval with "Exceeded USD budget", stranding it in `drafts/`.
 Only `ticket` unlocks the higher cap, so untrusted frontmatter can at worst pick between two fixed
-values — never inflate spend.
+values — never inflate spend. The best-effort QA generation that follows a ticket implementation
+(see below) is a *separate* `claude -p` run with its own cap, `QA_BUDGET_USD` (default `2.00`,
+override `EA_QA_BUDGET_USD`).
 
 ### Confined headless ticket implementation
 
 A `ticket` is the one item type whose *execution writes code* — approving it runs the full
-`implement-ticket` flow (branch → inline iterative implementation → migrations/typecheck → draft PR), not a single
+`implement-ticket` flow (branch → inline iterative implementation → migrations/typecheck → draft PR → best-effort QA plan), not a single
 `gh` call. That cannot run under the read/post allowlist the other types use, so the listener
 gives `ticket` a **separate, deliberately confined execution path** (`run_ticket_implementation`
 in `approval-listener.sh`). It is the one place untrusted issue text can steer code, so the two
@@ -333,6 +335,22 @@ text can influence code *inside* the sandbox but never the *shape* of it:
    ticket approval *refused* — the item stays in `drafts/`, a `⚠️ Failed` push tells the user to
    set the list, and no unconfined session ever runs. It is never `Bash(*)` / `bypassPermissions`.
 3. **Draft-PR review gate** (downstream, unchanged): the output is a draft PR the human reviews.
+
+**QA test plan (best-effort, after the draft PR).** Once the implementation has actually shipped
+(the `completed/<item>` record exists), and *only* if the project has `projects.<slug>.qa.base_url`
+configured, the listener runs a **second, separate** confined `claude -p` (`run_qa_generation`) —
+inside the same still-live worktree, before teardown, so `git diff <base>...HEAD` sees the branch
+changes — that follows the `qa`/`generate-qa` flow to draft a `qa-test-plan` queue item for the
+branch. It is a deliberately *different* allowlist from the implementation run: it **adds**
+`Bash(curl *)` (Pass 3 script execution) and `mcp__atlassian__getJiraIssue` (Jira AC) and **drops**
+the build-command rules — QA writes no code, so widening the code-writing sandbox with network
+egress is avoided; the implementation run, symmetrically, keeps the build rules but never gets
+`curl`. QA is read + queue-draft only (it posts nothing external — Slite publishing still happens
+later at review-queue/execute-item), so it needs no approval gate, and its result is surfaced as an
+informational FYI push (`qa-test-plan` is interactive-only for approval, so it is *never* an
+actionable Approve/Reject). It is **best-effort and decoupled**: a failure or an absent qa config
+is logged and skipped, and never flips the ticket's ✅/⚠️ ack — a shipped PR is never re-flagged as
+failed because QA hiccuped.
 
 **Honest limit — this is "medium," not airtight.** Claude Code `Bash()` rules are command-prefix
 matches, *not* cwd-scoped, so `Bash(git *)` also permits `git -C /elsewhere`. The worktree bounds

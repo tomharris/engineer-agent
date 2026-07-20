@@ -90,6 +90,40 @@ yaml_project_scalar() {
   ' "$EA_CONFIG_FILE"
 }
 
+# yaml_project_subscalar <slug> <parent> <key> — a scalar nested one level deeper than
+# yaml_project_scalar, at projects.<slug>.<parent>.<key> (e.g. qa.base_url). Prints the
+# unquoted value, or nothing if absent. Same descent as yaml_project_list, but reads the
+# scalar at sbase+4 under <parent> instead of collecting list items.
+yaml_project_subscalar() {
+  local slug="$1" parent="$2" key="$3"
+  [ -f "$EA_CONFIG_FILE" ] || return 0
+  awk -v slug="$slug" -v parent="$parent" -v key="$key" '
+    !inproj && $1=="projects:" { inproj=1; match($0,/^ */); pbase=RLENGTH; next }
+    inproj {
+      match($0,/^ */); ind=RLENGTH
+      if (length($0)==0) next
+      if ($0 ~ /^[ \t]*#/) next   # full-line comment: skip (a col-0 "#" is NOT a dedent)
+      if (ind<=pbase) exit
+      line=$0; sub(/^ +/,"",line)
+      if (!inslug) { if (ind==pbase+2 && line==slug":") { inslug=1; sbase=ind } ; next }
+      if (ind<=sbase) exit
+      if (ind==sbase+2) { inparent=(line==parent":"); next }
+      if (inparent && ind==sbase+4) {
+        k=line; sub(/:.*/,"",k)
+        if (k==key) {
+          v=substr(line,index(line,":")+1); sub(/^[ \t]+/,"",v)
+          print yaml_scalar(v); exit
+        }
+      }
+    }
+    function yaml_scalar(s,   q) {
+      if (substr(s,1,1)=="\"") { s=substr(s,2); q=index(s,"\""); return (q>0)?substr(s,1,q-1):s }
+      if (substr(s,1,1)=="\x27") { s=substr(s,2); q=index(s,"\x27"); return (q>0)?substr(s,1,q-1):s }
+      sub(/[ \t]+#.*$/,"",s); sub(/[ \t]+$/,"",s); return s
+    }
+  ' "$EA_CONFIG_FILE"
+}
+
 # yaml_project_list <slug> <parent> <listkey> — items of the list at
 # projects.<slug>.<parent>.<listkey> (e.g. exec.allowed_commands). One item per line,
 # unquoted, `- ` stripped.

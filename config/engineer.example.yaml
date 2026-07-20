@@ -110,6 +110,9 @@ projects:
       design_doc_parent: ""              # Slite note ID or channel where design docs are created
       design_doc_template: ""            # Slite note ID of a template doc (optional, uses built-in default if empty)
     qa:
+      # Also opt-in for headless QA: when this block has a base_url, a remotely-approved ticket
+      # implementation (ntfy) auto-drafts a qa-test-plan for the new branch after the draft PR
+      # (best-effort). Omit the block and that step is skipped quietly.
       base_url: "http://localhost:3000"  # base URL for curl commands in QA test scripts
       console_command: ""                # e.g. "rails console", "python manage.py shell", "node" (optional)
       document_to: ""                    # where to document completed QA plans: "slite" | "" (empty/absent disables)

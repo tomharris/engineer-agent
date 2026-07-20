@@ -553,13 +553,14 @@ This registers a supervised service (`engineer-agent-listener`) that restarts on
 
 **After updating the plugin, re-run `install-listener.sh`** (or `systemctl --user restart engineer-agent-listener`) so the running service loads the new code — a supervised daemon keeps executing whatever it parsed at launch. As a backstop the listener also re-execs itself when its own file changes, at the next stream reconnect.
 
-By default the listener caps each headless approval at **$2.00**, or **$8.00** for `ticket` items (which run a full implementation). Tune via the `EA_EXECUTE_BUDGET_USD` / `EA_TICKET_BUDGET_USD` environment variables.
+By default the listener caps each headless approval at **$2.00**, or **$8.00** for `ticket` items (which run a full implementation). Tune via the `EA_EXECUTE_BUDGET_USD` / `EA_TICKET_BUDGET_USD` environment variables. The best-effort QA generation that follows a ticket (below) is a separate run with its own **$2.00** cap, tunable via `EA_QA_BUDGET_USD`.
 
 **Approving a `ticket` from your phone** is special: it runs the whole `implement-ticket` coding session (branch → inline iterative implementation → draft PR) unattended, so it gets its own confined execution path instead of the read/post one every other type uses:
 
 - The listener creates a throwaway **git worktree** of the target repo and runs the session inside it, so your real checkout is never touched. The worktree is removed when the run finishes; the branch and draft PR persist.
 - The build/test commands that session may run come from a per-project allowlist, **`projects.<slug>.exec.allowed_commands`** — each becomes a `Bash(<cmd> *)` permission (e.g. `["bin/rails", "bin/rspec", "bin/srb", "bundle"]` for a Rails repo). This is the security boundary for code driven off issue text, so keep it to build/test tools only.
 - **Deny-by-default:** a project with no `exec.allowed_commands` has remote ticket approval *refused* — you get a `⚠️ Failed` push telling you to configure it, and you implement the ticket interactively instead. Nothing runs unconfined. (The interactive terminal path never consults this list — you're present to approve.)
+- **QA test plan (best-effort):** after the draft PR ships, and only if the project has a `qa.base_url` configured, the listener runs a *second, separate* confined session that drafts a `qa-test-plan` for the new branch (you get a 🧪 FYI push and review it in the terminal with `/engineer-agent review-queue qa`). It's decoupled — if QA generation fails or `qa` isn't configured, the ticket still reports ✅ Done; a shipped PR is never re-flagged as failed. That session's allowlist adds `curl` (to run the generated scripts) and a Jira read verb but drops the build commands — QA writes no code.
 
 Claude Code's `Bash()` permissions match on command prefix, not working directory, so this is defense-in-depth ("medium" isolation), not a hard jail — keep `allowed_commands` tight and treat your `command_topic` as a password (below).
 

@@ -44,6 +44,9 @@ NOTIFY_BIN="${NOTIFY_BIN:-${PLUGIN_ROOT}/scripts/notify.sh}"
 # an unknown/missing type falls back to the default.
 DEFAULT_BUDGET_USD="${EA_EXECUTE_BUDGET_USD:-2.00}"
 TICKET_BUDGET_USD="${EA_TICKET_BUDGET_USD:-8.00}"
+# QA generation is a SEPARATE claude -p run after a ticket implementation (read + queue-draft
+# only, no code), so it gets its own modest cap distinct from the implementation's TICKET cap.
+QA_BUDGET_USD="${EA_QA_BUDGET_USD:-2.00}"
 
 AGENT_DIR="${EA_AGENT_DIR}"
 STATE_DIR="${AGENT_DIR}/state"
@@ -185,6 +188,17 @@ Operate ONLY inside this working directory (plus writing that one completed/ que
       "$prompt" \
       </dev/null ) >> "$LOG_FILE" 2>&1
 
+  # Best-effort QA test plan for the branch we just built — a SEPARATE confined run (its own
+  # allowlist adds curl + a Jira read verb and drops the build rules; see run_qa_generation).
+  # Run it HERE, before teardown, while the worktree is still checked out on the ticket branch
+  # so `git diff <base>...HEAD` sees the changes. Gate on the implementation having actually
+  # succeeded (completed/<item> present — the same side-effect signal the reconcile below uses):
+  # no PR, no QA. It never fails the ticket — the ticket's ✅/⚠️ ack is decided by the caller
+  # from the drafts/ check alone.
+  if [ -e "${AGENT_DIR}/queue/completed/${item}" ]; then
+    run_qa_generation "$item" "$project" "$base" "$wt" "$QA_BUDGET_USD" || true
+  fi
+
   # Tear down the worktree regardless of outcome. The branch and any pushed commits / draft
   # PR persist in the repo; only the working copy is disposable.
   git -C "$project_path" worktree remove --force "$wt" >>"$LOG_FILE" 2>&1 || true
@@ -200,6 +214,66 @@ Operate ONLY inside this working directory (plus writing that one completed/ que
   # move grants no new capability.)
   if [ -e "${AGENT_DIR}/queue/completed/${item}" ] && [ -e "$draft" ]; then
     rm -f "$draft" && log "reconciled: removed stale drafts/${item} (completed/ copy present after implementation)"
+  fi
+  return 0
+}
+
+# run_qa_generation — best-effort QA test plan for a freshly-implemented ticket branch.
+# Called by run_ticket_implementation after a successful draft PR, from INSIDE the still-live
+# worktree (cwd), which is checked out on the ticket branch. Produces a `qa-test-plan` queue
+# DRAFT for later interactive review — it posts nothing external (Slite publishing happens
+# later, at review-queue/execute-item), so like the poll it only reads and drafts and needs no
+# approval gate.
+#
+# This is deliberately a SEPARATE claude -p run from the implementation, with a different
+# allowlist: QA needs curl (Pass 3 execution) + a Jira read verb but must NOT carry the
+# build-command rules, and the implementation needs the build rules but must NOT gain network
+# egress. Keeping them apart preserves the tight code-writing sandbox (untrusted issue text can
+# steer code but never reach curl/MCP).
+#
+# Opt-in + non-fatal: skipped (return 0) when the project has no qa.base_url configured, and it
+# never flips the ticket's ✅/⚠️ outcome — a QA hiccup must not fail a shipped PR.
+run_qa_generation() {
+  local item="$1" project="$2" base="$3" wt="$4" budget="$5"
+  local base_url
+  base_url="$(yaml_project_subscalar "$project" qa base_url)"
+  if [ -z "$base_url" ]; then
+    log "skipping QA generation for ${item}: project ${project} has no qa.base_url configured"
+    return 0
+  fi
+
+  # QA-shaped allowlist: read + queue-draft-write. Adds curl (script execution) and the Jira
+  # read verb (ticket AC for jira projects) vs. the implementation set; drops the build rules
+  # (QA writes no code). gh is read-only in practice here (ticket / PR fetch).
+  local allowed_tools=(
+    Read Edit Write Glob Grep
+    "Bash(git *)" "Bash(gh *)" "Bash(curl *)" "Bash(mv *)"
+    "mcp__atlassian__getJiraIssue"
+  )
+  local prompt="Generate a QA test plan for the engineer-agent ticket in queue item '${item}' (just implemented). \
+The current working directory is an isolated git worktree of the target repo, checked out on the ticket branch. \
+Read config from ${EA_CONFIG_FILE}. Follow skills/generate-qa/SKILL.md via the engineer-agent qa command (commands/qa.md): \
+project '${project}', base branch '${base}', deriving the ticket from the current branch / the queue item — gather the ticket AC, any PR, and the branch diff, create a qa-test-plan queue item, and draft it. \
+Use 'mv' (not rm) for the incoming/ -> drafts/ queue move. \
+Do NOT modify the already-completed ticket record at ${AGENT_DIR}/queue/completed/${item}. Operate only inside this working directory and the engineer-agent queue. Be concise."
+
+  ( cd "$wt" && "$CLAUDE_BIN" -p \
+      --plugin-dir "$PLUGIN_ROOT" \
+      --model sonnet \
+      --permission-mode acceptEdits \
+      --allowedTools "${allowed_tools[@]}" \
+      --max-budget-usd "$budget" \
+      "$prompt" \
+      </dev/null ) >> "$LOG_FILE" 2>&1
+
+  # Judge success by a real side effect (never by claude -p's exit code): a new qa-test-plan
+  # draft landing in the queue. FYI only — qa-test-plan is interactive-only for approval, so we
+  # surface it as information, never as an actionable Approve/Reject push.
+  if compgen -G "${AGENT_DIR}/queue/drafts/*qa-test-plan*" >/dev/null 2>&1; then
+    log "QA test plan drafted for ${item} (project ${project})"
+    push_ack normal "🧪 QA test plan drafted for ${item} — review in terminal"
+  else
+    log "WARN: QA generation for ${item} produced no qa-test-plan draft; skipping (ticket outcome unaffected)"
   fi
   return 0
 }

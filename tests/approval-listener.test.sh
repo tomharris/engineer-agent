@@ -43,6 +43,14 @@ EOF
   cat > "$CLAUDE_BIN" <<'EOF'
 #!/bin/bash
 printf '%s\n' "$*" >> "$CLAUDE_ARGS_LOG"
+# QA generation run: detected by its prompt marker. It must NOT touch the ticket's drafts/ or
+# completed/ records — it only drops a new qa-test-plan draft (when FAKE_QA_DRAFT=1).
+if printf '%s' "$*" | grep -q "Generate a QA test plan"; then
+  if [ "${FAKE_QA_DRAFT:-0}" = "1" ]; then
+    printf 'type: qa-test-plan\n' > "$EA_AGENT_DIR/queue/drafts/20260716-000000-qa-test-plan-fake.md"
+  fi
+  exit 0
+fi
 # FAKE_TICKET_RECONCILE simulates the real confined-worktree behavior: the run writes the
 # completed/ record but CANNOT delete the drafts/ original, leaving a stub for the listener
 # to reconcile. FAKE_SUCCEED simulates a clean move (drafts emptied). Neither => no-op.
@@ -117,7 +125,7 @@ test_invalid() {
 # fake `git` on PATH so worktree add/remove touch nothing real (they just mkdir the
 # worktree dir so the confined `claude` run has a cwd).
 write_ticket_config() {
-  # $1 = "with-allowlist" | "no-allowlist"
+  # $1 = "with-allowlist" | "no-allowlist"; $2 = "with-qa" (optional) adds qa.base_url
   mkdir -p "$TMP/repo"
   {
     printf 'agent:\n  branch_prefix: "x"\n'
@@ -128,6 +136,9 @@ write_ticket_config() {
       printf '    exec:\n      allowed_commands:\n        - "bin/rails"   # migrations, db:migrate\n        - "bundle"      # gem exec\n'
     fi
     printf '    github:\n      owner: "futuresinc"\n'
+    if [ "${2:-}" = "with-qa" ]; then
+      printf '    qa:\n      base_url: "http://localhost:3000"   # enables headless QA gen\n'
+    fi
   } > "$EA_CONFIG_FILE"
 }
 install_fake_git() {
@@ -204,6 +215,60 @@ test_ticket_reconciles_stub() {
   teardown
 }
 
+# --- Case 4c: qa configured — implemented ticket also drafts a qa-test-plan (best-effort) ---
+test_ticket_generates_qa() {
+  echo "test_ticket_generates_qa:"
+  setup
+  write_ticket_config with-allowlist with-qa
+  install_fake_git
+  local item="20260716-000000-ticket-gh-3.md"
+  printf 'type: ticket\nproject: wayfinder-api\n' > "$EA_AGENT_DIR/queue/drafts/$item"
+  export FAKE_TICKET_RECONCILE=1   # realistic: writes completed/, leaves drafts/ stub
+  export FAKE_QA_DRAFT=1           # the QA run drops a qa-test-plan draft
+  handle_line "$(msg_event id-ticket-qa "approve|$item")"
+
+  grep -q "Generate a QA test plan" "$CLAUDE_ARGS_LOG" \
+    && ok "QA generation run launched after implementation" \
+    || bad "QA run not launched (args: $(cat "$CLAUDE_ARGS_LOG"))"
+  grep -qF -- "Bash(curl *)" "$CLAUDE_ARGS_LOG" \
+    && ok "QA allowlist includes curl (Pass 3 execution)" || bad "QA allowlist missing curl"
+  compgen -G "$EA_AGENT_DIR/queue/drafts/*qa-test-plan*" >/dev/null \
+    && ok "qa-test-plan draft created" || bad "qa-test-plan draft missing"
+  [ ! -e "$EA_AGENT_DIR/queue/drafts/$item" ] \
+    && ok "ticket stub reconciled away" || bad "ticket stub not reconciled"
+  grep -q "QA test plan drafted" "$NOTIFY_LOG" \
+    && ok "🧪 QA FYI ack sent" || bad "missing QA FYI ack (log: $(cat "$NOTIFY_LOG"))"
+  grep -q "Done" "$NOTIFY_LOG" && ! grep -q "Failed" "$NOTIFY_LOG" \
+    && ok "ticket still reports Done (QA is best-effort)" || bad "wrong ticket ack"
+  unset FAKE_TICKET_RECONCILE FAKE_QA_DRAFT
+  teardown
+}
+
+# --- Case 4d: no qa config — QA generation is skipped, ticket still completes ---
+test_ticket_qa_skipped_without_config() {
+  echo "test_ticket_qa_skipped_without_config:"
+  setup
+  write_ticket_config with-allowlist    # no qa block
+  install_fake_git
+  local item="20260716-000000-ticket-gh-4.md"
+  printf 'type: ticket\nproject: wayfinder-api\n' > "$EA_AGENT_DIR/queue/drafts/$item"
+  export FAKE_TICKET_RECONCILE=1
+  export FAKE_QA_DRAFT=1   # would fire IF the QA run were launched — it must not be
+  handle_line "$(msg_event id-ticket-noqa "approve|$item")"
+
+  grep -q "Generate a QA test plan" "$CLAUDE_ARGS_LOG" \
+    && bad "QA run launched despite no qa.base_url" || ok "QA generation skipped (no qa.base_url)"
+  compgen -G "$EA_AGENT_DIR/queue/drafts/*qa-test-plan*" >/dev/null \
+    && bad "qa-test-plan draft created without qa config" || ok "no qa-test-plan draft"
+  grep -q "QA test plan drafted" "$NOTIFY_LOG" \
+    && bad "QA FYI ack sent without qa config" || ok "no QA FYI ack"
+  [ -e "$EA_AGENT_DIR/queue/completed/$item" ] && [ ! -e "$EA_AGENT_DIR/queue/drafts/$item" ] \
+    && ok "ticket still completed" || bad "ticket not completed"
+  grep -q "Done" "$NOTIFY_LOG" && ok "ticket reports Done" || bad "missing Done ack"
+  unset FAKE_TICKET_RECONCILE FAKE_QA_DRAFT
+  teardown
+}
+
 # --- Case 4b: deny-by-default — a ticket for a project with no exec.allowed_commands ---
 test_ticket_refused_without_allowlist() {
   echo "test_ticket_refused_without_allowlist:"
@@ -247,6 +312,8 @@ test_failure
 test_invalid
 test_ticket_confined_run
 test_ticket_reconciles_stub
+test_ticket_generates_qa
+test_ticket_qa_skipped_without_config
 test_ticket_refused_without_allowlist
 test_default_budget
 
