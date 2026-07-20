@@ -1,7 +1,7 @@
 ---
 name: poll-jira
 description: "Poll Jira for new or updated tickets assigned to the user. Use this skill when checking Jira for work, or during an engineer-agent poll cycle."
-version: 3.0.0
+version: 3.0.1
 model: haiku
 ---
 
@@ -61,9 +61,13 @@ For each engineer-agent project (slug, config):
 For each unique Jira project key in the map:
 
 1. Look up `jira_projects.<key>.last_checked` from state (default: `"1970-01-01T00:00:00Z"` if missing, or fall back to the earliest `projects.<slug>.jira.last_checked` for backward compat)
-2. Build ONE JQL query using the union of all assignees and statuses:
+2. Build ONE JQL query using the union of all assignees and statuses. **Quote every assignee
+   and status value in double quotes.** An assignee email contains `@`, a reserved JQL
+   character — unquoted, it fails the *entire* query with `Bad Request` ("The character '@' is
+   a reserved JQL character. You must enclose it in a string ...") and the poll silently queues
+   nothing (statuses like `"To Do"` must be quoted for their spaces regardless):
    ```
-   project = {jira_key} AND assignee IN ({all_assignees}) AND status IN ({all_statuses}) AND updated > "{last_checked}"
+   project = {jira_key} AND assignee IN ("{assignee1}", "{assignee2}") AND status IN ("{status1}", "{status2}") AND updated > "{last_checked}"
    ```
 3. Call `mcp__atlassian__searchJiraIssuesUsingJql` with the JQL query
 4. For each ticket returned, call `mcp__atlassian__getJiraIssue` to fetch full details:
