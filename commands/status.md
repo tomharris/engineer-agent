@@ -55,14 +55,17 @@ If the file doesn't exist, report "No polls have run yet."
 
 Read `~/.local/share/engineer-agent/state/last-poll-receipt.yaml` if it exists — the liveness
 receipt the cron writes as the final step of each run. Report `finished_at`, `status`,
-`items_queued`, and any `errors`:
+`items_queued`, any `errors`, and the `skipped` count:
 
 ```
-Last poll: 2026-07-15T20:31:45Z — status: ok, 0 items queued
+Last poll: 2026-07-15T20:31:45Z — status: ok, 0 items queued — 12 sources skipped (not configured)
 ```
 
 `status: ok` with `items_queued: 0` is **healthy** — it means the poll ran and legitimately found
-nothing. Flag `status: partial` / `status: error` (a source failed) and any `errors` entries. If the
+nothing. `skipped` entries are sources that aren't configured/enabled for a project (e.g. Jira on a
+github-issues project, Slack with no channels); they are **normal** and never a problem — report the
+count for transparency but do not flag them. Flag only `status: partial` / `status: error` and any
+`errors` entries (a *configured* source that failed). If the
 file is missing, report "No poll has completed since the liveness receipt was introduced." (Note:
 this is distinct from §3's per-source `last_checked` timestamps — those are dedup cutoffs, this is
 whether the last run actually finished.)
