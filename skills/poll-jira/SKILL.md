@@ -58,16 +58,46 @@ For each engineer-agent project (slug, config):
     jira_query_map[jira_key].watchers.append({ slug, source })
 ```
 
+#### Determine the account's UTC offset (once per run)
+
+**A bare datetime in JQL (`updated > "yyyy-MM-dd HH:mm"`) is interpreted in the searching
+account's Jira profile timezone, NOT UTC.** The watermark is stored in UTC (the cron mints it
+with `date -u …Z`), so handing its clock digits to JQL verbatim shifts the whole window by the
+account's offset — e.g. a `…14:03Z` watermark becomes `14:03` *Denver* = `20:03Z`, ~6h into the
+future, and every ticket updated during working hours falls before the cutoff. This queues
+**nothing**, silently, with a `status: ok` receipt — indistinguishable from a genuinely quiet
+poll. Fetch the offset from the instance (never hardcode it) and convert the watermark to
+account-local wall-clock time before building any cutoff:
+
+1. Run one **timezone-bootstrap query** — no `updated` filter, so it returns regardless of the
+   cutoff bug we are fixing — over the union of all assignees, e.g.
+   `assignee IN ("{assignee1}", "{assignee2}") ORDER BY updated DESC`, `maxResults: 1`, fields
+   including `assignee` and `updated`.
+2. From the single result, read the account's **current UTC offset** directly off the returned
+   `updated` field — Jira returns it with the live, DST-correct offset, e.g.
+   `"2026-07-21T08:12:57.458-0600"` ⇒ offset `-06:00` (the `assignee.timeZone` IANA name, e.g.
+   `"America/Denver"`, is there too as a cross-check). Reading the offset off a real timestamp
+   needs no tz database and is already DST-adjusted for today.
+3. If the bootstrap returns zero issues (the account has no assigned tickets at all), fall back to
+   offset `+00:00` (treat the watermark as UTC) — there is nothing to miss.
+
+Call this `account_offset` and reuse it for **every** Jira project key this run (the offset is
+per-account, not per-project).
+
 For each unique Jira project key in the map:
 
 1. Look up `jira_projects.<key>.last_checked` from state (default: `"1970-01-01T00:00:00Z"` if missing, or fall back to the earliest `projects.<slug>.jira.last_checked` for backward compat)
-2. Build ONE JQL query using the union of all assignees and statuses. **Quote every assignee
-   and status value in double quotes.** An assignee email contains `@`, a reserved JQL
-   character — unquoted, it fails the *entire* query with `Bad Request` ("The character '@' is
-   a reserved JQL character. You must enclose it in a string ...") and the poll silently queues
-   nothing (statuses like `"To Do"` must be quoted for their spaces regardless):
+2. **Convert the UTC watermark to account-local wall-clock time** by applying `account_offset`,
+   then truncate to minute precision: `last_checked` (UTC) `+ account_offset` ⇒ `{local_cutoff}`
+   formatted `yyyy-MM-dd HH:mm`. Example: watermark `2026-07-21T14:03:03Z` with offset `-06:00`
+   ⇒ `2026-07-21 08:03`. Build ONE JQL query using the union of all assignees and statuses,
+   with this local cutoff. **Quote every assignee and status value in double quotes.** An
+   assignee email contains `@`, a reserved JQL character — unquoted, it fails the *entire* query
+   with `Bad Request` ("The character '@' is a reserved JQL character. You must enclose it in a
+   string ...") and the poll silently queues nothing (statuses like `"To Do"` must be quoted for
+   their spaces regardless):
    ```
-   project = {jira_key} AND assignee IN ("{assignee1}", "{assignee2}") AND status IN ("{status1}", "{status2}") AND updated > "{last_checked}"
+   project = {jira_key} AND assignee IN ("{assignee1}", "{assignee2}") AND status IN ("{status1}", "{status2}") AND updated > "{local_cutoff}"
    ```
 3. Call `mcp__atlassian__searchJiraIssuesUsingJql` with the JQL query
 4. For each ticket returned, call `mcp__atlassian__getJiraIssue` to fetch full details:
