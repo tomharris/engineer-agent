@@ -60,7 +60,7 @@ of truth for this location — source it rather than hardcoding the path.
 ├── uat-plans/                 — Saved UAT checklists from /engineer-agent uat-plan (not part of the queue)
 └── state/
     ├── last-poll.yaml         — Dedup timestamps and seen IDs (per project, per Jira project key, per GitHub repo)
-    ├── last-poll-receipt.yaml — Liveness receipt from the last cron poll (run_id, status, item count, errors)
+    ├── last-poll-receipt.yaml — Liveness receipt from the last cron poll (run_id, status, item count, skipped, errors)
     └── ntfy-seen.yaml         — Processed ntfy command message IDs (remote-approval dedup)
 ```
 

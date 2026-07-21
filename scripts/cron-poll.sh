@@ -137,9 +137,14 @@ status: ok
 items_queued: 0
 sources_polled:
   - <project-slug>/<source>
+skipped: []
 errors: []
 
-Rules: copy run_id verbatim — it is how the cron proves this receipt came from THIS run and not a previous one. status is 'ok' only if every configured source was queried without error, 'partial' if at least one source failed while others succeeded, 'error' if nothing could be polled. items_queued is the number of items you moved into drafts/ this run (0 is a normal, successful result). List a source under sources_polled ONLY if you actually issued its query in THIS run; if you did not poll it, it belongs in errors with a one-line reason. Never claim a source you did not query.
+Rules: copy run_id verbatim — it is how the cron proves this receipt came from THIS run and not a previous one. items_queued is the number of items you moved into drafts/ this run (0 is a normal, successful result). Every source belongs in exactly ONE of three buckets; never claim a source you did not query:
+- sources_polled: a source you actually issued a query for in THIS run.
+- skipped: a source that is NOT configured or NOT enabled for that project — with a one-line reason. This covers Jira when the project's tracker is not 'jira' or it has no jira section; Slite when there is no slite section; Slack when slack.channels is empty; GitHub Issues when there is no github.issues section; and the like. A skipped source is a normal, expected result and MUST NOT affect status.
+- errors: a CONFIGURED source that you attempted and that FAILED (auth error, API error, or a required tool missing for an enabled source) — with a one-line reason.
+status is computed over CONFIGURED sources only: 'ok' if every configured source was queried without error (skipped sources are fine); 'partial' if at least one configured source failed while at least one other configured source succeeded; 'error' if no configured source could be polled.
 
 Be concise." \
   </dev/null >> "$LOG_FILE" 2>&1 || POLL_STATUS=$?
