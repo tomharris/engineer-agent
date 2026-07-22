@@ -49,7 +49,7 @@ priority `urgent`, do not start implementing).
 
 Read `~/.local/share/engineer-agent/engineer.yaml` and extract:
 - `agent.branch_prefix` — MUST be read from config. There is no fallback default. If the key is missing or empty, tell the user to set `agent.branch_prefix` in `~/.local/share/engineer-agent/engineer.yaml` and stop. Use the literal string from the yaml file verbatim — do not substitute any other value.
-- `agent.autonomy.auto_execute` — an optional list of action tiers that skip the approval gate. Absent ⇒ empty list. Whether `draft-pr` is present here decides Step 5 below.
+- `agent.autonomy.auto_execute` — an optional list of action tiers that skip the approval gate. Absent ⇒ empty list. Whether `draft-pr` is present here decides Step 6 below.
 - `projects.<project>.path` — the absolute path to the project directory
 - `projects.<project>.github.owner` and repos for PR creation
 
@@ -115,7 +115,43 @@ Stop when the acceptance criteria are met and tests pass, or when you have made 
 and something genuinely blocks completion (record that as partial in the next step — do not loop
 forever or fabricate completion).
 
-### 4. After Implementation
+### 4. Self-Review the Diff
+
+Before gathering results or opening any PR, review the complete branch diff with fresh eyes —
+one quick, deliberate pass, not an open-ended loop (on the headless path this shares the
+ticket's budget cap).
+
+Resolve the base branch the same way the listener does, then diff against it:
+
+```bash
+base="$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD | sed 's@^origin/@@')"
+base="${base:-main}"
+git diff "origin/${base}...HEAD" || git diff "${base}...HEAD"
+```
+
+Review the diff for (scoped-to-self-review version of `review-pr`'s checklist):
+
+- **Correctness** — logic errors, off-by-one, null/undefined handling, missing edge cases
+- **Bugs** — race conditions, resource cleanup, security (injection, auth), error-handling gaps
+- **Tests** — is the new behavior actually covered? Are assertions meaningful, not vacuous?
+- **Scope & conventions** — follows the repo's CLAUDE.md patterns; no unrelated refactors; no
+  leftover debug output, dead code, or secrets in the diff
+
+Classify each finding **Critical / Important / Suggestion** (same taxonomy as `review-pr`), then
+act:
+
+- **Critical / Important:** fix in place now, and re-run the test suite after the fixes — a fix
+  that breaks tests is itself a finding (see edge case below).
+- **Suggestion:** record as `deferred`; do not gold-plate it in.
+- **Unresolvable Critical:** do NOT block the PR. Set the Implementation Result status to
+  `partial`, record the finding as `deferred` in the ledger, and lead the PR body with it — the
+  draft PR is the human review gate, and a visibly flagged PR beats an invisible stalled item.
+
+Record **every** finding in the Findings & Disposition ledger (Step 5) with Source
+`self-review` — including a clean pass, as a single row: `| self-review | none found | n/a |
+clean pass |`. This is what makes the review auditable at the approval gate and in the PR body.
+
+### 5. After Implementation
 
 When the iterative implementation finishes (acceptance criteria met, or blocked/partial):
 
@@ -156,7 +192,7 @@ shared ledger format (omit the section entirely only if genuinely nothing was su
 {if partial, what still needs to be done}
 ```
 
-### 5. Create the Draft PR
+### 6. Create the Draft PR
 
 A **draft** PR merges nothing and requests no review, so it is safe to create without a
 gate. Decide based on `agent.autonomy.auto_execute` (read in Step 1):
@@ -197,7 +233,7 @@ gh pr create --repo {owner}/{repo} --title "#{number}: {title}" --body "{Intent 
 gh pr create --repo {owner}/{repo} --title "{ticket_key}: {title}" --body "{Intent block; ticket link; changes summary; test results; Findings & Disposition ledger}" --head "{branch_prefix}/{ticket_key}" --base main --draft
 ```
 
-### 6. Update Queue Item
+### 7. Update Queue Item
 
 Move the queue item to `~/.local/share/engineer-agent/queue/completed/` with `status: completed`.
 
@@ -205,4 +241,5 @@ Move the queue item to `~/.local/share/engineer-agent/queue/completed/` with `st
 
 - **Ticket too vague:** If acceptance criteria are missing or unclear, set the draft to say "Needs clarification" and set priority to `urgent`. Do not start implementing.
 - **Tests won't pass:** If you exhaust your iterations with failing tests, report partial progress and let the human decide whether to continue manually.
+- **Self-review fix breaks tests:** If fixing a Step 4 finding breaks the test suite and you can't reconcile the two, treat it like "Tests won't pass" — revert to the last green state if possible, record the finding as `deferred` in the ledger, mark the result `partial`, and let the human decide. Never ship the broken fix, and never silently drop the finding.
 - **Wrong repo:** If the target repo can't be determined, ask in the draft for the human to specify it.

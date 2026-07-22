@@ -310,7 +310,7 @@ override `EA_QA_BUDGET_USD`).
 ### Confined headless ticket implementation
 
 A `ticket` is the one item type whose *execution writes code* — approving it runs the full
-`implement-ticket` flow (branch → inline iterative implementation → migrations/typecheck → draft PR → best-effort QA plan), not a single
+`implement-ticket` flow (branch → inline iterative implementation → migrations/typecheck → self-review of the diff → draft PR → best-effort QA plan), not a single
 `gh` call. That cannot run under the read/post allowlist the other types use, so the listener
 gives `ticket` a **separate, deliberately confined execution path** (`run_ticket_implementation`
 in `approval-listener.sh`). It is the one place untrusted issue text can steer code, so the two

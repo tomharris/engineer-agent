@@ -423,7 +423,7 @@ discoveries become compounding, reusable assets. Review via `/engineer-agent rev
 The end-to-end loop these commands are designed to chain into, per ticket:
 
 ```
-/engineer-agent:implement-ticket <ticket>   # branch, implement iteratively, draft PR
+/engineer-agent:implement-ticket <ticket>   # branch, implement iteratively, self-review, draft PR
         │  (in parallel)
         └─ /security-review                  # security pass on the diff
 /engineer-agent:qa <ticket>                  # generate + run QA test plan
@@ -467,7 +467,7 @@ Skills are auto-invoked during polling and processing:
 | `poll-slite` | `/engineer-agent poll` | Finds docs tagged for review (all projects) |
 | `review-pr` | New PR detected | Generates structured review with severity levels |
 | `answer-slack` | New question detected | Drafts answer with confidence level |
-| `implement-ticket` | Ticket approved | Implements Jira or GitHub Issue on feature branch, runs tests |
+| `implement-ticket` | Ticket approved | Implements Jira or GitHub Issue on feature branch, runs tests, self-reviews the diff before the draft PR |
 | `review-doc` | New doc detected | Reviews for accuracy, completeness, clarity |
 | `generate-standup` | On demand | Creates standup from yesterday's activity (all projects) |
 | `generate-digest` | `/engineer-agent digest` | Summarizes daily activity with metrics (all projects) |
@@ -555,7 +555,7 @@ This registers a supervised service (`engineer-agent-listener`) that restarts on
 
 By default the listener caps each headless approval at **$2.00**, or **$8.00** for `ticket` items (which run a full implementation). Tune via the `EA_EXECUTE_BUDGET_USD` / `EA_TICKET_BUDGET_USD` environment variables. The best-effort QA generation that follows a ticket (below) is a separate run with its own **$2.00** cap, tunable via `EA_QA_BUDGET_USD`.
 
-**Approving a `ticket` from your phone** is special: it runs the whole `implement-ticket` coding session (branch → inline iterative implementation → draft PR) unattended, so it gets its own confined execution path instead of the read/post one every other type uses:
+**Approving a `ticket` from your phone** is special: it runs the whole `implement-ticket` coding session (branch → inline iterative implementation → self-review of the diff → draft PR) unattended, so it gets its own confined execution path instead of the read/post one every other type uses:
 
 - The listener creates a throwaway **git worktree** of the target repo and runs the session inside it, so your real checkout is never touched. The worktree is removed when the run finishes; the branch and draft PR persist.
 - The build/test commands that session may run come from a per-project allowlist, **`projects.<slug>.exec.allowed_commands`** — each becomes a `Bash(<cmd> *)` permission (e.g. `["bin/rails", "bin/rspec", "bin/srb", "bundle"]` for a Rails repo). This is the security boundary for code driven off issue text, so keep it to build/test tools only.
