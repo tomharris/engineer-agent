@@ -107,14 +107,19 @@ read `projects.<project>.tracker`, or infer from `source` frontmatter (`github` 
     stripped):
     ```bash
     gh pr create --repo {owner}/{repo} --title "#{number}: {title}" \
-      --body "{body with 'Closes #{number}'}" \
+      --body "{body with 'Closes #{number}' as the first line}" \
       --head "{branch_prefix}/issue-{number}-{slug}" --base main --draft
     ```
   - tracker `jira`:
     ```bash
-    gh pr create --repo {owner}/{repo} --title "{ticket_key}: {title}" --body "{body}" \
+    gh pr create --repo {owner}/{repo} --title "{ticket_key}: {title}" \
+      --body "{body with '**Ticket:** [{ticket_key}]({source_url})' as the first line}" \
       --head "{branch_prefix}/{ticket_key}" --base main --draft
     ```
+  The source-ticket attribution line is **required on every PR** (same rule as
+  `implement-ticket` Step 6): `Closes #{number}` for GitHub issues, the linked ticket key
+  (via the item's `source_url` frontmatter) for Jira — falling back to the bare
+  `{ticket_key}` if `source_url` is absent.
 
 - **doc-review** — call `mcp__slite__append-blocks` to post review comments on the document.
 
