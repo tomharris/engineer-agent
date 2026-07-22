@@ -419,7 +419,16 @@ Key invariant: **`/engineer-agent review-queue` (terminal) and `/engineer-agent 
   threaded replies). Same binary works in interactive skills and the headless cron/ntfy scripts.
   Because the MCP-proxy shim runs as one Bash invocation, its internal `curl`/`jq`/`security`
   subprocesses need no separate allowlist entry — a single `Bash(<shim> read:*)`-style rule
-  covers the whole call.
+  covers the whole call. **But that rule must match the shim as the skills actually invoke it:
+  `${CLAUDE_PLUGIN_ROOT}/scripts/slack-mcp.sh` (the unexpanded plugin-root variable, per
+  `poll-slack`/execute-item), NOT a shell-expanded absolute path.** Claude Code's Bash permission
+  matcher compares the literal command text and does *not* expand `${CLAUDE_PLUGIN_ROOT}`, so a
+  headless allowlist built only from the expanded abs path never matches and the Slack call is
+  denied non-interactively (a prompt under `-p` is a denial) — this silently broke the first poll
+  after Slack channels were configured. `cron-poll.sh` and `approval-listener.sh` therefore
+  allowlist **both** forms: the expanded `${PLUGIN_ROOT}/scripts/slack-mcp.sh ...` and the
+  single-quoted, unexpanded `'Bash(${CLAUDE_PLUGIN_ROOT}/scripts/slack-mcp.sh ...)'`. (`spy` needs
+  no such pairing — it is a bare literal identical in rule and invocation.)
 - Jira: `mcp__atlassian__*` tools (optional — either Jira or GitHub Issues per project)
 - Slite: `mcp__slite__*` tools
 - ntfy (optional): push notifications + remote approval via `curl` (publish) and `scripts/approval-listener.sh` (subscribe). Listener requires `jq`.

@@ -120,9 +120,19 @@ run_log() { tail -n "+$((LOG_START_LINE + 1))" "$LOG_FILE"; }
 #   - method: mcp-proxy      -> the bundled scripts/slack-mcp.sh (Enterprise Grid; reuses the
 #                               Keychain OAuth token). It runs as ONE Bash invocation, so its
 #                               internal curl/jq/security subprocesses need no separate rule —
-#                               `Bash(<bin> read:*)` covers the whole call. No `Bash(curl *)`.
+#                               one rule covers the whole call. No `Bash(curl *)`.
 # Either way only `read`/`thread` are listed; `<bin> send` stays UNMATCHED, so posting remains
 # execute-item's job behind the approval gate — identical to the gh read-vs-write split above.
+#
+# mcp-proxy gotcha (this silently broke the first poll after Slack channels were configured):
+# poll-slack invokes the shim via the UNEXPANDED `${CLAUDE_PLUGIN_ROOT}/scripts/slack-mcp.sh`
+# (SKILL.md §1 — the plugin-root var, not an absolute path), and Claude Code's Bash permission
+# matcher compares the LITERAL command text without expanding that variable. So a rule built
+# from the shell-expanded abs path (`${SLACK_BIN} ...` below) never matches the model's actual
+# invocation, and the read is denied headlessly (a prompt under `-p` is a denial). We therefore
+# ALSO add the unexpanded `${CLAUDE_PLUGIN_ROOT}` literal form, single-quoted so THIS script's
+# bash leaves it untouched (the var is empty here; it resolves inside the claude run). The
+# spy/bin backend needs no such rule — there `spy` is a bare literal identical in rule and call.
 SLACK_METHOD="$(yaml_agent_slack method)"; SLACK_METHOD="${SLACK_METHOD:-spy}"
 if [ "$SLACK_METHOD" = "mcp-proxy" ]; then
   SLACK_BIN="${PLUGIN_ROOT}/scripts/slack-mcp.sh"
@@ -140,6 +150,13 @@ allowed_tools=(
   Read Glob Grep
   "Edit(/${AGENT_DIR}/**)"
 )
+# See the mcp-proxy gotcha above: match the exact unexpanded form the skill emits.
+if [ "$SLACK_METHOD" = "mcp-proxy" ]; then
+  allowed_tools+=(
+    'Bash(${CLAUDE_PLUGIN_ROOT}/scripts/slack-mcp.sh read:*)'
+    'Bash(${CLAUDE_PLUGIN_ROOT}/scripts/slack-mcp.sh thread:*)'
+  )
+fi
 
 # --add-dir: acceptEdits only auto-accepts edits under the working directory, and cron
 # runs from $HOME. Naming the agent dir explicitly (alongside the scoped Edit rule above)
