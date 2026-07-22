@@ -54,6 +54,28 @@ receipt_field() {
     }' "$RECEIPT_FILE"
 }
 
+# List the entries of the receipt's `errors:` block (one per line, quotes stripped).
+# Same dependency-free awk approach as receipt_field. An inline `errors: []` yields
+# nothing, which callers treat as "no detail available".
+receipt_errors() {
+  [ -f "$RECEIPT_FILE" ] || return 0
+  awk '
+    /^errors:/ { in_block = 1; next }
+    in_block && /^[^ ]/ { in_block = 0 }
+    in_block && /^ *- / {
+      v = $0
+      sub(/^ *- */, "", v)
+      gsub(/^"|"$/, "", v)
+      print v
+    }' "$RECEIPT_FILE"
+}
+
+# The log is append-only, so any cause-extraction grep over the whole file can resurrect
+# a PREVIOUS run's error line and report it as this run's cause. Record where this run's
+# lines start; run_log yields only the slice this run appended.
+LOG_START_LINE="$(wc -l < "$LOG_FILE" 2>/dev/null || echo 0)"
+run_log() { tail -n "+$((LOG_START_LINE + 1))" "$LOG_FILE"; }
+
 # Run claude headlessly with the poll command.
 #
 # IMPORTANT: this is a non-interactive batch run. The agent must DO the work, not
@@ -187,11 +209,15 @@ fi
 if [ -n "$FAIL_REASON" ]; then
   echo "WARN: poll did not complete: ${FAIL_REASON} — see $LOG_FILE" >> "$LOG_FILE"
   # Surface the underlying cause in the alert itself, not just the log. The receipt check tells
-  # us the run didn't finish; the actual reason (a misauthed CLI: "Not logged in", "command not
-  # found", budget exhaustion) is usually the last recognizable error line in the log. Grab it —
-  # falls back to "unknown" so the message is never empty.
-  LAST_ERR="$(grep -E 'Not logged in|command not found|No such file|Execution error|WARN: claude exited' "$LOG_FILE" 2>/dev/null | tail -1)"
+  # us the run didn't finish; the actual reason (an API failure: "API Error: … ENOTFOUND", a
+  # misauthed CLI: "Not logged in", "command not found", budget exhaustion) is usually the last
+  # recognizable error line this run logged. Prefer a real cause line; fall back to the generic
+  # exit-code WARN, then "unknown" so the message is never empty. Each grep is `|| true`-guarded:
+  # under pipefail a no-match grep would otherwise abort the script before the notify fires.
+  LAST_ERR="$(run_log | grep -E 'API Error|Not logged in|command not found|No such file|Execution error' | tail -1 || true)"
+  LAST_ERR="${LAST_ERR:-$(run_log | grep 'WARN: claude exited' | tail -1 || true)}"
   LAST_ERR="${LAST_ERR:-unknown (see log)}"
+  LAST_ERR="${LAST_ERR:0:200}"
   # --priority urgent, not "high": notify.sh maps engineer-agent priorities
   # (urgent|normal|low) onto ntfy's, and an unrecognized value silently becomes
   # "default" — which would quietly downgrade this very alert.
@@ -209,9 +235,21 @@ else
   # out at --priority normal, not urgent — it shouldn't wake anyone.
   if [ "$RECEIPT_STATUS" != "ok" ]; then
     echo "WARN: poll reported status=${RECEIPT_STATUS:-unknown} — see $LOG_FILE" >> "$LOG_FILE"
+    # Say WHAT failed, not just that something did: inline the receipt's first errors:
+    # entry (and the count) so the push is actionable from a phone. Empty errors list
+    # (defensive — status != ok should always carry entries) keeps the generic wording.
+    ERR_LIST="$(receipt_errors)"
+    if [ -n "$ERR_LIST" ]; then
+      ERR_COUNT="$(printf '%s\n' "$ERR_LIST" | wc -l)"
+      FIRST_ERR="$(printf '%s\n' "$ERR_LIST" | head -1)"
+      FIRST_ERR="${FIRST_ERR:0:180}"
+      STATUS_MSG="Poll finished with status=${RECEIPT_STATUS:-unknown} — ${ERR_COUNT} configured source(s) failed. First: ${FIRST_ERR}. See state/last-poll-receipt.yaml."
+    else
+      STATUS_MSG="Poll finished with status=${RECEIPT_STATUS:-unknown}. Check state/last-poll-receipt.yaml."
+    fi
     "${PLUGIN_ROOT}/scripts/notify.sh" \
       --title 'engineer-agent: poll incomplete' \
-      --message "Poll finished with status=${RECEIPT_STATUS:-unknown}. Check state/last-poll-receipt.yaml." \
+      --message "$STATUS_MSG" \
       --priority normal --tags warning --fyi >> "$LOG_FILE" 2>&1 || true
   fi
 fi
