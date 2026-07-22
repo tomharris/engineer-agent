@@ -315,6 +315,15 @@ from a run that failed silently):
 
 Both `cron-poll.sh` and `approval-listener.sh` resolve the Claude Code binary from `PATH` by default, but honor a `CLAUDE_BIN` env var override (a specific shim/wrapper/install path). Because cron, systemd, and launchd do not inherit the interactive shell environment, `install-cron.sh` and `install-listener.sh` capture `CLAUDE_BIN` when set at install time and bake it into the launchd `EnvironmentVariables` (macOS) / systemd `Environment=` (Linux listener) / crontab entry (Linux poll) so the supervised runs use the same binary. On macOS `install-cron.sh` also accepts `EA_POLL_HOURS` (comma-separated clock hours) + `EA_POLL_MINUTE` to emit a `StartCalendarInterval` schedule confined to business hours instead of the default `StartInterval` every-N-minutes; this caps how much a first poll on a large assigned backlog can spend.
 
+The poll's own per-run budget is capped with `--max-budget-usd`, default **`6.00`**, overridable via
+`EA_POLL_BUDGET_USD` (captured at install time and baked into launchd/crontab like `CLAUDE_BIN`). A
+full 6-project × 4-source poll that reads live Slack channels and may draft a PR review / ticket
+intent inline can exceed a low cap; when it does, `claude -p` aborts mid-run, writes no receipt, and
+the next fire re-attempts the same work — a flat `2.00` did exactly this once mcp-proxy Slack reads
+started succeeding. `cron-poll.sh` also takes a **PID lockfile** (`state/cron-poll.lock`) and exits
+early if another poll is already running (a stale lock from a dead PID is reclaimed): two concurrent
+polls thrash the same state/receipt files and each burns its full budget racing the other.
+
 > **A supervised daemon runs whatever it parsed at launch — editing the script on disk
 > does not reload it.** `install-listener.sh`'s `systemctl --user enable --now` is a no-op on an
 > already-running unit, so before this was fixed a code deploy could leave the *old* listener
