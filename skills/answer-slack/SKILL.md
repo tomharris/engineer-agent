@@ -11,7 +11,7 @@ Generate a concise, helpful answer to a Slack question by researching the codeba
 
 ## Tools Needed
 
-- `Bash` — `spy thread <channel> <ts> --json -w <workspace>` ([Spy](https://github.com/tomharris/spy) Slack CLI) to read full thread context
+- `Bash` — `<slack> thread <channel> <ts> --json -w <workspace>` to read full thread context, where `<slack>` is the effective Slack CLI (`spy`, or `scripts/slack-mcp.sh` when `agent.slack.method: mcp-proxy`)
 - `Read` — read queue items, config, and source code files
 - `Write` — write draft answer
 - `Grep`, `Glob` — search local codebase
@@ -34,9 +34,12 @@ Read the queue item file. Extract the `project` field from frontmatter. Analyze:
 Read `~/.local/share/engineer-agent/engineer.yaml` to find the project's path at `projects.<project>.path`.
 
 If you need more thread context than the queue item already contains, read it with
-`spy thread <channel_id> <ts> --json -w <workspace>`, resolving the Spy binary
-(`agent.slack.bin`, default `spy`) and workspace (`projects.<project>.slack.workspace` ??
-`agent.slack.workspace`) from config.
+`<slack> thread <channel_id> <ts> --json -w <workspace>`, resolving the **effective Slack
+binary** (if `agent.slack.method` is `mcp-proxy` → `${CLAUDE_PLUGIN_ROOT}/scripts/slack-mcp.sh`;
+else `agent.slack.bin`, default `spy`) and workspace (`projects.<project>.slack.workspace` ??
+`agent.slack.workspace`) from config. Under `mcp-proxy`, if the CLI exits `75`
+(`{"skipped": true}` — Keychain token expired), skip the extra fetch and answer from the
+context already in the queue item.
 
 Based on the question type:
 

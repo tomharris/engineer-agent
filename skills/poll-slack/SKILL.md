@@ -11,9 +11,10 @@ Check configured Slack channels for messages matching keywords that may need a r
 
 ## Tools Needed
 
-- `Bash` — run the [Spy](https://github.com/tomharris/spy) Slack CLI:
-  - `spy read <channel> <count> --json -w <workspace>` — read recent messages in a channel
-  - `spy thread <channel> <ts> --json -w <workspace>` — read thread context
+- `Bash` — run the effective Slack CLI (`spy`, or `scripts/slack-mcp.sh` when
+  `agent.slack.method: mcp-proxy` — see §1 for resolution; both share this interface):
+  - `<slack> read <channel> <count> --json -w <workspace>` — read recent messages in a channel
+  - `<slack> thread <channel> <ts> --json -w <workspace>` — read thread context
 - `Read` — read config and state
 - `Write` — create queue items
 - `Glob` — check for existing queue items
@@ -25,12 +26,22 @@ Check configured Slack channels for messages matching keywords that may need a r
 Read `~/.local/share/engineer-agent/engineer.yaml`. Extract the `projects` map and the optional
 `agent.slack` block.
 
-Resolve the Spy invocation settings:
-- **Binary:** `agent.slack.bin` if set, otherwise `spy` (assumed on `PATH`).
+Resolve the Slack invocation settings:
+- **Binary (the effective Slack CLI):** if `agent.slack.method` is `mcp-proxy`, use the
+  bundled MCP-proxy client `${CLAUDE_PLUGIN_ROOT}/scripts/slack-mcp.sh` (fall back to a path
+  relative to this skill's directory if the env var is unset). Otherwise (method `spy` or
+  unset) use `agent.slack.bin` if set, else `spy` (assumed on `PATH`). The MCP-proxy client is
+  subcommand-compatible with `spy` (`read`/`thread`/`send`/`auth`, `--json`, `-w`), so every
+  invocation below is written the same way regardless of method.
 - **Workspace** (resolved per project below): `projects.<slug>.slack.workspace` if set,
-  otherwise `agent.slack.workspace`. Pass it as `-w <workspace>` on every `spy` call. If
-  neither is set, omit `-w` and rely on Spy's own default — but note `spy` errors when
-  multiple workspaces are signed in and no default is set.
+  otherwise `agent.slack.workspace`. Pass it as `-w <workspace>` on every call. If neither is
+  set, omit `-w` and rely on the backend's own default — note `spy` errors when multiple
+  workspaces are signed in and no default is set (the MCP-proxy client ignores `-w`, since the
+  connector is bound to its authorized workspace).
+- **Clean skip on expiry (mcp-proxy only):** the client exits `75` and prints
+  `{"skipped": true, ...}` when Claude Code's Keychain token is missing or expired. Treat that
+  as a *skipped* Slack source for this poll (not an error) — the token re-auths on its own and
+  the next poll picks up. Leave `last_checked_ts` unchanged, exactly as for a zero-message poll.
 
 ### 2. Load Dedup State
 

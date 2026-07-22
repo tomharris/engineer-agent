@@ -77,15 +77,20 @@ push_ack() {
 # Use acceptEdits + a tight --allowedTools allowlist rather than bypassPermissions:
 # execute-item reads UNTRUSTED draft-body content (Slack/Jira/GitHub text), so a
 # prompt-injection payload must not be able to run arbitrary commands. The allowlist is
-# exactly what execute-item / execute.md legitimately need — gh, spy, mv, the plugin's
+# exactly what execute-item / execute.md legitimately need — gh, the Slack backend (spy AND
+# slack-mcp.sh, so a reply posts under either agent.slack.method), mv, the plugin's
 # notify.sh, the file-editing tools, and the slite/atlassian MCP tools. Anything else is
 # denied; under acceptEdits a denied tool fails non-interactively, which the drafts/
 # check surfaces as a WARN (no longer a silent no-op).
 # Redirect stdin from /dev/null so claude doesn't try to read the listener's curl stream.
 run_generic_execute() {
   local item="$1" decision="$2" budget="$3"
+  # Both Slack backends are allowlisted so an approved slack-question reply posts under either
+  # method: `spy send …` OR `slack-mcp.sh send …` (agent.slack.method: mcp-proxy). This is the
+  # gated WRITE path — correct here, behind the ntfy approval — unlike the read-only poll.
   local allowed_tools=(
-    "Bash(gh *)" "Bash(spy *)" "Bash(mv *)" "Bash(${PLUGIN_ROOT}/scripts/notify.sh *)"
+    "Bash(gh *)" "Bash(spy *)" "Bash(${PLUGIN_ROOT}/scripts/slack-mcp.sh *)"
+    "Bash(mv *)" "Bash(${PLUGIN_ROOT}/scripts/notify.sh *)"
     Read Edit Write Glob Grep
     "mcp__slite__append-blocks" "mcp__slite__create-note" "mcp__atlassian__createJiraIssue"
   )

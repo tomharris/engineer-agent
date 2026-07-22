@@ -124,6 +124,63 @@ yaml_project_subscalar() {
   ' "$EA_CONFIG_FILE"
 }
 
+# yaml_agent_slack <key> — a scalar directly under agent.slack.<key> (e.g. method, bin).
+# Scoping to the agent: block matters because `slack:` ALSO appears under every
+# projects.<slug>; a bare "find slack:" would match the wrong one. Descent: agent: (col 0)
+# -> slack: (+2) -> <key> (+4). Prints the unquoted value, or nothing if absent.
+yaml_agent_slack() {
+  local key="$1"
+  [ -f "$EA_CONFIG_FILE" ] || return 0
+  awk -v key="$key" '
+    !inagent && $1=="agent:" { inagent=1; next }
+    inagent {
+      match($0,/^ */); ind=RLENGTH
+      if (length($0)==0) next
+      if ($0 ~ /^[ \t]*#/) next
+      if (ind==0) exit
+      line=$0; sub(/^ +/,"",line)
+      h=line; sub(/:.*/,"",h)               # block/key name, trailing comment stripped
+      if (ind==2) { inslack=(h=="slack"); next }
+      if (inslack && ind==4 && h==key) {
+        v=substr(line,index(line,":")+1); sub(/^[ \t]+/,"",v); print yaml_scalar(v); exit
+      }
+    }
+    function yaml_scalar(s,   q) {
+      if (substr(s,1,1)=="\"")   { s=substr(s,2); q=index(s,"\"");   return (q>0)?substr(s,1,q-1):s }
+      if (substr(s,1,1)=="\x27") { s=substr(s,2); q=index(s,"\x27"); return (q>0)?substr(s,1,q-1):s }
+      sub(/[ \t]+#.*$/,"",s); sub(/[ \t]+$/,"",s); return s
+    }
+  ' "$EA_CONFIG_FILE"
+}
+
+# yaml_agent_slack_mcp <key> — a scalar one level deeper, at agent.slack.mcp.<key> (e.g.
+# server, server_id). Same agent:-scoped descent as yaml_agent_slack, plus the mcp: level (+6).
+yaml_agent_slack_mcp() {
+  local key="$1"
+  [ -f "$EA_CONFIG_FILE" ] || return 0
+  awk -v key="$key" '
+    !inagent && $1=="agent:" { inagent=1; next }
+    inagent {
+      match($0,/^ */); ind=RLENGTH
+      if (length($0)==0) next
+      if ($0 ~ /^[ \t]*#/) next
+      if (ind==0) exit
+      line=$0; sub(/^ +/,"",line)
+      h=line; sub(/:.*/,"",h)               # block/key name, trailing comment stripped
+      if (ind==2) { inslack=(h=="slack"); inmcp=0; next }
+      if (inslack && ind==4) { inmcp=(h=="mcp"); next }
+      if (inslack && inmcp && ind==6 && h==key) {
+        v=substr(line,index(line,":")+1); sub(/^[ \t]+/,"",v); print yaml_scalar(v); exit
+      }
+    }
+    function yaml_scalar(s,   q) {
+      if (substr(s,1,1)=="\"")   { s=substr(s,2); q=index(s,"\"");   return (q>0)?substr(s,1,q-1):s }
+      if (substr(s,1,1)=="\x27") { s=substr(s,2); q=index(s,"\x27"); return (q>0)?substr(s,1,q-1):s }
+      sub(/[ \t]+#.*$/,"",s); sub(/[ \t]+$/,"",s); return s
+    }
+  ' "$EA_CONFIG_FILE"
+}
+
 # yaml_project_list <slug> <parent> <listkey> — items of the list at
 # projects.<slug>.<parent>.<listkey> (e.g. exec.allowed_commands). One item per line,
 # unquoted, `- ` stripped.

@@ -12,14 +12,33 @@ agent:
   digest_channel: "C98765432"
   cron_interval_minutes: 15
 
-  # Slack access via the Spy CLI (https://github.com/tomharris/spy) — no OAuth/app install;
-  # spy reuses your local Slack desktop session. Sign in to Slack desktop, then run
-  # `spy auth` to confirm. Optional block — omit it and the agent assumes `spy` is on PATH
-  # with a single signed-in workspace (or a default set via `spy workspaces use`).
+  # Slack access. Optional block — omit it and the agent assumes method "spy" with `spy` on
+  # PATH and a single signed-in workspace. Two backends, selected by `method`:
+  #
+  #   method: spy        (default) — the Spy CLI (https://github.com/tomharris/spy). No
+  #                      OAuth/app install; spy reuses your local Slack desktop session. Sign
+  #                      in to Slack desktop, then run `spy auth` to confirm. Best for a
+  #                      single, non-Enterprise-Grid workspace.
+  #
+  #   method: mcp-proxy  — for Slack ENTERPRISE GRID, where spy's browser-token scraping is
+  #                      broken and unsafe (the first automated call force-logs you out;
+  #                      tokens rotate hourly). This backend uses scripts/slack-mcp.sh, which
+  #                      reads Claude Code's existing OAuth token from your macOS login
+  #                      Keychain (read-only) and talks to Anthropic's MCP proxy fronting the
+  #                      official Slack connector. No browser tokens, zero model-token cost.
+  #                      Requires curl + jq. Depends on the login keychain being unlocked, so
+  #                      the headless poll must run in your GUI login session (the LaunchAgent
+  #                      installed by scripts/install-cron.sh already does — see CLAUDE.md).
   slack:
-    bin: "spy"            # path to the spy binary (default: "spy" on PATH)
+    method: "spy"         # "spy" (default) | "mcp-proxy" (Slack Enterprise Grid)
+    bin: "spy"            # path to the spy binary — only used when method: spy (default "spy")
     workspace: "myco"     # default Slack workspace (team domain or team_id) — required when
-                          # multiple workspaces are signed in. Per-project override below.
+                          # multiple workspaces are signed in (spy). Per-project override below.
+    mcp:                  # only used when method: mcp-proxy
+      server: "https://mcp-proxy.anthropic.com/v1/mcp"   # Anthropic MCP proxy base
+      server_id: "REPLACE_ME"   # your authorized Slack connector's id (an mcpsrv_… or a UUID).
+                                # Find it via claude.ai → Connectors, or Claude Code's /mcp.
+                                # Verify with: scripts/slack-mcp.sh auth
 
   # Autonomy tiers — action types the agent may execute WITHOUT a human approval gate.
   # Only "draft-pr" is supported today: a draft PR merges nothing and requests no review,

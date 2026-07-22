@@ -19,9 +19,10 @@ both the interactive review queue and the remote ntfy approval path call into it
 
 ## Tools Needed
 
-`Bash`, `Read`, `Write`, `Edit`, `Glob`, `Grep`. Posting happens via the
-[Spy](https://github.com/tomharris/spy) Slack CLI (`spy send …` over `Bash`), the `gh` CLI,
-and the Slite MCP tools `mcp__slite__append-blocks`, `mcp__slite__create-note`.
+`Bash`, `Read`, `Write`, `Edit`, `Glob`, `Grep`. Posting happens via the effective Slack CLI
+(`<slack> send …` over `Bash` — `spy`, or `${CLAUDE_PLUGIN_ROOT}/scripts/slack-mcp.sh` when
+`agent.slack.method: mcp-proxy`), the `gh` CLI, and the Slite MCP tools
+`mcp__slite__append-blocks`, `mcp__slite__create-note`.
 
 ## Steps
 
@@ -75,13 +76,17 @@ read `projects.<project>.tracker`, or infer from `source` frontmatter (`github` 
   gh pr review {pr_number} --repo {repo} --{approve|comment|request-changes} --body "{review_body}"
   ```
 
-- **slack-question** — post the reply in the original thread via the Spy CLI. Resolve the
-  binary (`agent.slack.bin`, default `spy`) and workspace
-  (`projects.<project>.slack.workspace` ?? `agent.slack.workspace`), then use the item's
-  `channel_id` and `message_ts` (the thread parent):
+- **slack-question** — post the reply in the original thread via the effective Slack CLI.
+  Resolve the binary (if `agent.slack.method` is `mcp-proxy` →
+  `${CLAUDE_PLUGIN_ROOT}/scripts/slack-mcp.sh`; else `agent.slack.bin`, default `spy`) and
+  workspace (`projects.<project>.slack.workspace` ?? `agent.slack.workspace`), then use the
+  item's `channel_id` and `message_ts` (the thread parent):
   ```bash
-  spy send {channel_id} "{reply_text}" --thread {message_ts} -w {workspace} --json
+  <slack> send {channel_id} "{reply_text}" --thread {message_ts} -w {workspace} --json
   ```
+  Under `mcp-proxy`, a `75` exit (`{"skipped": true}` — Keychain token expired) means the post
+  did not happen: treat it as a failed action (Step 5's failure rule — leave the item in
+  `drafts/`, report it, exit non-zero) so it is retried once Claude Code re-auths.
 
 - **ticket** — create a **draft** PR **from an already-implemented, pushed branch**. This case
   is the *finisher*: it assumes the branch already exists on the remote (a human ran
