@@ -25,6 +25,7 @@ A queue item file in `~/.local/share/engineer-agent/queue/drafts/` with type `ti
 Read the queue item to extract:
 - `ticket_key` from frontmatter
 - `project` from frontmatter
+- `source_url` from frontmatter (needed for the PR body's source-ticket attribution in Step 6)
 - Target repo from the implementation plan
 - Acceptance criteria from the context section
 - Implementation plan from the draft response
@@ -217,20 +218,29 @@ Push explicitly before creating the PR:
 git push -u origin {branch_name}
 ```
 
-**PR body composition.** Lead the body with the **Intent block** from Step 1, then the changes
-summary and test results, then the **Findings & Disposition** ledger from the Implementation
-Result (when non-empty). This makes the PR self-contained as an intent + integrate record — a
-reviewer can see the goal, the definition of done, and how each finding was resolved without
-opening the ticket. Create the PR based on tracker type:
+**PR body composition.** The body **must always open with an attribution line linking the
+source ticket** — this is required, never optional, on every PR this skill creates:
+
+- tracker `github-issues`: `Closes #{number}` (GitHub's auto-close keyword; also links the PR
+  from the issue)
+- tracker `jira`: `**Ticket:** [{ticket_key}]({source_url})`, using `source_url` from the queue
+  item's frontmatter (the Jira browse URL). If `source_url` is somehow absent, fall back to the
+  bare `{ticket_key}` — the body attribution line still ships.
+
+Then the **Intent block** from Step 1, then the changes summary and test results, then the
+**Findings & Disposition** ledger from the Implementation Result (when non-empty). This makes
+the PR self-contained as an intent + integrate record — a reviewer can see where the work came
+from, the goal, the definition of done, and how each finding was resolved without opening the
+ticket. Create the PR based on tracker type:
 
 **If tracker is `github-issues`:**
 ```bash
-gh pr create --repo {owner}/{repo} --title "#{number}: {title}" --body "{Intent block; 'Closes #{number}'; changes summary; test results; Findings & Disposition ledger}" --head "{branch_prefix}/issue-{number}-{slug}" --base main --draft
+gh pr create --repo {owner}/{repo} --title "#{number}: {title}" --body "{'Closes #{number}'; Intent block; changes summary; test results; Findings & Disposition ledger}" --head "{branch_prefix}/issue-{number}-{slug}" --base main --draft
 ```
 
 **If tracker is `jira`:**
 ```bash
-gh pr create --repo {owner}/{repo} --title "{ticket_key}: {title}" --body "{Intent block; ticket link; changes summary; test results; Findings & Disposition ledger}" --head "{branch_prefix}/{ticket_key}" --base main --draft
+gh pr create --repo {owner}/{repo} --title "{ticket_key}: {title}" --body "{'**Ticket:** [{ticket_key}]({source_url})'; Intent block; changes summary; test results; Findings & Disposition ledger}" --head "{branch_prefix}/{ticket_key}" --base main --draft
 ```
 
 ### 7. Update Queue Item

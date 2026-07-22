@@ -440,6 +440,9 @@ The end-to-end loop these commands are designed to chain into, per ticket:
 Each stage carries an **Intent block** (Goal / Key constraints / Definition of done /
 Non-goals) and a **Findings & Disposition** ledger forward into the PR and the completed queue
 item, so the work is self-documenting for intent and closes the loop on every review finding.
+Every PR opened this way also leads with a link back to its source ticket — `Closes #N` for a
+GitHub issue, a linked ticket key for Jira — so attribution to the originating work item is
+never lost.
 
 ## How It Works
 
