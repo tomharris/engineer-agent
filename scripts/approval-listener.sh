@@ -37,7 +37,7 @@ CLAUDE_BIN="${CLAUDE_BIN:-$(command -v claude || echo "${HOME}/.local/bin/claude
 NOTIFY_BIN="${NOTIFY_BIN:-${PLUGIN_ROOT}/scripts/notify.sh}"
 
 # Per-item-type spend cap for the headless execute run. Implementing a ticket
-# (implement-ticket runs a full Ralph Loop) costs far more than posting a review or
+# (implement-ticket runs a full inline implementation + self-review session) costs far more than posting a review or
 # an answer, so `ticket` gets a generous cap and everything else a modest default.
 # A flat 0.50 was too low even for some PR reviews and aborted every ticket approval
 # with "Exceeded USD budget", stranding the item in drafts/. Tune to your appetite;
@@ -175,7 +175,7 @@ run_ticket_implementation() {
   )
   local prompt="Implement the engineer-agent ticket in queue item '${item}' (approved). \
 The current working directory is an isolated git worktree of the target repo, checked out on a detached HEAD at the base branch. \
-Read config from ${EA_CONFIG_FILE}. Follow skills/implement-ticket/SKILL.md: create the ticket branch HERE (stay inside this worktree — do not cd elsewhere), implement via Ralph Loop, push the branch, and open a DRAFT pull request. \
+Read config from ${EA_CONFIG_FILE}. Follow skills/implement-ticket/SKILL.md: create the ticket branch HERE (stay inside this worktree — do not cd elsewhere), implement iteratively inline, self-review the branch diff and fix findings BEFORE opening any PR, then push the branch and open a DRAFT pull request. \
 To finalize the queue item, WRITE the completed record to ${AGENT_DIR}/queue/completed/${item} (status: completed). You do NOT need to delete the drafts/ original — the listener reconciles that afterward; do not spend effort trying to remove it. \
 Operate ONLY inside this working directory (plus writing that one completed/ queue file). Be concise."
 
