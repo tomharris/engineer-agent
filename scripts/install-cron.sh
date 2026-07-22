@@ -52,12 +52,18 @@ chmod +x "$POLL_SCRIPT"
 # with org IT. It is absent on this machine.)
 # ──────────────────────────────────────────────────────────────────────────────────────────
 
-# cron/launchd do not inherit the interactive shell environment. If CLAUDE_BIN is set at install
-# time, bake it into the definition so the supervised poll resolves the same binary override.
+# cron/launchd do not inherit the interactive shell environment. If CLAUDE_BIN or
+# EA_POLL_BUDGET_USD is set at install time, bake it into the definition so the supervised poll
+# resolves the same binary override / per-run budget cap.
 LAUNCHD_ENV=""
 if [ -n "${CLAUDE_BIN:-}" ]; then
-  LAUNCHD_ENV="        <key>CLAUDE_BIN</key>
+  LAUNCHD_ENV="${LAUNCHD_ENV}        <key>CLAUDE_BIN</key>
         <string>${CLAUDE_BIN}</string>
+"
+fi
+if [ -n "${EA_POLL_BUDGET_USD:-}" ]; then
+  LAUNCHD_ENV="${LAUNCHD_ENV}        <key>EA_POLL_BUDGET_USD</key>
+        <string>${EA_POLL_BUDGET_USD}</string>
 "
 fi
 
@@ -154,7 +160,9 @@ else
   # use the same credential store as the interactive CLI.
   CLAUDE_BIN_PREFIX=""
   [ -n "${CLAUDE_BIN:-}" ] && CLAUDE_BIN_PREFIX="CLAUDE_BIN=${CLAUDE_BIN} "
-  CRON_CMD="*/${INTERVAL} * * * * ${CLAUDE_BIN_PREFIX}PATH=${HOME}/.local/bin:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin ${POLL_SCRIPT}"
+  BUDGET_PREFIX=""
+  [ -n "${EA_POLL_BUDGET_USD:-}" ] && BUDGET_PREFIX="EA_POLL_BUDGET_USD=${EA_POLL_BUDGET_USD} "
+  CRON_CMD="*/${INTERVAL} * * * * ${CLAUDE_BIN_PREFIX}${BUDGET_PREFIX}PATH=${HOME}/.local/bin:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin ${POLL_SCRIPT}"
   (crontab -l 2>/dev/null | grep -v "engineer-agent.*cron-poll.sh" || true; echo "$CRON_CMD") | crontab -
 
   echo "Engineer-agent poll installed as a crontab entry:"

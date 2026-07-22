@@ -14,9 +14,28 @@ export PATH="${HOME}/.local/bin:${HOME}/bin:/usr/local/bin:/opt/homebrew/bin:${P
 # CLAUDE_BIN can be set in the environment to select a specific Claude Code binary
 # (e.g. a version shim or non-standard install path); otherwise discover it on PATH.
 CLAUDE_BIN="${CLAUDE_BIN:-$(command -v claude || echo "${HOME}/.local/bin/claude")}"
+# Per-run budget cap for the headless poll. A full 6-project × 4-source poll (GitHub + Jira +
+# Slack + Slite) that reads live Slack channels and may draft a PR review / ticket intent inline
+# can exceed a low cap; when it does, claude -p aborts mid-run, writes no receipt, and the next
+# fire re-attempts the same work (a $2 default did exactly this after Slack reads started
+# working, 2026-07-22). Override with EA_POLL_BUDGET_USD; install-cron.sh bakes it into launchd.
+POLL_BUDGET_USD="${EA_POLL_BUDGET_USD:-6.00}"
 
 # Ensure state directory exists
 mkdir -p "${AGENT_DIR}/state"
+
+# Single-run lock: a scheduled poll normally finishes in minutes, but a slow run (large
+# backlog, many Slack reads) can still be in flight when the next fire lands — and a manual
+# run can collide with a scheduled one. Two concurrent polls thrash the same state/receipt
+# files and each burns the full budget racing the other (observed 2026-07-22). Take a PID
+# lock and exit early if another poll holds it; a stale lock (dead PID) is reclaimed.
+LOCK_FILE="${AGENT_DIR}/state/cron-poll.lock"
+if [ -f "$LOCK_FILE" ] && kill -0 "$(cat "$LOCK_FILE" 2>/dev/null)" 2>/dev/null; then
+  echo "--- Poll skipped at $(date -u +%Y-%m-%dT%H:%M:%SZ): another poll (PID $(cat "$LOCK_FILE")) is running ---" >> "$LOG_FILE"
+  exit 0
+fi
+echo $$ > "$LOCK_FILE"
+trap 'rm -f "$LOCK_FILE"' EXIT
 
 echo "--- Poll started at $(date -u +%Y-%m-%dT%H:%M:%SZ) ---" >> "$LOG_FILE"
 
@@ -190,7 +209,7 @@ POLL_STATUS=0
   --model sonnet \
   --permission-mode acceptEdits \
   --allowedTools "${allowed_tools[@]}" \
-  --max-budget-usd 2.00 \
+  --max-budget-usd "$POLL_BUDGET_USD" \
   "Execute now — do NOT enter plan mode, do NOT output a plan, do NOT ask questions. Perform the work directly and report the results when finished.
 
 You ARE the scheduled poll for this cycle, not an observer of it. Do NOT check whether a poll has already run, and do NOT skip a source because recent queue items or a recent last_checked suggest it was already covered. Poll every configured source yourself, now.
