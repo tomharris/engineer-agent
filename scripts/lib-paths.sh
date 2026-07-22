@@ -47,6 +47,23 @@ export LOGNAME="${LOGNAME:-$USER}"
 # can detect an un-migrated install and say so.
 EA_LEGACY_AGENT_DIR="${HOME}/.claude/engineer-agent"
 
+# resolve_installed_plugin_root — the highest-version installed engineer-agent plugin dir, or
+# empty if the plugin isn't installed via marketplace (a pure `--plugin-dir` dev machine).
+#
+# WHY THIS EXISTS: when the plugin is installed via marketplace it SHADOWS a `--plugin-dir`
+# pointing at the dev checkout, so a skill's ${CLAUDE_PLUGIN_ROOT} resolves to this cache path,
+# NOT the dev repo. The model then EXPANDS that variable to this absolute path before Bash ever
+# sees it. So a headless `--allowedTools` rule for a plugin script (slack-mcp.sh) must match this
+# expanded cache path, not the dev-repo path nor the unexpanded `${CLAUDE_PLUGIN_ROOT}` literal.
+# cron-poll.sh / approval-listener.sh allowlist the shim for BOTH this root and their own
+# script-derived PLUGIN_ROOT so whichever one the runtime resolves, a rule matches. See the
+# "mcp-proxy gotcha" note in cron-poll.sh and CLAUDE.md.
+resolve_installed_plugin_root() {
+  local base="${CLAUDE_CONFIG_DIR:-${HOME}/.claude}/plugins/cache/engineer-agent/engineer-agent"
+  [ -d "$base" ] || return 0
+  ls -d "$base"/*/ 2>/dev/null | sort -V | tail -1 | sed 's:/*$::'
+}
+
 # --- Per-project config readers (dependency-free, indent-aware awk) -----------------
 # Used by approval-listener.sh to prepare a confined headless ticket implementation:
 # it needs the project's checkout path and its allow-listed build commands, both read

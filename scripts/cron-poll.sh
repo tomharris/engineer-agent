@@ -124,15 +124,21 @@ run_log() { tail -n "+$((LOG_START_LINE + 1))" "$LOG_FILE"; }
 # Either way only `read`/`thread` are listed; `<bin> send` stays UNMATCHED, so posting remains
 # execute-item's job behind the approval gate — identical to the gh read-vs-write split above.
 #
-# mcp-proxy gotcha (this silently broke the first poll after Slack channels were configured):
-# poll-slack invokes the shim via the UNEXPANDED `${CLAUDE_PLUGIN_ROOT}/scripts/slack-mcp.sh`
-# (SKILL.md §1 — the plugin-root var, not an absolute path), and Claude Code's Bash permission
-# matcher compares the LITERAL command text without expanding that variable. So a rule built
-# from the shell-expanded abs path (`${SLACK_BIN} ...` below) never matches the model's actual
-# invocation, and the read is denied headlessly (a prompt under `-p` is a denial). We therefore
-# ALSO add the unexpanded `${CLAUDE_PLUGIN_ROOT}` literal form, single-quoted so THIS script's
-# bash leaves it untouched (the var is empty here; it resolves inside the claude run). The
-# spy/bin backend needs no such rule — there `spy` is a bare literal identical in rule and call.
+# mcp-proxy gotcha (this silently broke the first poll after Slack channels were configured, AND
+# a first attempted fix that added an unexpanded `${CLAUDE_PLUGIN_ROOT}` literal rule — see below):
+# poll-slack references the shim as `${CLAUDE_PLUGIN_ROOT}/scripts/slack-mcp.sh` (SKILL.md §1 — the
+# plugin-root var, not an absolute path). Two facts, each confirmed from a real failing run's
+# transcript, decide the rule shape:
+#   1. The MODEL expands ${CLAUDE_PLUGIN_ROOT} to an absolute path before Bash sees it — it does
+#      NOT pass the literal `${CLAUDE_PLUGIN_ROOT}` token. So a single-quoted literal rule never
+#      matches; that earlier fix was dead code.
+#   2. When the plugin is installed via marketplace it SHADOWS our `--plugin-dir`, so that expanded
+#      root is the INSTALLED cache path (…/plugins/cache/engineer-agent/engineer-agent/<ver>), NOT
+#      this script's dev-repo PLUGIN_ROOT. So a rule built only from PLUGIN_ROOT also misses.
+# Fix: allowlist the shim's EXPANDED path for BOTH candidate roots — our script-derived PLUGIN_ROOT
+# and resolve_installed_plugin_root() (the cache path the runtime actually resolves) — so whichever
+# one applies, a rule matches. The spy/bin backend needs none of this: `spy` is a bare literal
+# identical in rule and call.
 SLACK_METHOD="$(yaml_agent_slack method)"; SLACK_METHOD="${SLACK_METHOD:-spy}"
 if [ "$SLACK_METHOD" = "mcp-proxy" ]; then
   SLACK_BIN="${PLUGIN_ROOT}/scripts/slack-mcp.sh"
@@ -150,12 +156,20 @@ allowed_tools=(
   Read Glob Grep
   "Edit(/${AGENT_DIR}/**)"
 )
-# See the mcp-proxy gotcha above: match the exact unexpanded form the skill emits.
+# See the mcp-proxy gotcha above: the model emits the shim's expanded abs path, resolved against
+# whichever plugin root the runtime uses (installed cache when installed, else our --plugin-dir).
+# Allowlist read/thread for every distinct candidate root. notify.sh is added for the installed
+# root too as cheap insurance, in case a skill ever invokes it via ${CLAUDE_PLUGIN_ROOT} rather
+# than the pre-expanded path this script injects into the prompt.
 if [ "$SLACK_METHOD" = "mcp-proxy" ]; then
-  allowed_tools+=(
-    'Bash(${CLAUDE_PLUGIN_ROOT}/scripts/slack-mcp.sh read:*)'
-    'Bash(${CLAUDE_PLUGIN_ROOT}/scripts/slack-mcp.sh thread:*)'
-  )
+  INSTALLED_ROOT="$(resolve_installed_plugin_root)"
+  if [ -n "$INSTALLED_ROOT" ] && [ "$INSTALLED_ROOT" != "$PLUGIN_ROOT" ]; then
+    allowed_tools+=(
+      "Bash(${INSTALLED_ROOT}/scripts/slack-mcp.sh read:*)"
+      "Bash(${INSTALLED_ROOT}/scripts/slack-mcp.sh thread:*)"
+      "Bash(${INSTALLED_ROOT}/scripts/notify.sh *)"
+    )
+  fi
 fi
 
 # --add-dir: acceptEdits only auto-accepts edits under the working directory, and cron

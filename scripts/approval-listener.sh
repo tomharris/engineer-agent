@@ -89,15 +89,21 @@ run_generic_execute() {
   # method: `spy send …` OR `slack-mcp.sh send …` (agent.slack.method: mcp-proxy). This is the
   # gated WRITE path — correct here, behind the ntfy approval — unlike the read-only poll.
   #
-  # The `${PLUGIN_ROOT}/scripts/slack-mcp.sh *` rule uses the shell-expanded abs path, but the
-  # skills invoke the shim via the UNEXPANDED `${CLAUDE_PLUGIN_ROOT}/scripts/slack-mcp.sh`, which
-  # Claude Code's permission matcher compares literally (it does NOT expand the var). So without
-  # the literal form below a mcp-proxy Slack read/send is denied headlessly — same gotcha that
-  # broke the first poll after Slack was configured. Single-quote it so THIS script's bash leaves
-  # the (empty here) var untouched; it resolves inside the claude run.
+  # The skills invoke the shim as `${CLAUDE_PLUGIN_ROOT}/scripts/slack-mcp.sh`, but the MODEL
+  # expands that variable to an absolute path before Bash sees it (it does NOT pass the literal
+  # token — so a single-quoted `${CLAUDE_PLUGIN_ROOT}` rule is dead code), and when the plugin is
+  # installed via marketplace it SHADOWS our --plugin-dir, so that expanded root is the INSTALLED
+  # cache path, not this script's dev-repo PLUGIN_ROOT. Both facts confirmed from a real failing
+  # poll transcript. So allowlist the shim's expanded abs path for BOTH candidate roots — our
+  # PLUGIN_ROOT and resolve_installed_plugin_root() — so whichever the runtime resolves, a rule
+  # matches. The trailing `*` covers read/thread/send. `spy` needs none of this (bare literal).
+  local slack_rules=("Bash(${PLUGIN_ROOT}/scripts/slack-mcp.sh *)")
+  local installed_root; installed_root="$(resolve_installed_plugin_root)"
+  if [ -n "$installed_root" ] && [ "$installed_root" != "$PLUGIN_ROOT" ]; then
+    slack_rules+=("Bash(${installed_root}/scripts/slack-mcp.sh *)")
+  fi
   local allowed_tools=(
-    "Bash(gh *)" "Bash(spy *)" "Bash(${PLUGIN_ROOT}/scripts/slack-mcp.sh *)"
-    'Bash(${CLAUDE_PLUGIN_ROOT}/scripts/slack-mcp.sh *)'
+    "Bash(gh *)" "Bash(spy *)" "${slack_rules[@]}"
     "Bash(mv *)" "Bash(${PLUGIN_ROOT}/scripts/notify.sh *)"
     Read Edit Write Glob Grep
     "mcp__slite__append-blocks" "mcp__slite__create-note" "mcp__atlassian__createJiraIssue"
