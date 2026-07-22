@@ -70,16 +70,26 @@ file is missing, report "No poll has completed since the liveness receipt was in
 this is distinct from §3's per-source `last_checked` timestamps — those are dedup cutoffs, this is
 whether the last run actually finished.)
 
-### 4. Slack (Spy) Health
+### 4. Slack Health
 
-If any project has a `slack` section configured, verify the Spy CLI is usable:
+If any project has a `slack` section configured, verify the effective Slack backend is usable.
+Resolve the method from `agent.slack.method` (default `spy`):
 
+**method: spy**
 1. Resolve the binary (`agent.slack.bin`, default `spy`) and check it is on `PATH`
    (`command -v <bin>`). If missing, report: "Spy CLI not found — install from
    https://github.com/tomharris/spy and ensure it's on PATH."
 2. Run `<bin> auth --json -w <agent.slack.workspace>` (omit `-w` if unset). Report the
    signed-in user/team on success, or the error (e.g. "multiple workspaces signed in; set
    agent.slack.workspace") on failure.
+
+**method: mcp-proxy**
+1. The binary is the bundled `${CLAUDE_PLUGIN_ROOT}/scripts/slack-mcp.sh`; check `curl` and
+   `jq` are on `PATH`.
+2. Run `${CLAUDE_PLUGIN_ROOT}/scripts/slack-mcp.sh auth --json`. On success (`{"ok": true}`)
+   report "Slack MCP proxy reachable". If it exits `75` (`{"skipped": true}`), report "Slack
+   MCP token expired — will resume when Claude Code re-auths" as an **informational** state,
+   not a failure. Any other non-zero exit is a real error — surface its message.
 
 ### 5. Summary
 

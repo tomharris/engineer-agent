@@ -70,9 +70,10 @@ receipt_field() {
 # work and drafts responses; posting is execute-item's job, behind the human approval
 # gate. Since poll ingests untrusted text (PR/issue bodies, Slack messages), a
 # prompt-injection payload must not be able to reach a write verb. So `gh pr create`,
-# `gh pr review`, `gh issue create` and `spy send` are all unmatched here, as is `gh api`
-# (`gh api -X POST` writes). Anything unmatched fails non-interactively, which the
-# no-progress check below surfaces as a WARN rather than a silent no-op.
+# `gh pr review`, `gh issue create` and the Slack `send` verb (spy or slack-mcp.sh) are all
+# unmatched here, as is `gh api` (`gh api -X POST` writes). Anything unmatched fails
+# non-interactively, which the no-progress check below surfaces as a WARN rather than a silent
+# no-op.
 #
 # Three gotchas encoded below, each of which silently broke a real run:
 #   1. Bash rules match the literal command text, so `mv *` -- a `~/`-prefixed pattern
@@ -90,10 +91,26 @@ receipt_field() {
 #      the READ verbs are listed (search + fetch); the write tools (createJiraIssue,
 #      editJiraIssue, transitionJiraIssue, addComment*, slite create/edit/append) stay
 #      unmatched, keeping posting behind the execute-item gate as with `gh`/`spy`.
+#
+# The Slack read verbs are keyed off the effective Slack binary, which depends on
+# agent.slack.method (resolved in plain bash below, before claude starts):
+#   - method: spy (default)  -> `spy`
+#   - method: mcp-proxy      -> the bundled scripts/slack-mcp.sh (Enterprise Grid; reuses the
+#                               Keychain OAuth token). It runs as ONE Bash invocation, so its
+#                               internal curl/jq/security subprocesses need no separate rule —
+#                               `Bash(<bin> read:*)` covers the whole call. No `Bash(curl *)`.
+# Either way only `read`/`thread` are listed; `<bin> send` stays UNMATCHED, so posting remains
+# execute-item's job behind the approval gate — identical to the gh read-vs-write split above.
+SLACK_METHOD="$(yaml_agent_slack method)"; SLACK_METHOD="${SLACK_METHOD:-spy}"
+if [ "$SLACK_METHOD" = "mcp-proxy" ]; then
+  SLACK_BIN="${PLUGIN_ROOT}/scripts/slack-mcp.sh"
+else
+  SLACK_BIN="$(yaml_agent_slack bin)"; SLACK_BIN="${SLACK_BIN:-spy}"
+fi
 allowed_tools=(
   "Bash(gh pr list:*)" "Bash(gh pr view:*)" "Bash(gh pr diff:*)"
   "Bash(gh issue list:*)" "Bash(gh issue view:*)"
-  "Bash(spy read:*)" "Bash(spy thread:*)"
+  "Bash(${SLACK_BIN} read:*)" "Bash(${SLACK_BIN} thread:*)"
   mcp__atlassian__searchJiraIssuesUsingJql mcp__atlassian__getJiraIssue
   mcp__slite__search-notes mcp__slite__get-note mcp__slite__get-note-children
   "Bash(${PLUGIN_ROOT}/scripts/notify.sh *)"

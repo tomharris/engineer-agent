@@ -82,9 +82,36 @@ Two `agent` subsections drive autonomy (both optional):
 - `agent.autonomy.auto_execute` — a list of action tiers allowed to run **without** an approval gate. Only `draft-pr` is supported (draft PRs merge nothing / request no review). Absent ⇒ empty ⇒ everything is gated.
 - `agent.notify.ntfy` — push-notification + remote-approval settings (`server`, `topic`, `command_topic`, `auth_token`). Absent ⇒ no notifications; the workflow is otherwise unchanged.
 
-Slack access uses the Spy CLI (`agent.slack`, optional):
-- `agent.slack.bin` — path to the `spy` binary. Effective binary = `agent.slack.bin` ?? `spy` (on PATH).
-- `agent.slack.workspace` — default Slack workspace. Effective workspace = `projects.<slug>.slack.workspace` ?? `agent.slack.workspace` ?? Spy's own default. Pass it as `-w <workspace>` on every `spy` call (Spy errors when multiple workspaces are signed in and no default is set).
+Slack access (`agent.slack`, optional) has **two selectable backends**, chosen by
+`agent.slack.method` (`spy` | `mcp-proxy`, default `spy`). Both present the **same
+subcommand/JSON interface** (`read`/`thread`/`send`/`auth`, `--json`, `-w`), so the one thing
+every call site does is resolve the **effective Slack binary**, then invoke it identically:
+
+- **`agent.slack.method: spy` (default)** — the [Spy](https://github.com/tomharris/spy) CLI,
+  reusing the local Slack desktop session (browser tokens). Effective binary =
+  `agent.slack.bin` ?? `spy` (on PATH).
+- **`agent.slack.method: mcp-proxy`** — for **Slack Enterprise Grid**, where spy's xoxc/xoxd
+  scraping is broken and unsafe (first automated call force-logs the human out; xoxd rotates
+  hourly). Effective binary = `${CLAUDE_PLUGIN_ROOT}/scripts/slack-mcp.sh` — a spy-compatible
+  shim (bash + curl + jq) that reads Claude Code's OAuth token from the macOS login Keychain
+  (`Claude Code-credentials`, **read-only**) and speaks JSON-RPC to Anthropic's MCP proxy
+  fronting the official Slack connector (`agent.slack.mcp.server` / `.server_id`). No browser
+  tokens, no LLM invocation, zero model-token cost.
+  - **Read-only Keychain / skip-on-expiry.** The shim NEVER refreshes or rewrites the Keychain
+    entry (an OAuth refresh rotates the refresh token and would invalidate Claude Code's own
+    credential). On a missing/expired token it **skips cleanly**: prints `{"skipped":true,…}`
+    and exits `75`. Callers treat `75` as a *skipped* Slack source (poll leaves `last_checked_ts`
+    unchanged; execute-item/digest treat a `75` on `send` as a failed post left in `drafts/`).
+    Claude Code re-auths on its own and the next run succeeds.
+  - **In-session keychain.** `security find-generic-password` reads the login keychain, which on
+    macOS only unlocks inside the GUI (Aqua) session — the same reason the poll runs as a
+    gui-session LaunchAgent (see "Notifications & Remote Approval"). No new scheduler work: the
+    existing `engineer-agent-poll` LaunchAgent already runs in-session.
+- `agent.slack.workspace` — default Slack workspace. Effective workspace =
+  `projects.<slug>.slack.workspace` ?? `agent.slack.workspace`. Pass it as `-w <workspace>` on
+  every call. Under `spy` it disambiguates multiple signed-in workspaces (spy errors without a
+  default); the `mcp-proxy` shim accepts `-w` but ignores it (the connector is bound to its
+  authorized workspace).
 
 To find config for a specific project, look up `projects.<slug>`. Each project entry has `path`, `tracker`, `github`, `slack`, `jira`, `slite`, `qa`, and (optional) `exec` subsections. `exec.allowed_commands` is the build/test command allowlist for confined headless ticket implementation — see "Confined headless ticket implementation" under Notifications & Remote Approval. The `tracker` field (`"jira"` | `"github-issues"` | `"none"`) determines which ticket tracker a project uses. If absent, it's inferred: `jira` section present → `"jira"`, `github.issues` section present → `"github-issues"`, neither → `"none"`.
 
@@ -361,11 +388,14 @@ creates the branch in place when already inside the repo checkout, and pushes be
 create` so the headless run never hits an interactive push prompt).
 
 Key invariant: **polling reads; only `execute-item` writes.** `cron-poll.sh` passes a deliberately
-read-only `--allowedTools` allowlist (`gh pr list/view/diff`, `gh issue list/view`, `spy read/thread`,
-and the read-only MCP verbs `mcp__atlassian__searchJiraIssuesUsingJql`/`getJiraIssue` and
+read-only `--allowedTools` allowlist (`gh pr list/view/diff`, `gh issue list/view`, the Slack
+backend's `read`/`thread` — `spy` or `scripts/slack-mcp.sh`, keyed off `agent.slack.method` and
+resolved in plain bash before `claude` starts — and the read-only MCP verbs
+`mcp__atlassian__searchJiraIssuesUsingJql`/`getJiraIssue` and
 `mcp__slite__search-notes`/`get-note`/`get-note-children`), so the poll can discover work and draft
-responses but *physically cannot* post. `gh pr create`, `gh pr review`, `gh issue create` and
-`spy send` are unmatched, as is `gh api` (`gh api -X POST` writes); so are the Jira/Slite **write**
+responses but *physically cannot* post. `gh pr create`, `gh pr review`, `gh issue create` and the
+Slack `send` verb (under either method) are unmatched, as is `gh api` (`gh api -X POST` writes); so
+are the Jira/Slite **write**
 MCP tools (`createJiraIssue`, `editJiraIssue`, `transitionJiraIssue`, `addComment*`, and every
 Slite create/edit/append tool). MCP tools are denied unless named explicitly, exactly like `gh` —
 so a poller that drives an MCP server (Jira, Slite) silently skips every run until its read verbs
@@ -381,10 +411,15 @@ Key invariant: **`/engineer-agent review-queue` (terminal) and `/engineer-agent 
 ## Available Integrations
 
 - GitHub (PRs and Issues): `gh` CLI via Bash (requires `gh auth login`)
-- Slack: the [Spy](https://github.com/tomharris/spy) CLI (`spy`) via Bash — reuses the local
-  Slack desktop session (no OAuth/app install). Reads with `spy read`/`spy thread`, posts
-  with `spy send` (`--thread <ts>` for threaded replies). Same binary works in interactive
-  skills and the headless cron/ntfy scripts.
+- Slack (two backends via `agent.slack.method`, see "Config Loading Pattern" above): the
+  [Spy](https://github.com/tomharris/spy) CLI (`spy`, default) reusing the local Slack desktop
+  session (no OAuth/app install), OR `scripts/slack-mcp.sh` (`mcp-proxy`, for Enterprise Grid)
+  going through the Keychain OAuth token + Anthropic MCP proxy. Both expose the same interface:
+  reads with `<slack> read`/`<slack> thread`, posts with `<slack> send` (`--thread <ts>` for
+  threaded replies). Same binary works in interactive skills and the headless cron/ntfy scripts.
+  Because the MCP-proxy shim runs as one Bash invocation, its internal `curl`/`jq`/`security`
+  subprocesses need no separate allowlist entry — a single `Bash(<shim> read:*)`-style rule
+  covers the whole call.
 - Jira: `mcp__atlassian__*` tools (optional — either Jira or GitHub Issues per project)
 - Slite: `mcp__slite__*` tools
 - ntfy (optional): push notifications + remote approval via `curl` (publish) and `scripts/approval-listener.sh` (subscribe). Listener requires `jq`.

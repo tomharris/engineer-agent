@@ -25,7 +25,9 @@ Everything goes through an approval queue — nothing is posted until you say so
 
 - [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) installed and authenticated
 - **GitHub CLI (`gh`)** — for PR reviews, code operations, and GitHub API access. Install from [cli.github.com](https://cli.github.com) and run `gh auth login`
-- **Spy Slack CLI (`spy`)** — for channel polling and message posting. Spy reuses your local Slack desktop session, so there's no OAuth or app install. Build it from [github.com/tomharris/spy](https://github.com/tomharris/spy) (`go install ./cmd/spy`), sign in to the Slack desktop app, then run `spy auth` to confirm. Set the workspace via `agent.slack.workspace` in config (required when multiple workspaces are signed in)
+- **Slack** — for channel polling and message posting. Two backends, selected by `agent.slack.method`:
+  - **`spy` (default)** — the [Spy Slack CLI](https://github.com/tomharris/spy), which reuses your local Slack desktop session (no OAuth or app install). Build it (`go install ./cmd/spy`), sign in to the Slack desktop app, run `spy auth` to confirm, and set `agent.slack.workspace` (required when multiple workspaces are signed in). Best for a single, non-Enterprise-Grid workspace.
+  - **`mcp-proxy`** — for **Slack Enterprise Grid**, where spy's browser-token scraping is broken and unsafe (the first automated call force-logs you out; session tokens rotate hourly). Set `agent.slack.method: mcp-proxy` and `agent.slack.mcp.server_id` to your Slack connector's `mcpsrv` id. The bundled `scripts/slack-mcp.sh` client reads Claude Code's existing OAuth token from your macOS Keychain (read-only) and talks to Anthropic's MCP proxy fronting the official Slack connector — no browser tokens, zero model-token cost. Requires `curl` + `jq`; no spy install. It depends on the login keychain being unlocked, so the headless poll must run in your GUI login session (the macOS LaunchAgent `install-cron.sh` installs already does).
 - **Jira MCP integration** (optional) — for ticket polling and implementation when using Jira as tracker (`mcp__atlassian__*`). Either Jira or GitHub Issues per project — GitHub Issues uses the `gh` CLI (already a prerequisite)
 - **Slite MCP integration** (optional) — for document reviews (`mcp__slite__*`)
 - **ntfy** (optional) — for push notifications and remote approval. No install needed to publish (uses `curl` against [ntfy.sh](https://ntfy.sh) or your self-hosted server); install the [ntfy mobile app](https://ntfy.sh/app) to receive alerts and tap Approve/Reject. The approval listener also needs **`jq`** on the host running it.
@@ -68,9 +70,13 @@ agent:
   standup_channel: "C98765432"
   digest_channel: "C98765432"
   cron_interval_minutes: 15
-  slack:                                  # Spy CLI settings (optional)
-    bin: "spy"                            # path to the spy binary (default: "spy" on PATH)
+  slack:                                  # Slack settings (optional)
+    method: "spy"                         # "spy" (default) | "mcp-proxy" (Enterprise Grid)
+    bin: "spy"                            # spy binary path (method: spy; default "spy" on PATH)
     workspace: "myco"                     # default Slack workspace (team domain or team_id)
+    mcp:                                  # method: mcp-proxy only
+      server: "https://mcp-proxy.anthropic.com/v1/mcp"
+      server_id: "mcpsrv_..."             # your Slack connector's mcpsrv id
   autonomy:
     auto_execute: ["draft-pr"]            # action tiers allowed to run without approval
   notify:                                 # optional — omit to disable push notifications
@@ -496,7 +502,7 @@ This installs a scheduled job that runs `scripts/cron-poll.sh`, which invokes Cl
 
 On macOS you can confine polling to specific clock hours (e.g. business hours, to cap spend on a first poll over a large backlog) by setting `EA_POLL_HOURS` (comma-separated, 0–23) and optionally `EA_POLL_MINUTE` at install time — e.g. `EA_POLL_HOURS=9,10,11,13,14,15,16 EA_POLL_MINUTE=3 scripts/install-cron.sh`. Without them the poll runs every N minutes.
 
-**The poll is read-only by construction.** It runs with an allowlist limited to read verbs (`gh pr list/view/diff`, `gh issue list/view`, `spy read/thread`), so it can find work and draft responses but cannot post anything. Every outbound action stays behind the approval gate.
+**The poll is read-only by construction.** It runs with an allowlist limited to read verbs (`gh pr list/view/diff`, `gh issue list/view`, and the Slack backend's `read`/`thread` — `spy` or `scripts/slack-mcp.sh` depending on `agent.slack.method`), so it can find work and draft responses but cannot post anything. The Slack `send` verb is never allowlisted in the poll under either method. Every outbound action stays behind the approval gate.
 
 **Headless auth (macOS): why the poll runs under launchd, not cron.** On macOS the Claude credential lives in the login keychain, which only unlocks *inside* your GUI login session. A **crontab** job runs outside that session and can't read it, so a cron poll fails with `Not logged in` even though the same credentials work interactively. A **launchd LaunchAgent** bootstrapped into your GUI session *can* read the keychain — so `install-cron.sh` installs the poll as a LaunchAgent on macOS (the approval-listener already uses this path). No token on disk; the tradeoff is that it only polls while you're logged in. On Linux there's no per-user GUI-keychain split, so crontab is fine.
 

@@ -107,8 +107,13 @@ Engineer-agent setup complete!
 
 Next steps:
   1. Edit ~/.local/share/engineer-agent/engineer.yaml with your Slack channels, Jira project, etc.
-  2. For Slack: install the Spy CLI (https://github.com/tomharris/spy), sign in to the Slack
-     desktop app, run `spy auth` to confirm, and set agent.slack.workspace in config.
+  2. For Slack, pick a backend via agent.slack.method:
+       • spy (default): install the Spy CLI (https://github.com/tomharris/spy), sign in to the
+         Slack desktop app, run `spy auth` to confirm, and set agent.slack.workspace.
+       • mcp-proxy (Slack Enterprise Grid, where spy is broken): set agent.slack.method:
+         mcp-proxy and agent.slack.mcp.server_id to your Slack connector's mcpsrv id. It reuses
+         Claude Code's Keychain OAuth token (needs curl + jq); no spy install. Verify with
+         `${CLAUDE_PLUGIN_ROOT}/scripts/slack-mcp.sh auth`.
   3. macOS headless auth: cron cannot read the login keychain. On a forceLoginOrgUUID-managed
      machine there is no environment-credential fix — see CLAUDE.md and work with your org's IT.
   4. Run /engineer-agent add-project from other project directories to register them.
