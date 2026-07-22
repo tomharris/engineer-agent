@@ -88,8 +88,16 @@ run_generic_execute() {
   # Both Slack backends are allowlisted so an approved slack-question reply posts under either
   # method: `spy send …` OR `slack-mcp.sh send …` (agent.slack.method: mcp-proxy). This is the
   # gated WRITE path — correct here, behind the ntfy approval — unlike the read-only poll.
+  #
+  # The `${PLUGIN_ROOT}/scripts/slack-mcp.sh *` rule uses the shell-expanded abs path, but the
+  # skills invoke the shim via the UNEXPANDED `${CLAUDE_PLUGIN_ROOT}/scripts/slack-mcp.sh`, which
+  # Claude Code's permission matcher compares literally (it does NOT expand the var). So without
+  # the literal form below a mcp-proxy Slack read/send is denied headlessly — same gotcha that
+  # broke the first poll after Slack was configured. Single-quote it so THIS script's bash leaves
+  # the (empty here) var untouched; it resolves inside the claude run.
   local allowed_tools=(
     "Bash(gh *)" "Bash(spy *)" "Bash(${PLUGIN_ROOT}/scripts/slack-mcp.sh *)"
+    'Bash(${CLAUDE_PLUGIN_ROOT}/scripts/slack-mcp.sh *)'
     "Bash(mv *)" "Bash(${PLUGIN_ROOT}/scripts/notify.sh *)"
     Read Edit Write Glob Grep
     "mcp__slite__append-blocks" "mcp__slite__create-note" "mcp__atlassian__createJiraIssue"
