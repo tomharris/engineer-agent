@@ -64,6 +64,22 @@ resolve_installed_plugin_root() {
   ls -d "$base"/*/ 2>/dev/null | sort -V | tail -1 | sed 's:/*$::'
 }
 
+# resolve_marketplace_plugin_root — the engineer-agent plugin dir inside the marketplace
+# CHECKOUT (…/plugins/marketplaces/engineer-agent), or empty if not present.
+#
+# WHY THIS EXISTS: ${CLAUDE_PLUGIN_ROOT} does NOT resolve to a single stable path. Across real
+# headless polls it has expanded to THREE different dirs depending on how the plugin was loaded:
+# the script-derived dev-repo PLUGIN_ROOT (a bare --plugin-dir run), the installed cache
+# (resolve_installed_plugin_root, when marketplace-installed), AND this marketplace-checkout dir
+# — the last one observed emitting `.../marketplaces/engineer-agent/scripts/slack-mcp.sh read …`
+# and getting DENIED because the allowlist covered only the first two. The shim allowlist in
+# cron-poll.sh / approval-listener.sh must cover all three candidate roots so whichever one the
+# runtime resolves, a rule matches. See the "mcp-proxy gotcha" note in cron-poll.sh and CLAUDE.md.
+resolve_marketplace_plugin_root() {
+  local dir="${CLAUDE_CONFIG_DIR:-${HOME}/.claude}/plugins/marketplaces/engineer-agent"
+  [ -d "$dir" ] && [ -f "$dir/scripts/slack-mcp.sh" ] && printf '%s\n' "$dir"
+}
+
 # --- Per-project config readers (dependency-free, indent-aware awk) -----------------
 # Used by approval-listener.sh to prepare a confined headless ticket implementation:
 # it needs the project's checkout path and its allow-listed build commands, both read

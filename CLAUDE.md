@@ -429,21 +429,33 @@ Key invariant: **`/engineer-agent review-queue` (terminal) and `/engineer-agent 
   Because the MCP-proxy shim runs as one Bash invocation, its internal `curl`/`jq`/`security`
   subprocesses need no separate allowlist entry — a single `Bash(<shim> read:*)`-style rule
   covers the whole call. **But that rule must match the shim's path as the model *actually runs*
-  it, and getting there took two corrections, each learned from a real failing poll (transcript
+  it, and getting there took several corrections, each learned from a real failing poll (transcript
   evidence, not theory):** the skills reference the shim as `${CLAUDE_PLUGIN_ROOT}/scripts/slack-mcp.sh`
   (per `poll-slack`/execute-item), and (1) the **model expands `${CLAUDE_PLUGIN_ROOT}` to an
   absolute path** before Bash ever sees it — it does *not* pass the literal `${CLAUDE_PLUGIN_ROOT}`
   token, so a single-quoted-literal allowlist rule is dead code and never matches (an earlier fix
-  that added one did nothing); and (2) when the plugin is **installed via marketplace it shadows
-  `--plugin-dir`**, so that expanded root is the *installed cache* path
-  (`~/.claude/plugins/cache/engineer-agent/engineer-agent/<ver>`), **not** the dev-repo path a
-  script derives from its own location. A rule built only from the dev-repo `PLUGIN_ROOT` therefore
-  also misses. Either miss denies the Slack call non-interactively (a prompt under `-p` is a
-  denial). Fix: `cron-poll.sh` and `approval-listener.sh` allowlist the shim's **expanded** abs
-  path for **both** candidate roots — the script's own `PLUGIN_ROOT` **and**
-  `resolve_installed_plugin_root()` (in `lib-paths.sh`, the highest-version installed cache dir) —
-  so whichever root the runtime resolves, a rule matches. (`spy` needs none of this — it is a bare
-  literal identical in rule and invocation; that is the pattern the shim's path form can't reach.)
+  that added one did nothing); and (2) **that expanded root is not stable — it has been observed
+  resolving to THREE different dirs across runs**: the dev-repo `PLUGIN_ROOT` a script derives from
+  its own location (a bare `--plugin-dir` run), the *installed cache* path
+  (`~/.claude/plugins/cache/engineer-agent/engineer-agent/<ver>`, when marketplace-installed shadows
+  `--plugin-dir`), **and** the *marketplace checkout* path
+  (`~/.claude/plugins/marketplaces/engineer-agent`). A rule built from only one or two of these
+  misses whenever the runtime picks the third, and any miss denies the Slack call non-interactively
+  (a prompt under `-p` is a denial). Fix: `cron-poll.sh` and `approval-listener.sh` allowlist the
+  shim's **expanded** abs path for **all three** candidate roots — the script's own `PLUGIN_ROOT`,
+  `resolve_installed_plugin_root()` (highest-version installed cache dir), and
+  `resolve_marketplace_plugin_root()` (the marketplace checkout) — all three in `lib-paths.sh`, so
+  whichever root the runtime resolves, a rule matches. (3) The **poll allowlist must also include
+  the `auth` verb, not just `read`/`thread`**: the model runs `slack-mcp.sh auth` as a read-only
+  token preflight before reading, and when only `read`/`thread` were allowed that preflight was
+  denied — the model then treated the shim as unavailable and cascaded to the direct
+  `mcp__claude_ai_Slack__slack_read_channel` connector, which is *also* unlisted, so both Slack
+  paths were denied and the poll silently drafted nothing for the affected projects while its
+  narrative sometimes still (wrongly) claimed Slack "succeeded" — trust the receipt's `errors:`
+  list and the transcript, not the prose summary. `cron-poll.sh` allowlists `read`/`thread`/`auth`
+  for every root; `approval-listener.sh` uses a trailing-`*` rule that already covers all verbs.
+  (`spy` needs none of this — it is a bare literal identical in rule and invocation; that is the
+  pattern the shim's path form can't reach.)
 - Jira: `mcp__atlassian__*` tools (optional — either Jira or GitHub Issues per project)
 - Slite: `mcp__slite__*` tools
 - ntfy (optional): push notifications + remote approval via `curl` (publish) and `scripts/approval-listener.sh` (subscribe). Listener requires `jq`.

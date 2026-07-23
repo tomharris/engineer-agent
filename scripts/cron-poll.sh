@@ -167,7 +167,7 @@ fi
 allowed_tools=(
   "Bash(gh pr list:*)" "Bash(gh pr view:*)" "Bash(gh pr diff:*)"
   "Bash(gh issue list:*)" "Bash(gh issue view:*)"
-  "Bash(${SLACK_BIN} read:*)" "Bash(${SLACK_BIN} thread:*)"
+  "Bash(${SLACK_BIN} read:*)" "Bash(${SLACK_BIN} thread:*)" "Bash(${SLACK_BIN} auth:*)"
   mcp__atlassian__searchJiraIssuesUsingJql mcp__atlassian__getJiraIssue
   mcp__slite__search-notes mcp__slite__get-note mcp__slite__get-note-children
   "Bash(${PLUGIN_ROOT}/scripts/notify.sh *)"
@@ -176,19 +176,24 @@ allowed_tools=(
   "Edit(/${AGENT_DIR}/**)"
 )
 # See the mcp-proxy gotcha above: the model emits the shim's expanded abs path, resolved against
-# whichever plugin root the runtime uses (installed cache when installed, else our --plugin-dir).
-# Allowlist read/thread for every distinct candidate root. notify.sh is added for the installed
-# root too as cheap insurance, in case a skill ever invokes it via ${CLAUDE_PLUGIN_ROOT} rather
-# than the pre-expanded path this script injects into the prompt.
+# whichever plugin root the runtime uses. That root is NOT stable — across real polls it has been
+# the dev-repo PLUGIN_ROOT (our --plugin-dir), the installed cache, AND the marketplace checkout
+# (…/plugins/marketplaces/engineer-agent). Allowlist read/thread/auth for EVERY candidate root so
+# whichever the runtime resolves, a rule matches. `auth` is included because the model runs it as a
+# read-only token preflight before reading (observed getting denied and cascading to a doomed
+# direct-connector fallback when only read/thread were allowed). notify.sh is added for the extra
+# roots too as cheap insurance, in case a skill invokes it via ${CLAUDE_PLUGIN_ROOT} rather than
+# the pre-expanded path this script injects into the prompt.
 if [ "$SLACK_METHOD" = "mcp-proxy" ]; then
-  INSTALLED_ROOT="$(resolve_installed_plugin_root)"
-  if [ -n "$INSTALLED_ROOT" ] && [ "$INSTALLED_ROOT" != "$PLUGIN_ROOT" ]; then
+  for EXTRA_ROOT in "$(resolve_installed_plugin_root)" "$(resolve_marketplace_plugin_root)"; do
+    [ -n "$EXTRA_ROOT" ] && [ "$EXTRA_ROOT" != "$PLUGIN_ROOT" ] || continue
     allowed_tools+=(
-      "Bash(${INSTALLED_ROOT}/scripts/slack-mcp.sh read:*)"
-      "Bash(${INSTALLED_ROOT}/scripts/slack-mcp.sh thread:*)"
-      "Bash(${INSTALLED_ROOT}/scripts/notify.sh *)"
+      "Bash(${EXTRA_ROOT}/scripts/slack-mcp.sh read:*)"
+      "Bash(${EXTRA_ROOT}/scripts/slack-mcp.sh thread:*)"
+      "Bash(${EXTRA_ROOT}/scripts/slack-mcp.sh auth:*)"
+      "Bash(${EXTRA_ROOT}/scripts/notify.sh *)"
     )
-  fi
+  done
 fi
 
 # --add-dir: acceptEdits only auto-accepts edits under the working directory, and cron

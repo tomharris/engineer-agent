@@ -92,16 +92,19 @@ run_generic_execute() {
   # The skills invoke the shim as `${CLAUDE_PLUGIN_ROOT}/scripts/slack-mcp.sh`, but the MODEL
   # expands that variable to an absolute path before Bash sees it (it does NOT pass the literal
   # token — so a single-quoted `${CLAUDE_PLUGIN_ROOT}` rule is dead code), and when the plugin is
-  # installed via marketplace it SHADOWS our --plugin-dir, so that expanded root is the INSTALLED
-  # cache path, not this script's dev-repo PLUGIN_ROOT. Both facts confirmed from a real failing
-  # poll transcript. So allowlist the shim's expanded abs path for BOTH candidate roots — our
-  # PLUGIN_ROOT and resolve_installed_plugin_root() — so whichever the runtime resolves, a rule
-  # matches. The trailing `*` covers read/thread/send. `spy` needs none of this (bare literal).
+  # installed via marketplace it SHADOWS our --plugin-dir. That expanded root is NOT stable —
+  # across real headless runs it has been the dev-repo PLUGIN_ROOT, the installed cache, AND the
+  # marketplace checkout (…/plugins/marketplaces/engineer-agent). All confirmed from real
+  # transcripts. So allowlist the shim's expanded abs path for ALL THREE candidate roots — our
+  # PLUGIN_ROOT, resolve_installed_plugin_root(), and resolve_marketplace_plugin_root() — so
+  # whichever the runtime resolves, a rule matches. The trailing `*` covers read/thread/send/auth.
+  # `spy` needs none of this (bare literal).
   local slack_rules=("Bash(${PLUGIN_ROOT}/scripts/slack-mcp.sh *)")
-  local installed_root; installed_root="$(resolve_installed_plugin_root)"
-  if [ -n "$installed_root" ] && [ "$installed_root" != "$PLUGIN_ROOT" ]; then
-    slack_rules+=("Bash(${installed_root}/scripts/slack-mcp.sh *)")
-  fi
+  local extra_root
+  for extra_root in "$(resolve_installed_plugin_root)" "$(resolve_marketplace_plugin_root)"; do
+    [ -n "$extra_root" ] && [ "$extra_root" != "$PLUGIN_ROOT" ] || continue
+    slack_rules+=("Bash(${extra_root}/scripts/slack-mcp.sh *)")
+  done
   local allowed_tools=(
     "Bash(gh *)" "Bash(spy *)" "${slack_rules[@]}"
     "Bash(mv *)" "Bash(${PLUGIN_ROOT}/scripts/notify.sh *)"
