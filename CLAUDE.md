@@ -267,10 +267,17 @@ from a run that failed silently):
   permanently blocked — including "Do not treat this as transient and just rerun" — which every
   later poll then loaded, re-read, and confirmed **instead of retesting**. That converts an
   independent transient into a correlated, self-citing, permanent outage, and it defeats the
-  receipt-based liveness design (which assumes failures are independent). `cron-poll.sh`'s prompt
-  therefore forbids creating/updating memory files and forbids treating an existing memory as
-  evidence about the current run. If a poll ever misdiagnoses itself again, check
-  `~/.claude/projects/-home-tom/memory/` before believing the diagnosis.
+  receipt-based liveness design (which assumes failures are independent). Every headless prompt
+  in `cron-poll.sh` and `approval-listener.sh` (the shared `NO_MEMORY_RULE`, applied to the
+  generic execute, ticket implementation, and QA runs alike) therefore forbids creating/updating
+  memory files and forbids treating an existing memory as evidence about the current run.
+  **Memory is keyed by CWD, not by which script launched the run** — the poll and the listener's
+  `run_generic_execute` both run from `$HOME`, so they share
+  `~/.claude/projects/-home-tom/memory/` and can cross-contaminate; the ticket/QA runs `cd` into
+  a per-run worktree and so get a throwaway namespace, but only as a side effect of the path
+  sandbox, which is why the rule is applied uniformly rather than relying on that accident. If an
+  unattended run ever misdiagnoses itself again, check that memory directory before believing the
+  diagnosis.
 - **Don't put `--allowedTools` last before the prompt.** It takes a variable number of values and
   will swallow the prompt as another rule (`Input must be provided … when using --print`). Keep a
   single-value flag in between.

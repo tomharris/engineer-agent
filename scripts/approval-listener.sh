@@ -83,6 +83,20 @@ push_ack() {
 # denied; under acceptEdits a denied tool fails non-interactively, which the drafts/
 # check surfaces as a WARN (no longer a silent no-op).
 # Redirect stdin from /dev/null so claude doesn't try to read the listener's curl stream.
+#
+# NO_MEMORY_RULE — appended to every headless prompt below. A queue item is a fact about ONE
+# item; a memory is a belief applied to ALL future runs, so an unattended run must not write
+# one. This is not hypothetical: on 2026-07-24 a failing cron poll wrote a memory asserting
+# `gh` was permanently blocked ("Do not treat this as transient and just rerun"), and every
+# later poll loaded it and re-confirmed the wrong conclusion instead of retesting — one flake
+# became five identical failures (fixed in cron-poll.sh; see CLAUDE.md's headless-run notes).
+# The listener is exposed to the SAME pool: memory is keyed by CWD, and this service runs from
+# $HOME, so run_generic_execute shares ~/.claude/projects/-home-tom/memory/ with the poll and
+# would have loaded that same poisoned file. (The ticket/QA runs cd into a per-run worktree, so
+# they get a throwaway namespace — isolated only as a side effect of the path sandbox. Applied
+# uniformly here so the guarantee does not depend on that accident.)
+NO_MEMORY_RULE="MEMORY: do NOT create or update memory files, and do NOT treat any pre-existing memory as evidence about this run — a wrong conclusion recorded once would otherwise be re-read and re-confirmed by every later run instead of being retested. If a tool or command appears unavailable, establish that fresh THIS run."
+
 run_generic_execute() {
   local item="$1" decision="$2" budget="$3"
   # Both Slack backends are allowlisted so an approved slack-question reply posts under either
@@ -117,7 +131,7 @@ run_generic_execute() {
     --permission-mode acceptEdits \
     --allowedTools "${allowed_tools[@]}" \
     --max-budget-usd "$budget" \
-    "Run the engineer-agent execute command (commands/execute.md) for queue item '${item}' with decision '${decision}'. Read config from ${EA_CONFIG_FILE}. Be concise." \
+    "Run the engineer-agent execute command (commands/execute.md) for queue item '${item}' with decision '${decision}'. Read config from ${EA_CONFIG_FILE}. ${NO_MEMORY_RULE} Be concise." \
     </dev/null >> "$LOG_FILE" 2>&1
 }
 
@@ -199,7 +213,8 @@ run_ticket_implementation() {
 The current working directory is an isolated git worktree of the target repo, checked out on a detached HEAD at the base branch. \
 Read config from ${EA_CONFIG_FILE}. Follow skills/implement-ticket/SKILL.md: create the ticket branch HERE (stay inside this worktree — do not cd elsewhere), implement iteratively inline, self-review the branch diff and fix findings BEFORE opening any PR, then push the branch and open a DRAFT pull request. \
 To finalize the queue item, WRITE the completed record to ${AGENT_DIR}/queue/completed/${item} (status: completed). You do NOT need to delete the drafts/ original — the listener reconciles that afterward; do not spend effort trying to remove it. \
-Operate ONLY inside this working directory (plus writing that one completed/ queue file). Be concise."
+Operate ONLY inside this working directory (plus writing that one completed/ queue file). \
+${NO_MEMORY_RULE} Be concise."
 
   ( cd "$wt" && "$CLAUDE_BIN" -p \
       --plugin-dir "$PLUGIN_ROOT" \
@@ -277,7 +292,8 @@ The current working directory is an isolated git worktree of the target repo, ch
 Read config from ${EA_CONFIG_FILE}. Follow skills/generate-qa/SKILL.md via the engineer-agent qa command (commands/qa.md): \
 project '${project}', base branch '${base}', deriving the ticket from the current branch / the queue item — gather the ticket AC, any PR, and the branch diff, create a qa-test-plan queue item, and draft it. \
 Use 'mv' (not rm) for the incoming/ -> drafts/ queue move. \
-Do NOT modify the already-completed ticket record at ${AGENT_DIR}/queue/completed/${item}. Operate only inside this working directory and the engineer-agent queue. Be concise."
+Do NOT modify the already-completed ticket record at ${AGENT_DIR}/queue/completed/${item}. Operate only inside this working directory and the engineer-agent queue. \
+${NO_MEMORY_RULE} Be concise."
 
   ( cd "$wt" && "$CLAUDE_BIN" -p \
       --plugin-dir "$PLUGIN_ROOT" \
