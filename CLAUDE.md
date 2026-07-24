@@ -250,6 +250,27 @@ from a run that failed silently):
 - **`--permission-mode` is not enough on its own — pass `--allowedTools`.** Only a built-in set of
   Bash commands (`ls`, `cat`, `grep`, read-only `git`, …) is auto-approved. `gh` and `spy` are not
   in it, so they prompt in every mode, and a prompt in `-p` is a denial.
+- **Allowlist a CLI's read-only *preflight* verbs, not just its data verbs.** The model routinely
+  probes a tool's health before using it (`gh auth status`, `gh --version`, `slack-mcp.sh auth`);
+  when the probe is denied it concludes the **whole CLI is unavailable** and abandons every source
+  *without ever trying the verbs that are allowed*. This has now broken two integrations the same
+  way: the Slack `auth` preflight (fixed in `162a4bb`, which cascaded to a doomed direct-connector
+  fallback) and `gh` — where five consecutive polls on 2026-07-24 reported `status: error` with all
+  8 GitHub sources in `errors:` while `gh pr list` was allowlisted and working the entire time; the
+  transcripts show only `gh auth status`/`gh --version` were ever issued. It presents as
+  *intermittent*, not deterministic, because a run that happens to skip the probe (or shrug it off)
+  still succeeds — the 2026-07-23 run hit the identical denial and recovered. Preflights are
+  read-only, so listing them costs nothing against the read-only invariant.
+- **Never let an unattended run write memory.** A receipt is a fact about **one** run; a memory is a
+  belief applied to **all future** runs. The 2026-07-24 `gh` outage went from one flake to five
+  identical failures because the second failing poll wrote a project memory asserting `gh` was
+  permanently blocked — including "Do not treat this as transient and just rerun" — which every
+  later poll then loaded, re-read, and confirmed **instead of retesting**. That converts an
+  independent transient into a correlated, self-citing, permanent outage, and it defeats the
+  receipt-based liveness design (which assumes failures are independent). `cron-poll.sh`'s prompt
+  therefore forbids creating/updating memory files and forbids treating an existing memory as
+  evidence about the current run. If a poll ever misdiagnoses itself again, check
+  `~/.claude/projects/-home-tom/memory/` before believing the diagnosis.
 - **Don't put `--allowedTools` last before the prompt.** It takes a variable number of values and
   will swallow the prompt as another rule (`Input must be provided … when using --print`). Keep a
   single-value flag in between.
@@ -397,7 +418,8 @@ creates the branch in place when already inside the repo checkout, and pushes be
 create` so the headless run never hits an interactive push prompt).
 
 Key invariant: **polling reads; only `execute-item` writes.** `cron-poll.sh` passes a deliberately
-read-only `--allowedTools` allowlist (`gh pr list/view/diff`, `gh issue list/view`, the Slack
+read-only `--allowedTools` allowlist (`gh pr list/view/diff`, `gh issue list/view`,
+`gh auth status`/`gh --version`, the Slack
 backend's `read`/`thread` — `spy` or `scripts/slack-mcp.sh`, keyed off `agent.slack.method` and
 resolved in plain bash before `claude` starts — and the read-only MCP verbs
 `mcp__atlassian__searchJiraIssuesUsingJql`/`getJiraIssue` and

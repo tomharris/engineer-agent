@@ -116,7 +116,7 @@ run_log() { tail -n "+$((LOG_START_LINE + 1))" "$LOG_FILE"; }
 # non-interactively, which the no-progress check below surfaces as a WARN rather than a silent
 # no-op.
 #
-# Three gotchas encoded below, each of which silently broke a real run:
+# Five gotchas encoded below, each of which silently broke a real run:
 #   1. Bash rules match the literal command text, so `mv *` -- a `~/`-prefixed pattern
 #      would miss the absolute paths the model actually writes.
 #   2. Use Edit(...), never Write(...): the CLI rejects Write(path) rules outright ("only
@@ -132,6 +132,16 @@ run_log() { tail -n "+$((LOG_START_LINE + 1))" "$LOG_FILE"; }
 #      the READ verbs are listed (search + fetch); the write tools (createJiraIssue,
 #      editJiraIssue, transitionJiraIssue, addComment*, slite create/edit/append) stay
 #      unmatched, keeping posting behind the execute-item gate as with `gh`/`spy`.
+#   5. Allowlist the read-only PREFLIGHT verbs (`gh auth status`, `gh --version`), not just the
+#      data verbs. The model routinely probes a CLI's health before using it; when the probe is
+#      denied it concludes the whole CLI is unavailable and aborts every source WITHOUT ever
+#      trying the verbs that are allowed. Observed 2026-07-24: five consecutive polls reported
+#      `status: error` with all 8 GitHub sources in `errors:` while `gh pr list` was allowlisted
+#      and working the whole time — the transcripts show only `gh auth status` / `gh --version`
+#      were ever issued. (The 2026-07-23 run hit the same denial and happened to recover, which
+#      is why this presents as intermittent.) Identical shape to the Slack `auth` preflight fixed
+#      in 162a4bb: an unallowlisted probe poisons a perfectly-allowed read path. Both verbs are
+#      read-only and write nothing, so the read-only invariant is untouched.
 #
 # The Slack read verbs are keyed off the effective Slack binary, which depends on
 # agent.slack.method (resolved in plain bash below, before claude starts):
@@ -167,6 +177,7 @@ fi
 allowed_tools=(
   "Bash(gh pr list:*)" "Bash(gh pr view:*)" "Bash(gh pr diff:*)"
   "Bash(gh issue list:*)" "Bash(gh issue view:*)"
+  "Bash(gh auth status:*)" "Bash(gh --version:*)"
   "Bash(${SLACK_BIN} read:*)" "Bash(${SLACK_BIN} thread:*)" "Bash(${SLACK_BIN} auth:*)"
   mcp__atlassian__searchJiraIssuesUsingJql mcp__atlassian__getJiraIssue
   mcp__slite__search-notes mcp__slite__get-note mcp__slite__get-note-children
@@ -218,6 +229,8 @@ POLL_STATUS=0
   "Execute now — do NOT enter plan mode, do NOT output a plan, do NOT ask questions. Perform the work directly and report the results when finished.
 
 You ARE the scheduled poll for this cycle, not an observer of it. Do NOT check whether a poll has already run, and do NOT skip a source because recent queue items or a recent last_checked suggest it was already covered. Poll every configured source yourself, now.
+
+MEMORY: do NOT create, update, or delete memory files, and do NOT treat any pre-existing memory as evidence about this run. Record what happened ONLY in the receipt described below. A receipt is a fact about ONE run; a memory is a belief applied to ALL future runs, and an unattended run must never write the latter — a single wrong conclusion would otherwise be re-read and re-confirmed by every later poll instead of being retested. So if a tool or command appears unavailable, establish that FRESH this run, and never skip a source because a memory claims it will fail.
 
 Run the /engineer-agent poll command for all configured sources (equivalent to '/engineer-agent poll all'). Read config from ${AGENT_DIR}/engineer.yaml and follow commands/poll.md and the per-source poll skills. Iterate over all projects in the config. For each project, check all configured sources (GitHub, Slack, Jira, Slite) for new items since the last poll recorded in ${AGENT_DIR}/state/last-poll.yaml. For each new item, create a queue file in ${AGENT_DIR}/queue/incoming/ with the standard frontmatter format documented in CLAUDE.md (include the project slug in the frontmatter), then generate a draft and move it to ${AGENT_DIR}/queue/drafts/. For EACH newly drafted item, send a push notification by running: ${PLUGIN_ROOT}/scripts/notify.sh --title '<type>: <title>' --message '<project> — <short summary>' --priority '<priority from frontmatter>' --item-id '<the queue filename>' --source-url '<source_url from frontmatter>' --tags 'inbox_tray'. (notify.sh no-ops safely if ntfy is not configured, so always call it.)
 
