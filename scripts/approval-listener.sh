@@ -113,11 +113,23 @@ run_generic_execute() {
   # PLUGIN_ROOT, resolve_installed_plugin_root(), and resolve_marketplace_plugin_root() — so
   # whichever the runtime resolves, a rule matches. The trailing `*` covers read/thread/send/auth.
   # `spy` needs none of this (bare literal).
-  local slack_rules=("Bash(${PLUGIN_ROOT}/scripts/slack-mcp.sh *)")
-  local extra_root
-  for extra_root in "$(resolve_installed_plugin_root)" "$(resolve_marketplace_plugin_root)"; do
-    [ -n "$extra_root" ] && [ "$extra_root" != "$PLUGIN_ROOT" ] || continue
-    slack_rules+=("Bash(${extra_root}/scripts/slack-mcp.sh *)")
+  #
+  # The PREFIX varies too, not just the root: the model has been observed emitting
+  # `bash <abs>/scripts/slack-mcp.sh auth …`, whose executable is `bash` — matching no `<abs>/…`
+  # rule, so the call is refused outright. In the poll that denial was fatal (it cascaded to the
+  # unlisted direct connector and errored every Slack source; see cron-poll.sh). The same latent
+  # bug lives here on the SEND path — it just hasn't been hit yet, because approvals are far rarer
+  # than polls. Emit both the bare and `bash `-prefixed form for every root.
+  local slack_rules=()
+  local shim_root seen_roots=""
+  for shim_root in "$PLUGIN_ROOT" "$(resolve_installed_plugin_root)" "$(resolve_marketplace_plugin_root)"; do
+    [ -n "$shim_root" ] || continue
+    case "$seen_roots" in *"|${shim_root}|"*) continue ;; esac
+    seen_roots="${seen_roots}|${shim_root}|"
+    slack_rules+=(
+      "Bash(${shim_root}/scripts/slack-mcp.sh *)"
+      "Bash(bash ${shim_root}/scripts/slack-mcp.sh *)"
+    )
   done
   local allowed_tools=(
     "Bash(gh *)" "Bash(spy *)" "${slack_rules[@]}"
