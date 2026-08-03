@@ -178,33 +178,67 @@ allowed_tools=(
   "Bash(gh pr list:*)" "Bash(gh pr view:*)" "Bash(gh pr diff:*)"
   "Bash(gh issue list:*)" "Bash(gh issue view:*)"
   "Bash(gh auth status:*)" "Bash(gh --version:*)"
-  "Bash(${SLACK_BIN} read:*)" "Bash(${SLACK_BIN} thread:*)" "Bash(${SLACK_BIN} auth:*)"
   mcp__atlassian__searchJiraIssuesUsingJql mcp__atlassian__getJiraIssue
   mcp__slite__search-notes mcp__slite__get-note mcp__slite__get-note-children
   "Bash(${PLUGIN_ROOT}/scripts/notify.sh *)"
   "Bash(mv *)"
+  # The model habitually appends a status probe (`… auth 2>&1; echo "EXIT:$?"`). Claude Code
+  # evaluates each part of a compound command separately, so an unlisted `echo` gets the WHOLE
+  # invocation refused with "contains multiple operations … the following part requires approval:
+  # echo …". The model recovers by retrying without it, so this never failed a poll — it just
+  # burned a turn on nearly every run. `echo` is read-only, so listing it costs nothing against
+  # the read-only invariant.
+  "Bash(echo:*)"
   Read Glob Grep
   "Edit(/${AGENT_DIR}/**)"
 )
-# See the mcp-proxy gotcha above: the model emits the shim's expanded abs path, resolved against
-# whichever plugin root the runtime uses. That root is NOT stable — across real polls it has been
-# the dev-repo PLUGIN_ROOT (our --plugin-dir), the installed cache, AND the marketplace checkout
-# (…/plugins/marketplaces/engineer-agent). Allowlist read/thread/auth for EVERY candidate root so
-# whichever the runtime resolves, a rule matches. `auth` is included because the model runs it as a
-# read-only token preflight before reading (observed getting denied and cascading to a doomed
-# direct-connector fallback when only read/thread were allowed). notify.sh is added for the extra
-# roots too as cheap insurance, in case a skill invokes it via ${CLAUDE_PLUGIN_ROOT} rather than
-# the pre-expanded path this script injects into the prompt.
+
+# Slack read verbs. `send` is deliberately absent under EVERY form below — that is what keeps
+# posting execute-item's job, behind the approval gate. `auth` is included because the model runs
+# it as a read-only token preflight before reading (observed getting denied and cascading to a
+# doomed direct-connector fallback when only read/thread were allowed — 162a4bb).
+SLACK_READ_VERBS=(read thread auth)
+
+# A rule must match the command FORM the model emits, not just the shim's PATH. Two independent
+# axes vary, and BOTH have caused real Slack-wide poll failures:
+#
+#   axis 1 — the root. ${CLAUDE_PLUGIN_ROOT} expands to one of THREE dirs depending on how the
+#     plugin was loaded (dev-repo --plugin-dir, installed cache, marketplace checkout). See the
+#     mcp-proxy gotcha above and lib-paths.sh.
+#   axis 2 — the prefix. The model does not always invoke the shim bare; it has been observed
+#     emitting `bash <abs>/scripts/slack-mcp.sh auth 2>&1`, whose executable is `bash`, matching
+#     no `<abs>/…` rule. That denial is FATAL rather than recoverable: the model concludes the
+#     shim is unavailable and cascades to the direct mcp__claude_ai_Slack__* connector, which is
+#     also unlisted, so both Slack paths die and every Slack source reports an error.
+#     Transcript-confirmed on 2026-08-01T15:00Z and 2026-08-03T13:04Z — exactly the two runs out
+#     of the last sixteen that emitted a `bash `-prefixed call, and exactly the two that failed.
+#
+# Generate roots × verbs × forms from lists rather than hand-repeating the rules: the block this
+# replaced already repeated four near-identical lines per root, and hand-doubling that is how the
+# next variation gets missed. The prompt also now pins the exact binary and forbids the `bash `
+# prefix (see the SLACK: directive below) — that is the real fix; this is defense in depth for
+# when the model improvises anyway.
 if [ "$SLACK_METHOD" = "mcp-proxy" ]; then
-  for EXTRA_ROOT in "$(resolve_installed_plugin_root)" "$(resolve_marketplace_plugin_root)"; do
-    [ -n "$EXTRA_ROOT" ] && [ "$EXTRA_ROOT" != "$PLUGIN_ROOT" ] || continue
-    allowed_tools+=(
-      "Bash(${EXTRA_ROOT}/scripts/slack-mcp.sh read:*)"
-      "Bash(${EXTRA_ROOT}/scripts/slack-mcp.sh thread:*)"
-      "Bash(${EXTRA_ROOT}/scripts/slack-mcp.sh auth:*)"
-      "Bash(${EXTRA_ROOT}/scripts/notify.sh *)"
-    )
+  SEEN_ROOTS=""
+  for SHIM_ROOT in "$PLUGIN_ROOT" "$(resolve_installed_plugin_root)" "$(resolve_marketplace_plugin_root)"; do
+    [ -n "$SHIM_ROOT" ] || continue
+    case "$SEEN_ROOTS" in *"|${SHIM_ROOT}|"*) continue ;; esac
+    SEEN_ROOTS="${SEEN_ROOTS}|${SHIM_ROOT}|"
+    for VERB in "${SLACK_READ_VERBS[@]}"; do
+      allowed_tools+=(
+        "Bash(${SHIM_ROOT}/scripts/slack-mcp.sh ${VERB}:*)"
+        "Bash(bash ${SHIM_ROOT}/scripts/slack-mcp.sh ${VERB}:*)"
+      )
+    done
+    # notify.sh for the extra roots too, as cheap insurance in case a skill invokes it via
+    # ${CLAUDE_PLUGIN_ROOT} rather than the pre-expanded path this script injects into the prompt.
+    [ "$SHIM_ROOT" = "$PLUGIN_ROOT" ] || allowed_tools+=( "Bash(${SHIM_ROOT}/scripts/notify.sh *)" )
   done
+else
+  # spy backend: a bare literal on PATH, identical in rule and invocation — none of the above applies.
+  allowed_tools+=(
+    "Bash(${SLACK_BIN} read:*)" "Bash(${SLACK_BIN} thread:*)" "Bash(${SLACK_BIN} auth:*)"
+  )
 fi
 
 # --add-dir: acceptEdits only auto-accepts edits under the working directory, and cron
@@ -233,6 +267,8 @@ You ARE the scheduled poll for this cycle, not an observer of it. Do NOT check w
 MEMORY: do NOT create, update, or delete memory files, and do NOT treat any pre-existing memory as evidence about this run. Record what happened ONLY in the receipt described below. A receipt is a fact about ONE run; a memory is a belief applied to ALL future runs, and an unattended run must never write the latter — a single wrong conclusion would otherwise be re-read and re-confirmed by every later poll instead of being retested. So if a tool or command appears unavailable, establish that FRESH this run, and never skip a source because a memory claims it will fail.
 
 Run the /engineer-agent poll command for all configured sources (equivalent to '/engineer-agent poll all'). Read config from ${AGENT_DIR}/engineer.yaml and follow commands/poll.md and the per-source poll skills. Iterate over all projects in the config. For each project, check all configured sources (GitHub, Slack, Jira, Slite) for new items since the last poll recorded in ${AGENT_DIR}/state/last-poll.yaml. For each new item, create a queue file in ${AGENT_DIR}/queue/incoming/ with the standard frontmatter format documented in CLAUDE.md (include the project slug in the frontmatter), then generate a draft and move it to ${AGENT_DIR}/queue/drafts/. For EACH newly drafted item, send a push notification by running: ${PLUGIN_ROOT}/scripts/notify.sh --title '<type>: <title>' --message '<project> — <short summary>' --priority '<priority from frontmatter>' --item-id '<the queue filename>' --source-url '<source_url from frontmatter>' --tags 'inbox_tray'. (notify.sh no-ops safely if ntfy is not configured, so always call it.)
+
+SLACK: the effective Slack CLI for this run is EXACTLY this command — ${SLACK_BIN} — and it is already installed and executable. Do NOT search the filesystem for it (no find, no ls), do NOT read \${CLAUDE_PLUGIN_ROOT}, and do NOT substitute a different copy of the same script from another directory; only the command above is permitted. Invoke it directly and bare, as '${SLACK_BIN} read <channel> <count> --json -w <workspace>' (likewise 'thread' and 'auth'). Do NOT prefix it with bash, sh, or env, and do NOT wrap it in a compound command — no ';', no '&&', no trailing 'echo'. Issue one plain command per call. If a Slack call is denied or the CLI is unavailable, record Slack as an error for that project and move on; do NOT fall back to the mcp__claude_ai_Slack__* connector tools, which are deliberately not available to this run and will only waste the attempt.
 
 STATE: use exactly ${RUN_TS} as this poll's timestamp — do not compute or guess one. After polling each source, set that source's last_checked in ${AGENT_DIR}/state/last-poll.yaml to exactly ${RUN_TS}, WHETHER OR NOT it produced any items: a source that found zero items was still polled successfully and must have its cutoff advanced. (Exception: Slack's last_checked_ts tracks the highest Slack message timestamp actually seen — leave it unchanged when no messages were read.)
 
