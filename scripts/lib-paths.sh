@@ -186,6 +186,38 @@ yaml_agent_slack() {
   ' "$EA_CONFIG_FILE"
 }
 
+# yaml_agent_notify <key> — a scalar directly under agent.notify.<key> (e.g. turn_completions).
+# Descent: agent: (col 0) -> notify: (+2) -> <key> (+4), i.e. the exact shape of
+# yaml_agent_slack with `slack` swapped for `notify`.
+#
+# Deliberately NOT lib-ntfy.sh's yaml_ntfy_get(): that one is scoped to the `ntfy:` block, which
+# sits one level deeper (agent.notify.ntfy.*), and it is not anchored to `agent:` at all. Reading
+# at +4 here cannot collide with ntfy's server/topic/command_topic/auth_token, which live at +6.
+yaml_agent_notify() {
+  local key="$1"
+  [ -f "$EA_CONFIG_FILE" ] || return 0
+  awk -v key="$key" '
+    !inagent && $1=="agent:" { inagent=1; next }
+    inagent {
+      match($0,/^ */); ind=RLENGTH
+      if (length($0)==0) next
+      if ($0 ~ /^[ \t]*#/) next
+      if (ind==0) exit
+      line=$0; sub(/^ +/,"",line)
+      h=line; sub(/:.*/,"",h)               # block/key name, trailing comment stripped
+      if (ind==2) { innotify=(h=="notify"); next }
+      if (innotify && ind==4 && h==key) {
+        v=substr(line,index(line,":")+1); sub(/^[ \t]+/,"",v); print yaml_scalar(v); exit
+      }
+    }
+    function yaml_scalar(s,   q) {
+      if (substr(s,1,1)=="\"")   { s=substr(s,2); q=index(s,"\"");   return (q>0)?substr(s,1,q-1):s }
+      if (substr(s,1,1)=="\x27") { s=substr(s,2); q=index(s,"\x27"); return (q>0)?substr(s,1,q-1):s }
+      sub(/[ \t]+#.*$/,"",s); sub(/[ \t]+$/,"",s); return s
+    }
+  ' "$EA_CONFIG_FILE"
+}
+
 # yaml_agent_slack_mcp <key> — a scalar one level deeper, at agent.slack.mcp.<key> (e.g.
 # server, server_id). Same agent:-scoped descent as yaml_agent_slack, plus the mcp: level (+6).
 yaml_agent_slack_mcp() {

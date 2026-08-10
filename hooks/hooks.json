@@ -1,0 +1,61 @@
+{
+  "description": "engineer-agent — opt-in ntfy push at the end of every turn of an implement-ticket session (agent.notify.turn_completions, default off). Every hook here exits 0 unconditionally and writes nothing to stdout: a Stop hook exiting 2 blocks the turn from ending, a PreToolUse hook exiting 2 denies the tool, and a UserPromptSubmit hook exiting 2 blocks the prompt (while its stdout on exit 0 is injected into model context). See scripts/turn-notify-hook.sh.",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Skill",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/scripts/turn-notify-hook.sh\" arm-skill",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/scripts/turn-notify-hook.sh\" arm-prompt",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/scripts/turn-notify-hook.sh\" fire",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "StopFailure": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/scripts/turn-notify-hook.sh\" fire",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/scripts/turn-notify-hook.sh\" disarm",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}
