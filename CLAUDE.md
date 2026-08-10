@@ -22,6 +22,7 @@ This repo IS the plugin.
 commands/                      — Slash commands (/engineer-agent <command>)
 skills/                        — Auto-invoked skills by task type
 references/                    — Shared procedural docs skills Read at runtime (routing-ladder.md)
+hooks/hooks.json               — Claude Code hook registrations (turn-completion pushes)
 scripts/                       — Cron polling, ntfy notify/listener, and setup scripts
 config/engineer.example.yaml   — Config template
 ```
@@ -61,7 +62,9 @@ of truth for this location — source it rather than hardcoding the path.
 └── state/
     ├── last-poll.yaml         — Dedup timestamps and seen IDs (per project, per Jira project key, per GitHub repo)
     ├── last-poll-receipt.yaml — Liveness receipt from the last cron poll (run_id, status, item count, skipped, errors)
-    └── ntfy-seen.yaml         — Processed ntfy command message IDs (remote-approval dedup)
+    ├── ntfy-seen.yaml         — Processed ntfy command message IDs (remote-approval dedup)
+    ├── turn-notify/           — One marker per session armed for turn-completion pushes (<session_id>)
+    └── turn-notify.log        — Turn-completion hook diagnostics (only when EA_TURN_NOTIFY_DEBUG=1)
 ```
 
 ## Config Loading Pattern
@@ -81,6 +84,7 @@ without having to pre-seed `seen_issues`.
 Two `agent` subsections drive autonomy (both optional):
 - `agent.autonomy.auto_execute` — a list of action tiers allowed to run **without** an approval gate. Only `draft-pr` is supported (draft PRs merge nothing / request no review). Absent ⇒ empty ⇒ everything is gated.
 - `agent.notify.ntfy` — push-notification + remote-approval settings (`server`, `topic`, `command_topic`, `auth_token`). Absent ⇒ no notifications; the workflow is otherwise unchanged.
+- `agent.notify.turn_completions` — push an FYI at the end of every turn of an `implement-ticket` session (interactive and headless). Absent/false ⇒ off. Read by `yaml_agent_notify()` in `lib-paths.sh`; see "Turn-completion pushes (opt-in)".
 
 Slack access (`agent.slack`, optional) has **two selectable backends**, chosen by
 `agent.slack.method` (`spy` | `mcp-proxy`, default `spy`). Both present the **same
@@ -243,6 +247,69 @@ ntfy turns the approval gate into a remote, async one without a custom server. B
 - **Outbound** (`topic`): after a poll, `cron-poll.sh` calls `scripts/notify.sh` to push each new draft with **Approve / Reject / Open** action buttons.
 - **Inbound** (`command_topic`): the Approve/Reject buttons are ntfy `http` actions that POST `approve|<item-id>` / `reject|<item-id>` back to the command topic. `scripts/approval-listener.sh` (a long-running service installed by `scripts/install-listener.sh`) streams that topic and runs `/engineer-agent execute <item-id> <decision>` headlessly (an approved `ticket` takes the separate confined-implementation path instead — see "Confined headless ticket implementation"). After validating a command the listener also pushes two best-effort acknowledgements back to the outbound `topic` via `notify.sh --fyi`: a **receipt** ack (low priority, "📨 Received…") the moment the tap lands, and an **outcome** ack after the run — "✅ Done…" (normal) when the item leaves `queue/drafts/`, or "⚠️ Failed…" (urgent) when it did not. Invalid or already-seen commands are not acknowledged (avoids noise and confirming a live listener to a prober). The ack adds no posting capability — it is an outbound notification only, so the "polling reads; only execute-item writes" invariant is untouched.
 
+### Turn-completion pushes (opt-in)
+
+`implement-ticket` is the longest thing this plugin runs, and until you approve it nothing tells
+you how it is going: the headless path sends one ✅/⚠️ after the *whole* run, and the interactive
+path (`/engineer-agent:implement-ticket`) sent nothing at all. Setting
+`agent.notify.turn_completions: true` pushes an FYI at the **end of every turn** — done, blocked,
+pausing to ask you something, or dead on an API error.
+
+It is a **Claude Code hook**, not a `notify.sh` line in the skill, and that distinction is the
+whole point. This repo has learned twice over that a model's own report is not a completion signal
+(hence the run-id receipt in `cron-poll.sh` and the `drafts/` existence check in the listener). A
+prompt instruction fires only when the model chooses to — so it would go quiet on exactly the turns
+worth hearing about: budget abort, API error, an early bail. `hooks/hooks.json` registers
+`scripts/turn-notify-hook.sh` on five events and the harness fires them regardless.
+
+**Arm → fire → disarm**, because a plugin-wide `Stop` hook otherwise runs on every turn of every
+project of everyone who has the plugin enabled:
+
+| | Armed by | Disarmed by |
+|---|---|---|
+| Interactive | `UserPromptSubmit` matching `^/engineer-agent[: ]implement-ticket` (primary — the literal text typed), or `PreToolUse:Skill` where `tool_input.skill` is `engineer-agent:implement-ticket` (backstop). Writes `state/turn-notify/<session_id>` | `SessionEnd`; plus a 24h prune on the arm path for sessions that crashed |
+| Headless | `EA_TURN_NOTIFY=1`, set **inline** on the one `claude -p` in `run_ticket_implementation` — no file, no session correlation, nothing orphaned | process exit |
+
+Two independent interactive arms exist because the namespaced `engineer-agent:implement-ticket`
+form is only *guaranteed* while a same-named user-level skill forces disambiguation. Delete that
+skill and the plugin's could be invoked bare, silently killing the `PreToolUse` arm — the prompt
+matcher still catches it. Deliberately **out of scope:** a bare `implement-ticket`, which is
+somebody else's skill.
+
+**Default OFF, and the gate is checked at *arm* time only.** `hooks/hooks.json` registers
+unconditionally on the next `/plugin update`, so the behavior change has to be consented to even
+though the registration isn't — the same deny-by-default posture as `agent.autonomy.auto_execute`
+and `exec.allowed_commands`. Checking the config only when arming is also what keeps the fire path
+free: an unarmed session costs one `cat`, one `test -d` and one glob, with no config read, no awk,
+no jq, no network.
+
+**Three invariants in `turn-notify-hook.sh`, each guarding a different foot-gun:**
+- **Always `exit 0`, never write stdout.** Exit 2 on `Stop` *blocks the turn from ending* and
+  forces the model to continue; on `PreToolUse` it denies the tool; on `UserPromptSubmit` it blocks
+  the prompt — and `UserPromptSubmit` stdout on exit 0 is **injected into the model's context**. So
+  no `set -e`, no stray `echo`; diagnostics go to `state/turn-notify.log` under
+  `EA_TURN_NOTIFY_DEBUG=1`.
+- **jq is a soft dependency.** `cron-poll.sh` makes "deliberately NOT jq" policy for anything
+  outside the separately-installed listener, and a plugin-wide hook is even more exposed. Every
+  field used to *decide whether to push* is escape-free by construction (uuid / enum / skill slug /
+  anchored raw-JSON prefix) and is read with `sed`. jq is used for exactly one thing — decoding
+  `last_assistant_message` for the excerpt — so no jq means a label-only push, never a broken hook.
+- **Nothing tappable reaches the phone.** No `--source-url` is passed, so there are no action
+  buttons and no Open link, and `sanitize_text` replaces every `scheme://` URL, `www.` host and
+  `mailto:` with `(link)` before anything hits the wire. The excerpt is model-authored text
+  ultimately derived from untrusted ticket/PR/Slack bodies, and ntfy's mobile clients autolink URLs
+  in the message body — so without this an injected line could render a tappable link inside a
+  notification arriving on the very topic you have trained yourself to trust for Approve/Reject,
+  aimed at you while you are away from your desk. *Residual, accepted:* a bare `evil.tld` with no
+  scheme can still be autolinked by some clients; neutralizing that would also destroy `notify.sh`
+  and `SKILL.md`, and the excerpt is the model's own summary rather than a quote.
+
+Capped at `EA_TURN_NOTIFY_MAX` (40) pushes per session, with one "🔕 muted" push at the boundary so
+the silence is explained. `EA_TURN_NOTIFY_ENABLED` overrides the config key either way — set it to
+`0` in the listener's environment to disable just the headless leg. Hook registrations are read at
+session start, so an existing install needs `/plugin update engineer-agent` (or a new session);
+the listener's own mtime self-reexec covers `approval-listener.sh` but not this.
+
 **Writing a headless `claude -p` run** (both scripts do this; the rules below were each learned
 from a run that failed silently):
 - **Pin `--permission-mode`.** Otherwise the run inherits `permissions.defaultMode`; in `plan` mode
@@ -281,6 +348,12 @@ from a run that failed silently):
 - **Don't put `--allowedTools` last before the prompt.** It takes a variable number of values and
   will swallow the prompt as another rule (`Input must be provided … when using --print`). Keep a
   single-value flag in between.
+- **Hook commands are NOT subject to `--allowedTools`.** A plugin's `hooks/hooks.json` runs
+  whatever it registered regardless of the allowlist, because hooks are operator-configured rather
+  than model-requested. So an `allowed_tools` array is not an exhaustive statement of what a
+  headless run can cause to happen — `hooks/hooks.json` is the other half. Today that grants
+  nothing new (`turn-notify-hook.sh` only shells out to `notify.sh`, which the confined ticket
+  allowlist already carries), but keep hooks outbound-only and fail-open so it stays that way.
 - **Use `Edit(path)`, never `Write(path)`.** The CLI rejects `Write(path)` rules; one `Edit` rule
   covers every file-editing tool. Path rules need `//abs` to anchor at the filesystem root — a
   single leading `/` anchors to the cwd.
@@ -400,6 +473,12 @@ text can influence code *inside* the sandbox but never the *shape* of it:
    set the list, and no unconfined session ever runs. It is never `Bash(*)` / `bypassPermissions`.
 3. **Draft-PR review gate** (downstream, unchanged): the output is a draft PR the human reviews.
 
+When `agent.notify.turn_completions` is on, this run is also handed `EA_TURN_NOTIFY=1` and
+`EA_TURN_NOTIFY_LABEL=<item>` as an **inline `env` on that one process** — resolved in plain bash
+alongside the worktree and the allowlist, for the same reason. Being inline rather than exported
+is what keeps `run_qa_generation`'s separate run silent; the ticket therefore produces one 🔔 in
+addition to the listener's 📨/✅, and QA still produces only its 🧪.
+
 **QA test plan (best-effort, after the draft PR).** Once the implementation has actually shipped
 (the `completed/<item>` record exists), and *only* if the project has `projects.<slug>.qa.base_url`
 configured, the listener runs a **second, separate** confined `claude -p` (`run_qa_generation`) —
@@ -508,7 +587,7 @@ Key invariant: **`/engineer-agent review-queue` (terminal) and `/engineer-agent 
   so it never failed a poll, but it burned a turn on nearly every run.
 - Jira: `mcp__atlassian__*` tools (optional — either Jira or GitHub Issues per project)
 - Slite: `mcp__slite__*` tools
-- ntfy (optional): push notifications + remote approval via `curl` (publish) and `scripts/approval-listener.sh` (subscribe). Listener requires `jq`.
+- ntfy (optional): push notifications + remote approval via `curl` (publish) and `scripts/approval-listener.sh` (subscribe). Listener requires `jq`. Turn-completion pushes (`hooks/hooks.json` → `scripts/turn-notify-hook.sh`) add **no** hard dependency — jq is used only to decode the message excerpt, and its absence degrades to a label-only push.
 
 ## Documentation Maintenance
 

@@ -18,6 +18,7 @@ A Claude Code plugin that automates senior software engineer tasks with an appro
 - **Standup Generation** — Creates daily standup updates from activity history
 - **Daily Digest** — Summarizes all agent activity with approval metrics
 - **Push Notifications & Remote Approval** — Optional [ntfy](https://ntfy.sh) integration pushes an alert when work is queued and lets you approve/reject from your phone without opening Claude Code
+- **Turn-Completion Pushes** — Optional per-turn FYI during a ticket implementation, so a long unattended session tells you when it finished, stalled, or needs you
 
 Everything goes through an approval queue — nothing is posted until you say so. One unified queue across all your projects. With ntfy configured, that approval can happen remotely from your phone, and safe actions (draft-PR creation) can be allowed to run hands-free.
 
@@ -30,7 +31,7 @@ Everything goes through an approval queue — nothing is posted until you say so
   - **`mcp-proxy`** — for **Slack Enterprise Grid**, where spy's browser-token scraping is broken and unsafe (the first automated call force-logs you out; session tokens rotate hourly). Set `agent.slack.method: mcp-proxy` and `agent.slack.mcp.server_id` to your Slack connector's `mcpsrv` id. The bundled `scripts/slack-mcp.sh` client reads Claude Code's existing OAuth token from your macOS Keychain (read-only) and talks to Anthropic's MCP proxy fronting the official Slack connector — no browser tokens, zero model-token cost. Requires `curl` + `jq`; no spy install. It depends on the login keychain being unlocked, so the headless poll must run in your GUI login session (the macOS LaunchAgent `install-cron.sh` installs already does).
 - **Jira MCP integration** (optional) — for ticket polling and implementation when using Jira as tracker (`mcp__atlassian__*`). Either Jira or GitHub Issues per project — GitHub Issues uses the `gh` CLI (already a prerequisite)
 - **Slite MCP integration** (optional) — for document reviews (`mcp__slite__*`)
-- **ntfy** (optional) — for push notifications and remote approval. No install needed to publish (uses `curl` against [ntfy.sh](https://ntfy.sh) or your self-hosted server); install the [ntfy mobile app](https://ntfy.sh/app) to receive alerts and tap Approve/Reject. The approval listener also needs **`jq`** on the host running it.
+- **ntfy** (optional) — for push notifications and remote approval. No install needed to publish (uses `curl` against [ntfy.sh](https://ntfy.sh) or your self-hosted server); install the [ntfy mobile app](https://ntfy.sh/app) to receive alerts and tap Approve/Reject. The approval listener also needs **`jq`** on the host running it. Turn-completion pushes (below) add no new requirement — they use `jq` when it is present, for the message excerpt only, and fall back to a label-only push when it isn't.
 
 ## Installation
 
@@ -80,6 +81,7 @@ agent:
   autonomy:
     auto_execute: ["draft-pr"]            # action tiers allowed to run without approval
   notify:                                 # optional — omit to disable push notifications
+    turn_completions: false               # FYI at the end of every implement-ticket turn (off by default)
     ntfy:
       server: "https://ntfy.sh"
       topic: "ea-alert-CHANGE-ME-RANDOM"        # outbound alerts (keep name secret)
@@ -579,6 +581,31 @@ As with cron, set `CLAUDE_BIN` to pick a specific Claude Code binary — e.g. `C
 
 **Hands-free draft PRs:** with `agent.autonomy.auto_execute: ["draft-pr"]`, draft-PR creation after a ticket is implemented runs without an approval gate — a draft PR merges nothing and requests no review, and you still review it on GitHub. Every other action (Slack posts, PR approve/request-changes, issue creation, non-draft PRs) always requires explicit approval.
 
+### Turn-completion pushes
+
+Implementing a ticket is a long, unattended session. By default you hear about it once — the ✅/⚠️ at the very end on the phone path, and nothing at all when you run `/engineer-agent:implement-ticket` yourself. Turn it around with:
+
+```yaml
+agent:
+  notify:
+    turn_completions: true    # requires the ntfy block above
+```
+
+Now every time the session finishes a turn you get an FYI — whether it finished, stalled, paused to ask you something, or died on an API error:
+
+```
+🔔 Turn 4 complete · ENG-412 (my-api)
+Self-review found 2 Important issues; fixed both and re-ran tests. Opening draft PR.
+```
+
+- **It's a Claude Code hook** (`hooks/hooks.json` → `scripts/turn-notify-hook.sh`), not something the model chooses to send — so it still fires on the turns the model can't report on itself, like a budget abort or an API error (those arrive as an urgent 🛑).
+- **Off by default**, deliberately: an interactive session is many turns, and the headless path already sends its own ✅/⚠️, so enabling this makes a remote ticket approval three pushes instead of two. Capped at 40 pushes per session, with one 🔕 at the boundary so the silence is explained.
+- **Only `implement-ticket` sessions notify.** They're armed by typing `/engineer-agent:implement-ticket …`, or by the confined headless run; every other session in every other project stays silent, and the hook does no work at all in them.
+- **Nothing in the push is tappable.** No Approve/Reject/Open buttons, and every URL in the excerpt is replaced with `(link)` — the excerpt is model text ultimately derived from untrusted ticket bodies, and a tappable link in a notification you're primed to trust is exactly the wrong thing to hand someone who's away from their desk.
+- Set `EA_TURN_NOTIFY_ENABLED=0` in the listener's environment to keep the interactive pushes but silence the headless leg; `EA_TURN_NOTIFY_MAX` changes the cap.
+
+**After enabling, run `/plugin update engineer-agent` or start a new session** — hook registrations are read at session start.
+
 > **Security:** on public `ntfy.sh`, a topic name is effectively a password — anyone who knows your `command_topic` could trigger Slack posts or PR creation. Use long, random topic names, set an `auth_token`, and/or self-host ntfy via `server`. As defense in depth, the listener only accepts `approve`/`reject` decisions, only item ids matching a strict filename pattern, and only acts on items still sitting in `queue/drafts/`.
 
 ## Project Structure
@@ -622,10 +649,13 @@ skills/
   execute-item/SKILL.md        Shared approve/reject action logic (terminal + remote)
 references/
   routing-ladder.md            Shared ticket→project routing logic (poll-jira, poll-github-issues, add-ticket)
+hooks/
+  hooks.json                   Claude Code hook registrations (turn-completion pushes)
 scripts/
   cron-poll.sh                 Cron polling script
   install-cron.sh              Cron setup script
   notify.sh                    Publish a push notification to ntfy
+  turn-notify-hook.sh          Hook handler: FYI push at each implement-ticket turn end
   approval-listener.sh         Long-running ntfy command-topic subscriber (remote approval)
   install-listener.sh          Installs the approval listener as a service
   lib-ntfy.sh                  Shared ntfy config resolution (sourced by the above)
@@ -650,6 +680,8 @@ config/
     ntfy-seen.yaml             Processed ntfy command message IDs (remote-approval dedup)
     ntfy-listener.since        Last-seen ntfy command timestamp (listener stream resume point)
     approval-listener.log      Listener activity log
+    turn-notify/               One marker per session armed for turn-completion pushes
+    turn-notify.log            Turn-completion hook diagnostics (only with EA_TURN_NOTIFY_DEBUG=1)
 ```
 
 ## Maintenance

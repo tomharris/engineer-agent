@@ -228,7 +228,29 @@ To finalize the queue item, WRITE the completed record to ${AGENT_DIR}/queue/com
 Operate ONLY inside this working directory (plus writing that one completed/ queue file). \
 ${NO_MEMORY_RULE} Be concise."
 
-  ( cd "$wt" && "$CLAUDE_BIN" -p \
+  # Turn-completion push (opt-in: agent.notify.turn_completions). hooks/hooks.json fires
+  # scripts/turn-notify-hook.sh at the end of every turn, but ONLY when armed — and this run is
+  # armed by environment, not by a marker file: nothing to correlate, nothing orphaned if the run
+  # dies. Resolved HERE, in plain bash, on the privileged side of the sandbox boundary — the same
+  # rule as the worktree and the allowlist: untrusted ticket text may influence the code produced
+  # inside the sandbox, never whether or what we notify. ${item} is already validated
+  # ^[A-Za-z0-9._-]+$ by handle_line.
+  #
+  # Passed as an INLINE `env` on this ONE process, so it reaches this run's hooks and nothing
+  # else — notably NOT run_qa_generation's separate run below, which stays silent.
+  #
+  # NOTE: hook commands are NOT subject to --allowedTools. That grants nothing new here (the
+  # allowlist above already carries Bash(notify.sh *)), but see CLAUDE.md — the general rule is
+  # that a plugin hook is a capability outside every allowlist in this repo.
+  local turn_notify=0
+  case "${EA_TURN_NOTIFY_ENABLED:-$(yaml_agent_notify turn_completions)}" in
+    true|yes|1|on) turn_notify=1 ;;
+  esac
+
+  # Always pass 0|1 rather than conditionally building an array: `set -u` plus an empty-array
+  # expansion is an unbound-variable error on bash 3.2, which macOS still ships.
+  ( cd "$wt" && env "EA_TURN_NOTIFY=${turn_notify}" "EA_TURN_NOTIFY_LABEL=${item%.md}" \
+      "$CLAUDE_BIN" -p \
       --plugin-dir "$PLUGIN_ROOT" \
       --model sonnet \
       --permission-mode acceptEdits \

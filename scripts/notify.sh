@@ -62,7 +62,10 @@ case "$PRIORITY" in
 esac
 
 # --- Build curl args ---
-ARGS=(-s -X POST)
+# Bounded: turn-notify-hook.sh calls this from a Stop hook, and a hung ntfy connection must never
+# delay the end of a turn (the hook itself is killed at 10s). Benefits every other caller too —
+# the cron and the listener both block on this.
+ARGS=(-s -X POST --connect-timeout 5 --max-time 10)
 [ -n "$AUTH_TOKEN" ] && ARGS+=(-H "Authorization: Bearer ${AUTH_TOKEN}")
 [ -n "$TITLE" ]      && ARGS+=(-H "Title: ${TITLE}")
 ARGS+=(-H "Priority: ${NTFY_PRIORITY}")

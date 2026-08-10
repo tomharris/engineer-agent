@@ -60,6 +60,17 @@ agent:
   # `command_topic` can trigger Slack posts and PR creation. Use long, random topic names,
   # set an `auth_token`, and/or self-host ntfy via `server`. Treat `command_topic` as a secret.
   notify:
+    # Push an FYI at the end of EVERY turn of an implement-ticket session — interactive and the
+    # confined headless run alike — so a long walk-away implementation tells you when it
+    # finished, stalled, paused to ask you something, or died on an API error. Delivered by a
+    # Claude Code hook (hooks/hooks.json), not by the model, so it also fires on the turns the
+    # model can't report on itself.
+    #
+    # OFF by default, and deliberately so: an interactive session is many turns (capped at 40
+    # per session, then muted), and the headless path already sends its own ✅/⚠️ ack — so
+    # enabling this adds a third push per remote approval. Requires the `ntfy` block below.
+    # Set EA_TURN_NOTIFY_ENABLED=0 in the listener's environment to disable just the headless leg.
+    turn_completions: false
     ntfy:
       server: "https://ntfy.sh"              # self-host for stronger isolation
       topic: "ea-alert-CHANGE-ME-RANDOM"     # outbound alerts — keep the name secret
