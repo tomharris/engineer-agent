@@ -437,6 +437,25 @@ polls thrash the same state/receipt files and each burns its full budget racing 
 > reconnect loop when its own mtime changes — the one point guaranteed to be *between* executes,
 > so no in-flight approval is interrupted.
 
+**Which copy of the plugin the service supervises (`EA_LISTENER_FROM_CACHE`).**
+`install-listener.sh` defaults to supervising **its own checkout**, which is right on a
+`--plugin-dir` dev box but means the listener and the interactive skills can resolve *different*
+`${CLAUDE_PLUGIN_ROOT}`s — the dev repo vs. the marketplace cache — and so drift apart whenever you
+commit without pushing, or push without `/plugin update`. Setting `EA_LISTENER_FROM_CACHE=1` at
+install time supervises the **installed cache** copy instead, putting both on the same root.
+
+It cannot do that by naming the cache dir in the plist/unit: that path is **version-pinned**
+(`…/plugins/cache/engineer-agent/engineer-agent/<ver>`) and old versions are **retained**, so a
+service naming `1.10.0` would keep running `1.10.0` forever after the next `/plugin update` —
+and *silently*, because the mtime self-reexec above sees an unchanged file at an unchanged path,
+which is exactly the stale-daemon failure that guard exists to prevent. So the installer generates
+a **stable launcher** at `~/.local/bin/engineer-agent-listener` that resolves the highest installed
+version at each launch and `exec`s it (so it leaves no wrapper process). Consequence: a new version
+is picked up on the next service **restart** (`launchctl kickstart -k` / `systemctl --user restart`),
+not on `/plugin update` alone and not by re-running the installer. The launcher duplicates
+`resolve_installed_plugin_root()`'s few lines rather than sourcing `lib-paths.sh` — that library
+lives *inside* the versioned dir being resolved; keep the two in sync.
+
 The listener's headless execute is capped with `--max-budget-usd`, chosen **per item type** from
 the draft's `type:` frontmatter: `ticket` items (which run the full `implement-ticket` coding session)
 get `TICKET_BUDGET_USD` (default `8.00`); everything else gets `DEFAULT_BUDGET_USD` (default

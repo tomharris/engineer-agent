@@ -576,6 +576,23 @@ This registers a supervised service (`engineer-agent-listener`) that restarts on
 
 **After updating the plugin, re-run `install-listener.sh`** (or `systemctl --user restart engineer-agent-listener`) so the running service loads the new code — a supervised daemon keeps executing whatever it parsed at launch. As a backstop the listener also re-execs itself when its own file changes, at the next stream reconnect.
 
+**Supervising the installed copy instead of a checkout.** By default the service runs the
+`approval-listener.sh` belonging to the checkout you ran the installer from. If you use the
+marketplace install (`/plugin install engineer-agent`), pass `EA_LISTENER_FROM_CACHE=1` so the
+service runs the *installed* copy instead and resolves the same plugin root your interactive
+sessions do:
+
+```bash
+EA_LISTENER_FROM_CACHE=1 /path/to/engineer-agent/scripts/install-listener.sh
+```
+
+Because the install cache is versioned and keeps old versions, the service can't name a version
+directly — it would silently keep running that one after your next `/plugin update`. Instead the
+installer generates a stable launcher at `~/.local/bin/engineer-agent-listener` that picks the
+highest installed version each time it starts. So after a `/plugin update`, **restart the service**
+(`launchctl kickstart -k gui/$UID/engineer-agent-listener` on macOS, `systemctl --user restart
+engineer-agent-listener` on Linux) to move onto the new version.
+
 By default the listener caps each headless approval at **$2.00**, or **$8.00** for `ticket` items (which run a full implementation). Tune via the `EA_EXECUTE_BUDGET_USD` / `EA_TICKET_BUDGET_USD` environment variables. The best-effort QA generation that follows a ticket (below) is a separate run with its own **$2.00** cap, tunable via `EA_QA_BUDGET_USD`.
 
 **Approving a `ticket` from your phone** is special: it runs the whole `implement-ticket` coding session (branch → inline iterative implementation → self-review of the diff → draft PR) unattended, so it gets its own confined execution path instead of the read/post one every other type uses:
