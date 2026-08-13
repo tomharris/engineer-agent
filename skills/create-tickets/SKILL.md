@@ -10,8 +10,9 @@ Generate a phased ticket breakdown from an engineering design doc, with real fil
 
 ## Tools Needed
 
-- `mcp__slite__get-note` — fetch design doc from Slite
 - `Read`, `Write` — read/write queue items and source code
+- `mcp__slite__get-note` — re-fetch a Slite-sourced design doc if needed (normally unnecessary: the
+  command inlines the full doc into the queue item, whatever its source)
 - `Grep`, `Glob` — explore codebase architecture, find implementations and patterns
 - `mcp__atlassian__searchJiraIssuesUsingJql` — find existing related tickets (Jira tracker)
 - `mcp__atlassian__getJiraIssue` — read ticket details (Jira tracker)
@@ -19,7 +20,7 @@ Generate a phased ticket breakdown from an engineering design doc, with real fil
 
 ## Input
 
-A queue item file in `~/.local/share/engineer-agent/queue/incoming/` with type `ticket-plan`, containing the design doc content in `## Context`. The frontmatter includes `design_doc_id` linking to the source design doc, `project` identifying the project slug, and optionally `jira_project` for the target project.
+A queue item file in `~/.local/share/engineer-agent/queue/incoming/` with type `ticket-plan`, containing the design doc content in `## Context`. The design doc may have come from Slite or from a local file; the content is inlined either way, so the source makes no difference here. The frontmatter includes `design_doc_id` linking to the source design doc, `project` identifying the project slug, and optionally `jira_project` for the target project.
 
 ## Steps
 

@@ -10,7 +10,8 @@ Generate a comprehensive engineering design doc from a PM's feature spec, incorp
 
 ## Tools Needed
 
-- `mcp__slite__get-note` — fetch spec and optional template from Slite
+- `mcp__slite__get-note` — fetch the optional design doc template from Slite (the spec itself is
+  already inlined into the queue item by the command, whatever its source)
 - `mcp__slite__create-note` — create the design doc on approval
 - `Read`, `Write` — read/write queue items and source code
 - `Grep`, `Glob` — explore codebase architecture, find implementations and patterns
@@ -19,7 +20,7 @@ Generate a comprehensive engineering design doc from a PM's feature spec, incorp
 
 ## Input
 
-A queue item file in `~/.local/share/engineer-agent/queue/incoming/` with type `design-doc`, containing the spec content in `## Context`. The frontmatter may include `spec_refinement_id` linking to a completed spec-refinement for additional Q&A context.
+A queue item file in `~/.local/share/engineer-agent/queue/incoming/` with type `design-doc`, containing the spec content in `## Context`. The spec may have come from Slite or from a local file; the content is inlined either way, so the source makes no difference here. The frontmatter may include `spec_refinement_id` linking to a completed spec-refinement for additional Q&A context.
 
 ## Steps
 
