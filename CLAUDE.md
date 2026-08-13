@@ -208,7 +208,10 @@ Filename: `{YYYYMMDD-HHmmss}-{type}-{short-id}.md`
 
 YAML frontmatter fields:
 - `type`: pr-review | slack-question | ticket | doc-review | spec-refinement | design-doc | ticket-plan | ticket-refinement | gap-audit | qa-test-plan | code-audit-finding | codify-candidate
-- `source`: github | slack | jira | slite | audit | internal
+- `source`: github | slack | jira | slite | file | audit | internal (`file` = a local document path
+  given to `refine-spec` / `create-design-doc` / `create-tickets`; its `source_url` is a `file://`
+  URI and its `source_id` is `file:{absolute path}`, so the spec → design doc → ticket-plan
+  prior-artifact lookups chain the same way they do for `slite:{doc_id}`)
 - `source_url`: URL to the original item
 - `source_id`: Unique identifier (e.g. "org/repo#142")
 - `title`: Short description

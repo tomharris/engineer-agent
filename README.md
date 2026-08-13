@@ -313,13 +313,17 @@ Generate a daily summary of all agent activity across all projects.
 
 The digest includes items processed, approval rates, and breakdowns by project and type. Approve to post it to your configured digest channel.
 
-### `/engineer-agent refine-spec <slite-url-or-id> [--project <slug>]`
+### `/engineer-agent refine-spec <slite-url-or-id|path> [--project <slug>]`
 
 Analyze a PM feature spec and generate clarifying questions.
 
 ```
 /engineer-agent refine-spec https://example.slite.com/p/note/abc123
+/engineer-agent refine-spec docs/specs/checkout-v2.md
+/engineer-agent refine-spec ~/Documents/spec.pdf
 ```
+
+The spec can be a Slite doc (URL or bare ID) or a local file — anything readable as a document, including markdown, plain text, and PDF.
 
 Generates structured questions across scope, feasibility, missing details, ambiguities, and constraints. After approval, fill in the answer fields to provide context for design doc generation.
 
@@ -337,25 +341,31 @@ Analyze existing tickets for scope, feasibility, testability, and sizing.
 
 Assesses scope clarity, implementation feasibility (grounded in codebase analysis), testability, and assigns a Fibonacci sizing estimate. Multiple tickets are processed in parallel. Approve via `/engineer-agent review-queue refinement`.
 
-### `/engineer-agent create-design-doc <slite-url-or-id> [--project <slug>]`
+### `/engineer-agent create-design-doc <slite-url-or-id|path> [--project <slug>]`
 
 Generate an engineering design doc from a PM spec.
 
 ```
 /engineer-agent create-design-doc https://example.slite.com/p/note/abc123
+/engineer-agent create-design-doc docs/specs/checkout-v2.md
+/engineer-agent create-design-doc ~/Documents/spec.pdf
 ```
+
+The spec can be a Slite doc (URL or bare ID) or a local file. Either way, the generated design doc is created in Slite on approval.
 
 Researches the codebase and produces a full design doc (architecture, components, data model, API changes, risks, implementation phases). If a prior spec refinement exists for this doc, its Q&A is included as context. On approval, the design doc is created in Slite.
 
-### `/engineer-agent create-tickets <slite-url-or-id> [--project <slug>]`
+### `/engineer-agent create-tickets <slite-url-or-id|path> [--project <slug>]`
 
 Break a design doc into phased implementation tickets.
 
 ```
 /engineer-agent create-tickets https://example.slite.com/p/note/abc123
+/engineer-agent create-tickets docs/design/checkout-v2.md
+/engineer-agent create-tickets ~/Documents/design.pdf
 ```
 
-Takes a Slite design doc and generates detailed tickets grouped by implementation phase. Each ticket includes purpose, implementation approach (with real file paths), testing strategy, acceptance criteria, and dependencies on other tickets. On approval, the ticket plan moves to completed for reference when creating tickets in your project tracker.
+Takes a design doc — a Slite doc (URL or bare ID) or a local file — and generates detailed tickets grouped by implementation phase. Each ticket includes purpose, implementation approach (with real file paths), testing strategy, acceptance criteria, and dependencies on other tickets. On approval, the ticket plan moves to completed for reference when creating tickets in your project tracker.
 
 ### `/engineer-agent audit-gaps <url-or-key> [--project <slug>] [--boundary <spec-design|design-tickets|all>]`
 

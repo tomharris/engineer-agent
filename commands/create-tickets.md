@@ -1,7 +1,7 @@
 ---
-description: "Break a Slite design doc into phased implementation tickets"
+description: "Break a design doc (Slite or local file) into phased implementation tickets"
 model: sonnet
-argument-hint: "<slite-url-or-id> [--project <slug>]"
+argument-hint: "<slite-url-or-id|path> [--project <slug>]"
 allowed-tools: ["Bash", "Read", "Write", "Glob", "Grep", "AskUserQuestion",
   "mcp__slite__get-note", "mcp__slite__get-note-children",
   "mcp__atlassian__searchJiraIssuesUsingJql", "mcp__atlassian__getJiraIssue"]
@@ -13,8 +13,15 @@ Break a design doc into phased implementation tickets with dependencies.
 
 ## Arguments
 
-- `$ARGUMENTS` should contain a Slite document URL or bare document ID
+- `$ARGUMENTS` should contain the design doc source: a Slite document URL, a bare Slite document
+  ID, or a path to a local file
 - `$ARGUMENTS` may contain `--project <slug>` to associate with a specific project
+
+```
+/engineer-agent create-tickets https://example.slite.com/p/note/abc123
+/engineer-agent create-tickets docs/design/checkout-v2.md
+/engineer-agent create-tickets ~/Documents/design.pdf --project my-api
+```
 
 ## Steps
 
@@ -26,24 +33,55 @@ Read `~/.local/share/engineer-agent/engineer.yaml`. If missing, tell the user to
 
 If `--project <slug>` is specified, use that slug. Otherwise, try to infer the project from the current working directory by matching against `projects.<slug>.path` values in config. If no match, ask the user which project this ticket plan belongs to (list available slugs).
 
-### 3. Parse Arguments
+### 3. Classify the Source
 
-Extract the Slite document ID from `$ARGUMENTS`:
-- If a full URL (e.g. `https://example.slite.com/api/s/note/...` or `https://example.slite.com/p/note/...`), extract the note ID from the path
-- If a bare ID, use it directly
-- If no argument provided, ask the user for the Slite doc URL or ID
+Classify the positional argument in `$ARGUMENTS` (ignoring `--project <slug>`). Check in this
+order — the first match wins:
+
+- **Slite URL** — `https://…/api/s/note/…` or `https://…/p/note/…` → extract the note ID from the
+  path. Source type is `slite`.
+- **Local path** — a `file://` URI, an absolute path (`/…`), a `~/`-relative path, or a
+  cwd-relative path. Treat the argument as a local path when it is not an `http(s)://` URL **and**
+  it either contains a `/` or ends in a file extension. Source type is `file`.
+- **Bare Slite ID** — any other non-empty argument. Source type is `slite`.
+- **Nothing** — ask the user for a Slite doc URL/ID or a local file path.
 
 ### 4. Fetch the Design Doc
 
-Call `mcp__slite__get-note` with the extracted document ID to retrieve the design doc content and title.
+**For a Slite source:** call `mcp__slite__get-note` with the extracted document ID to retrieve the
+design doc content and title.
 
-If the fetch fails, report the error and stop.
+**For a local file source:** resolve the argument to an absolute path — strip a leading `file://`,
+expand a leading `~`, and resolve a relative path against the current working directory. Verify the
+file exists; if it does not, report the resolved path and stop.
+
+Read the file with the `Read` tool. Any file `Read` can open is acceptable — markdown, plain text,
+or PDF. For a PDF longer than 10 pages, page through it with the `pages` parameter until the whole
+document has been read.
+
+Derive the title from the first `# ` heading in the content. If the file has no `# ` heading, fall
+back to the filename stem with `-` and `_` replaced by spaces.
+
+If the fetch or read fails, report the error and stop.
+
+### 4a. Resolve Source Identifiers
+
+Derive these values from the source type; every later step and the frontmatter template below refer
+to them by name:
+
+| Value | Slite source | Local file source |
+|---|---|---|
+| `{source}` | `slite` | `file` |
+| `{doc_id}` | the Slite note ID | the absolute file path |
+| `{source_url}` | the Slite doc URL | `file://{absolute path}` |
+| `{source_id}` | `slite:{doc_id}` | `file:{doc_id}` |
+| `{doc_id_short}` | first 8 chars of the note ID | filename stem, lowercased, each run of non-alphanumeric characters replaced by `-`, first 8 chars |
 
 ### 5. Check for Prior Design Doc
 
-Search `~/.local/share/engineer-agent/queue/completed/` for files matching `*-design-doc-*.md`. Read each file's frontmatter and check if `source_id` matches `slite:{doc_id}`.
+Search `~/.local/share/engineer-agent/queue/completed/` for files matching `*-design-doc-*.md`. Read each file's frontmatter and check if its `source_id` matches the `{source_id}` resolved in step 4a.
 
-If found, read the completed design doc's `## Draft Response` section to include as enriched context (this may contain additional detail beyond what's in Slite).
+If found, read the completed design doc's `## Draft Response` section to include as enriched context (this may contain additional detail beyond what's in the source doc).
 
 ### 6. Check Jira for Existing Tickets
 
@@ -53,28 +91,30 @@ If `projects.<slug>.jira.project` is set, search Jira for existing tickets relat
 
 Generate a timestamp and write a new file to `~/.local/share/engineer-agent/queue/incoming/`:
 
-Filename: `{YYYYMMDD-HHmmss}-ticket-plan-{doc_id_short}.md` (use first 8 chars of doc ID)
+Filename: `{YYYYMMDD-HHmmss}-ticket-plan-{doc_id_short}.md`
+
+All `{source*}` and `{doc_id*}` placeholders below are the values resolved in step 4a.
 
 ```yaml
 ---
 type: ticket-plan
-source: slite
-source_url: "{slite_doc_url}"
-source_id: "slite:{doc_id}"
+source: {source}
+source_url: "{source_url}"
+source_id: "{source_id}"
 title: "Tickets: {design_doc_title}"
 priority: normal
 created_at: "{ISO 8601 timestamp}"
 status: incoming
 project: "{slug}"
 doc_id: "{doc_id}"
-design_doc_id: "slite:{doc_id}"
+design_doc_id: "{source_id}"
 jira_project: "{projects.<slug>.jira.project}"
 ---
 
 ## Context
 
 **Design Doc Title:** {title}
-**Source:** {url}
+**Source:** {source_url}
 **Project:** {slug}
 **Fetched:** {timestamp}
 **Prior Design Doc in Queue:** {link to completed design-doc or "None"}

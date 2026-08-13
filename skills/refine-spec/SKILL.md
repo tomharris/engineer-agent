@@ -7,12 +7,13 @@ model: sonnet
 
 # Refine a Feature Spec
 
-Analyze a PM's feature spec from Slite and produce structured clarifying questions with rationale.
+Analyze a PM's feature spec and produce structured clarifying questions with rationale.
 
 ## Tools Needed
 
-- `mcp__slite__get-note` — fetch spec content from Slite
 - `Read`, `Write` — read/write queue items and source code
+- `mcp__slite__get-note` — re-fetch a Slite-sourced spec if needed (normally unnecessary: the
+  command inlines the full spec into the queue item, whatever its source)
 - `Grep`, `Glob` — search codebase for referenced code and find relevant implementations
 - `mcp__atlassian__searchJiraIssuesUsingJql` — find related/overlapping tickets
 - `mcp__atlassian__getJiraIssue` — read related ticket details
