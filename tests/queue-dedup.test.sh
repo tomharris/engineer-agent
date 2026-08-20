@@ -173,6 +173,72 @@ fi
 teardown
 
 # ---------------------------------------------------------------------------
+# {ticket, ticket-investigation} is ONE type family: two shapes of the same work (code change vs
+# findings document, see references/ticket-kind.md). A ticket's kind can change between polls, so
+# two LIVE items across the pair is always the poller failing to update in place.
+echo "family: two live items across the ticket/ticket-investigation pair"
+setup
+item incoming 20260820-100000-ticket-investigation-ENG-1.md ENG-1 incoming payroll-treasury ticket-investigation
+item drafts   20260820-110000-ticket-ENG-1.md               ENG-1 drafted  payroll-treasury ticket
+out="$(bash "$CHECK" 2>&1)" && rc=0 || rc=$?
+if [ "$rc" -ne 0 ]; then
+  ok "two live items across the ticket family is a duplicate"
+else
+  bad "family duplicate not detected (a reclassification would mint a rival item)"
+fi
+# The report loop must match rows on the SAME key the group was built with. Keying the group on the
+# family name while matching rows on the raw type finds the key but then lists zero files.
+if printf '%s' "$out" | grep -q "ticket-investigation-ENG-1.md" \
+   && printf '%s' "$out" | grep -q "110000-ticket-ENG-1.md"; then
+  ok "family report names both offending files"
+else
+  bad "family report did not name both files (report loop keyed differently from the group)"
+fi
+teardown
+
+# ---------------------------------------------------------------------------
+# The legitimate handoff: a spike is investigated, then its outcome implemented via
+# `add-ticket --implement`. Collapsing the family across TERMINAL items would flag this — and it is
+# the most likely real workflow, so the check would go permanently red on correct behavior.
+echo "family: completed investigation + new implementation draft is NOT a duplicate"
+setup
+item completed 20260820-100000-ticket-investigation-ENG-2.md ENG-2 completed payroll-treasury ticket-investigation
+item drafts    20260820-110000-ticket-ENG-2.md               ENG-2 drafted   payroll-treasury ticket
+if bash "$CHECK" >/dev/null 2>&1; then
+  ok "spike -> implement handoff is not a duplicate"
+else
+  bad "flagged the legitimate spike -> add-ticket --implement flow (crying-wolf regression)"
+fi
+teardown
+
+# ---------------------------------------------------------------------------
+# The family must not be over-broad: an investigation and a qa-test-plan are still different work.
+echo "family: ticket-investigation + qa-test-plan for one key is not a duplicate"
+setup
+item completed 20260820-100000-ticket-investigation-ENG-3.md ENG-3 completed payroll-treasury ticket-investigation
+item drafts    20260820-110000-qa-test-plan-ENG-3.md         ENG-3 drafted   payroll-treasury qa-test-plan
+if bash "$CHECK" >/dev/null 2>&1; then
+  ok "investigation + qa-test-plan on one source_id is not a duplicate"
+else
+  bad "family definition is over-broad"
+fi
+teardown
+
+# ---------------------------------------------------------------------------
+# Two completed investigations are still a same-type violation — the exact-type check must keep
+# working alongside the family one.
+echo "family: two completed investigations is still a violation"
+setup
+item completed 20260820-100000-ticket-investigation-ENG-4.md ENG-4 completed payroll-treasury ticket-investigation
+item completed 20260820-110000-ticket-investigation-ENG-4.md ENG-4 completed payroll-treasury ticket-investigation
+if bash "$CHECK" >/dev/null 2>&1; then
+  bad "duplicate completed investigations should still fail"
+else
+  ok "duplicate completed investigations are still a violation"
+fi
+teardown
+
+# ---------------------------------------------------------------------------
 # rejected/ is the DISPOSAL path: rejecting the redundant copy is exactly how a human resolves a
 # duplicate. So a rejected sibling must not count against the invariant — otherwise the check fires
 # forever on already-resolved duplicates, and a permanently-red check is one nobody reads.

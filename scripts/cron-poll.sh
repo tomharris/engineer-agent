@@ -181,6 +181,12 @@ allowed_tools=(
   mcp__atlassian__searchJiraIssuesUsingJql mcp__atlassian__getJiraIssue
   mcp__slite__search-notes mcp__slite__get-note mcp__slite__get-note-children
   "Bash(${PLUGIN_ROOT}/scripts/notify.sh *)"
+  # NOTE: ticket-investigation items need NO new verbs here. The poll only DRAFTS an investigation
+  # plan — the research, the ticket comment and any transition all happen later, behind the approval
+  # gate, in the listener's confined run_ticket_investigation. mcp__atlassian__getJiraIssue (the
+  # source of the `issuetype` field the kind ladder needs) and Read (references/ticket-kind.md) are
+  # already listed above. Do NOT add addCommentToJiraIssue / gh issue comment here: it would break
+  # the "polling reads; only execute-item writes" invariant.
   "Bash(mv *)"
   # The model habitually appends a status probe (`… auth 2>&1; echo "EXIT:$?"`). Claude Code
   # evaluates each part of a compound command separately, so an unlisted `echo` gets the WHOLE

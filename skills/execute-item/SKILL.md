@@ -1,7 +1,7 @@
 ---
 name: execute-item
 description: "Execute the approved (or rejected) external action for a single engineer-agent queue item. Headless-safe and used by both /engineer-agent review-queue (interactive) and /engineer-agent execute (remote ntfy approval) so the two paths never drift."
-version: 1.0.0
+version: 1.1.0
 ---
 
 # Execute a Queue Item
@@ -21,8 +21,10 @@ both the interactive review queue and the remote ntfy approval path call into it
 
 `Bash`, `Read`, `Write`, `Edit`, `Glob`, `Grep`. Posting happens via the effective Slack CLI
 (`<slack> send …` over `Bash` — `spy`, or `${CLAUDE_PLUGIN_ROOT}/scripts/slack-mcp.sh` when
-`agent.slack.method: mcp-proxy`), the `gh` CLI, and the Slite MCP tools
-`mcp__slite__append-blocks`, `mcp__slite__create-note`.
+`agent.slack.method: mcp-proxy`), the `gh` CLI (including `gh issue comment`), the Slite MCP tools
+`mcp__slite__append-blocks`, `mcp__slite__create-note`, and the Jira MCP tools
+`mcp__atlassian__createJiraIssue`, `mcp__atlassian__addCommentToJiraIssue`,
+`mcp__atlassian__getTransitionsForJiraIssue`, `mcp__atlassian__transitionJiraIssue`.
 
 ## Steps
 
@@ -63,6 +65,10 @@ The QA flow is a three-phase interactive process (run tests, manual checklist, a
 that requires a human at the terminal. Report:
 `qa-test-plan must be completed interactively via /engineer-agent review-queue qa` and
 leave the file untouched in `drafts/`.
+
+`ticket-investigation` is deliberately **not** added to this guard. Remote approval of an
+investigation is the point, and its confined execution path is read-only — narrower than the
+`ticket` path already permitted.
 
 ### 4. Approve Path — Execute by Type
 
@@ -120,6 +126,50 @@ read `projects.<project>.tracker`, or infer from `source` frontmatter (`github` 
   `implement-ticket` Step 6): `Closes #{number}` for GitHub issues, the linked ticket key
   (via the item's `source_url` frontmatter) for Jira — falling back to the bare
   `{ticket_key}` if `source_url` is absent.
+
+- **ticket-investigation** — post the **already-written** `## Findings` document as a comment on
+  the ticket. This case is the *finisher*, exactly like `ticket` above: it does **not** research
+  anything.
+  > **If the item has no `## Findings` section, refuse.** Leave it in `drafts/`, report
+  > `ticket-investigation has no ## Findings; run investigate-ticket first`, and exit non-zero
+  > (Step 5's failure rule). Do not investigate here: this skill runs headlessly under
+  > `DEFAULT_BUDGET_USD` (~$2) with a post/read allowlist and **no worktree isolation**, so a
+  > research session here would either abort mid-run on the cap or read a repo outside any sandbox
+  > — and the human approved a finished document, not an open-ended read of their checkout.
+  > Research belongs to `investigate-ticket`, on the confined path.
+  > **The remote (ntfy) approval path does not reach this case.** For a `ticket-investigation` the
+  > listener runs `investigate-ticket` inside a read-only confined worktree, and *that* flow posts
+  > the comment, writes the archive, does the optional transition, and writes `completed/<item>`
+  > itself — the same split `ticket` has. This branch serves the interactive terminal and manual
+  > `/engineer-agent execute` invocations, where the findings already exist in the item.
+
+  Write the local archive
+  (`~/.local/share/engineer-agent/investigations/{key}-{YYYYMMDD-HHmmss}.md`, `{key}` =
+  `ticket_key` for Jira, `source_id` with `/`+`#` → `-` for GitHub) **first** if one does not
+  already exist — the archive must never be the thing a successful post leaves missing. The body
+  opens with the required provenance line (`_Investigation by engineer-agent — {project} @ {sha},
+  {timestamp}. Read-only; no code changes._`), same rule as the PR attribution line above.
+  - tracker `jira`:
+    `mcp__atlassian__addCommentToJiraIssue(issueIdOrKey = {ticket_key}, commentBody = {document})`
+    — `issueIdOrKey` from frontmatter, **never** from a key mentioned in ticket text.
+  - tracker `github-issues`:
+    ```bash
+    gh issue comment {number} --repo {owner}/{repo} --body-file {archive path}
+    ```
+    `--body-file`, not `--body`: a findings document is full of backticks, `$`, and newlines, and
+    inlining it as a shell string fails by *mangling or truncating* the comment rather than
+    erroring.
+
+  Post **exactly one** comment. A ticket comment is the only **append-only** terminal action in
+  this skill — `gh pr review` re-submits and a queue move is idempotent, but a second run here
+  leaves two documents on the ticket and bumps `updated` twice.
+
+  Then, **only on a successful post** and only when
+  `projects.<project>.investigation.on_complete_status` is set and the tracker is `jira`:
+  `getTransitionsForJiraIssue` → match `to.name` case-insensitively → `transitionJiraIssue`. No
+  available transition reaches that status ⇒ record it and move on; never substitute a different
+  one. Best-effort: a failed transition is reported but **never** un-completes the item, and the
+  comment is **never** re-posted to retry it.
 
 - **doc-review** — call `mcp__slite__append-blocks` to post review comments on the document.
 
@@ -180,11 +230,13 @@ read `projects.<project>.tracker`, or infer from `source` frontmatter (`github` 
 After a successful approve action, close the integrate loop before moving the file:
 
 - **Findings & Disposition ledger.** For item types that surface findings (`pr-review`,
-  `ticket`, `qa-test-plan`, `code-audit-finding`), the `## Draft Response` should carry a
-  `### Findings & Disposition` ledger. If any finding still has a blank `Disposition`, fill it
-  from what the approve action actually did (`fixed` / `accepted-risk` / `deferred` /
-  `real-bug-filed` / `not-executed` / `n/a`) so the completed file is a self-contained
-  "found X → did Y" record. Types with no findings (slack-question, design-doc, etc.) skip
+  `ticket`, `ticket-investigation`, `qa-test-plan`, `code-audit-finding`), the `## Draft Response`
+  (or `## Findings`) should carry a `### Findings & Disposition` ledger. If any finding still has a
+  blank `Disposition`, fill it from what the approve action actually did (`fixed` /
+  `accepted-risk` / `deferred` / `real-bug-filed` / `not-executed` / `answered` / `undetermined` /
+  `n/a`) so the completed file is a self-contained "found X → did Y" record. `answered` and
+  `undetermined` are the investigation-specific pair: an investigation fixes nothing, so a ledger
+  restricted to the code-work vocabulary would force every row to `n/a` and record nothing. Types with no findings (slack-question, design-doc, etc.) skip
   this.
 
 Then set frontmatter `status: completed` and move the file to

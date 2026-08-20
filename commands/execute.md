@@ -2,10 +2,17 @@
 description: "Headlessly execute (approve/reject) a single queue item — used by the ntfy remote-approval listener"
 model: sonnet
 argument-hint: "<item-id> <approve|reject> [reason...]"
-allowed-tools: ["Bash", "Read", "Write", "Edit", "Glob", "Grep", "mcp__slite__append-blocks", "mcp__slite__create-note"]
+allowed-tools: ["Bash", "Read", "Write", "Edit", "Glob", "Grep", "mcp__slite__append-blocks", "mcp__slite__create-note", "mcp__atlassian__createJiraIssue", "mcp__atlassian__addCommentToJiraIssue", "mcp__atlassian__getTransitionsForJiraIssue", "mcp__atlassian__transitionJiraIssue"]
 ---
 
 # Engineer Agent: Execute Item
+
+> **The `allowed-tools` list above is a second gate on top of the listener's `--allowedTools`; both
+> must name a verb.** This command runs unattended, and a permission prompt in a headless run is a
+> denial — an unlisted MCP write verb means the action silently never happens and the item strands in
+> `drafts/`, the exact failure mode CLAUDE.md documents for the poll's `gh`/Slack allowlists.
+> (`mcp__atlassian__createJiraIssue`, needed by `code-audit-finding`, was missing here until the
+> investigation work added the comment verbs alongside it.)
 
 Execute the approved or rejected action for a single queue item, non-interactively.
 This is the headless entry point that `scripts/approval-listener.sh` invokes when you tap

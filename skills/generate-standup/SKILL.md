@@ -50,7 +50,7 @@ Group by project, then by category:
 
 **Pending queue items:** Glob for files in `~/.local/share/engineer-agent/queue/drafts/` and `~/.local/share/engineer-agent/queue/incoming/`. These represent upcoming work. Note the `project` field for each.
 
-**In-progress tickets:** Look for ticket-type items that are in progress or recently created.
+**In-progress tickets:** Look for ticket-type items that are in progress or recently created — both `ticket` (code work) and `ticket-investigation` (a Spike/Decision delivering findings). Describe an investigation as "investigating X" rather than "implementing X": it produces a findings comment, not a PR, and reporting it as implementation work misstates the standup.
 
 ### 4. Identify Blockers
 

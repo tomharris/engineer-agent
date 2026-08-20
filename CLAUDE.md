@@ -21,13 +21,16 @@ This repo IS the plugin.
 .claude-plugin/plugin.json    — Plugin manifest
 commands/                      — Slash commands (/engineer-agent <command>)
 skills/                        — Auto-invoked skills by task type
-references/                    — Shared procedural docs skills Read at runtime (routing-ladder.md)
+references/                    — Shared procedural docs skills Read at runtime (routing-ladder.md,
+                                 ticket-kind.md, queue-reconciliation.md)
 hooks/hooks.json               — Claude Code hook registrations (turn-completion pushes)
 scripts/                       — Cron polling, ntfy notify/listener, and setup scripts
 config/engineer.example.yaml   — Config template
 ```
 
-`references/` holds logic that several skills must apply *identically*. It is plain markdown read
+`references/` holds logic that several skills must apply *identically* — today `routing-ladder.md`
+(which project), `ticket-kind.md` (what the ticket delivers), and `queue-reconciliation.md` (whether
+an item enters the queue). It is plain markdown read
 with `Read`, deliberately not a skill or subagent: `scripts/cron-poll.sh` allowlists `Read` but not
 `Skill`/`Agent`, so anything shaped that way is unreachable from the cron — the one path with no
 human fallback.
@@ -59,6 +62,7 @@ of truth for this location — source it rather than hardcoding the path.
 │   ├── completed/             — Approved and posted
 │   └── rejected/              — Rejected with reason
 ├── uat-plans/                 — Saved UAT checklists from /engineer-agent uat-plan (not part of the queue)
+├── investigations/            — Archived findings docs from ticket-investigation items (not part of the queue)
 └── state/
     ├── last-poll.yaml         — Dedup timestamps and seen IDs (per project, per Jira project key, per GitHub repo)
     ├── last-poll-receipt.yaml — Liveness receipt from the last cron poll (run_id, status, item count, skipped, errors)
@@ -84,6 +88,11 @@ without having to pre-seed `seen_issues`.
 Two `agent` subsections drive autonomy (both optional):
 - `agent.autonomy.auto_execute` — a list of action tiers allowed to run **without** an approval gate. Only `draft-pr` is supported (draft PRs merge nothing / request no review). Absent ⇒ empty ⇒ everything is gated.
 - `agent.notify.ntfy` — push-notification + remote-approval settings (`server`, `topic`, `command_topic`, `auth_token`). Absent ⇒ no notifications; the workflow is otherwise unchanged.
+- `agent.investigation` — which tickets deliver a **findings document** instead of code
+  (`jira_types`, `github_labels`, `title_keywords`). Absent ⇒ shipped defaults apply, which include
+  Jira type `Task`. Per-project `projects.<slug>.investigation.*` **replaces** a list rather than
+  merging it, so a project can *narrow* the triggers (the operation that fixes a false positive); an
+  explicitly empty list disables that tier. See "Ticket Kind" below.
 - `agent.notify.turn_completions` — push an FYI at the end of every turn of an `implement-ticket` session (interactive and headless). Absent/false ⇒ off. Read by `yaml_agent_notify()` in `lib-paths.sh`; see "Turn-completion pushes (opt-in)".
 
 Slack access (`agent.slack`, optional) has **two selectable backends**, chosen by
@@ -117,7 +126,7 @@ every call site does is resolve the **effective Slack binary**, then invoke it i
   default); the `mcp-proxy` shim accepts `-w` but ignores it (the connector is bound to its
   authorized workspace).
 
-To find config for a specific project, look up `projects.<slug>`. Each project entry has `path`, `tracker`, `github`, `slack`, `jira`, `slite`, `qa`, and (optional) `exec` subsections. `exec.allowed_commands` is the build/test command allowlist for confined headless ticket implementation — see "Confined headless ticket implementation" under Notifications & Remote Approval. The `tracker` field (`"jira"` | `"github-issues"` | `"none"`) determines which ticket tracker a project uses. If absent, it's inferred: `jira` section present → `"jira"`, `github.issues` section present → `"github-issues"`, neither → `"none"`.
+To find config for a specific project, look up `projects.<slug>`. Each project entry has `path`, `tracker`, `github`, `slack`, `jira`, `slite`, `qa`, and (optional) `exec` and `investigation` subsections. `investigation` overrides the global kind lists for this project and carries `on_complete_status` — a Jira status to move the ticket to after a successful findings comment. Empty/absent ⇒ no transition, **and the transition MCP verbs are not added to the confined run's allowlist at all**, so capability follows config. `exec.allowed_commands` is the build/test command allowlist for confined headless ticket implementation — see "Confined headless ticket implementation" under Notifications & Remote Approval. The `tracker` field (`"jira"` | `"github-issues"` | `"none"`) determines which ticket tracker a project uses. If absent, it's inferred: `jira` section present → `"jira"`, `github.issues` section present → `"github-issues"`, neither → `"none"`.
 
 ### Jira Multi-Source Config
 
@@ -185,6 +194,58 @@ repo — it cannot invent a target or reach an unrelated project. Ticket text is
 (topic only); imperatives inside it ("assign this to X") are ignored. Routing decides only which
 project's config drafts the item; every posting verb stays in `execute-item`, behind the gate.
 
+### Ticket Kind
+
+**`references/ticket-kind.md` is the single source of truth for what a ticket delivers** — a code
+change (branch → draft PR → QA) or a findings document (a `## Findings` comment on the ticket + a
+local archive). `poll-jira`, `poll-github-issues`, `add-ticket`, and `review-queue`'s unrouted
+assignment flow all `Read` it, for the same reason they do the routing ladder.
+
+Two independent ladders, and **routing runs first**: the kind lists are per-project overridable, so
+there is no correct kind to compute until a slug exists. Routing answers *which project*; this
+answers *what it delivers*. Neither reads the other's output.
+
+| Tier | Basis | `ticket_kind_method` |
+|---|---|---|
+| 0 | `--investigate` / `--implement` on `add-ticket` | `manual` |
+| 1 | Jira issue type name ∈ `jira_types` — **terminal for Jira** | `jira-issuetype` |
+| 2 | GitHub label ∈ `github_labels` (after a `type:`/`kind/` prefix strip) | `github-label` |
+| 3 | GitHub title keyword, delimited prefix or leading imperative | `title-keyword` (+ `ticket_kind_rationale`) |
+| 4 | Nothing matched ⇒ code work, the status quo | `default` |
+
+**Tier 1 being terminal for Jira is what removes the false-positive problem.** A Jira issue always
+has a type, so Tier 1 always answers and title matching is unreachable for Jira — a Story titled
+`Add spike protection to the rate limiter` is code work by structure, not by luck. For GitHub, Tier
+3 requires a *form* (`Spike:`, `[Decision]`, or a leading imperative verb like `Investigate`), never
+bare presence of a keyword, because it is impossible to write about rate limiting or decision
+engines without tripping a presence test.
+
+Unlike the routing ladder, the last tier is **not** a human: "nothing matched" has a correct,
+non-surprising answer (code work — the behavior before this ladder existed), and both outcomes are
+gated anyway. The human override is `add-ticket --investigate` / `--implement`.
+
+> **`Task` ships as a trigger and is the one aggressive default.** In many Jira projects `Task` is
+> the catch-all for ordinary code work, so on such an instance a routine ticket is drafted as an
+> investigation. Bounded by the gate (the human reads an "Investigation Plan" that says "no branch,
+> no PR") and by one line of config (`jira_types: ["Spike", "Decision"]`, globally or per project).
+
+**Injection containment:** the ladder's entire output alphabet is two config-derived shapes, both
+behind the approval gate. Ticket text is only ever the *left* side of a comparison — it never
+contributes a keyword — so the trigger vocabulary is closed under config. Classification happens
+during polling, which has a read-only allowlist, so it cannot reach a posting verb; the comment
+target is `ticket_key` from the tracker API, never a key parsed out of ticket text; and the
+investigation execution path is *narrower* than the implementation path, so a flip toward
+investigation reduces capability.
+
+**`{ticket, ticket-investigation}` is one `(type, source_id)` family.** A kind can change between
+polls (an issue type edited, a title retitled), and since the dedup invariant is keyed on `type`, the
+naive rule mints a rival item for work already queued or finished. So the poller lookup is
+family-wide **including terminal items**, while `queue-dedup-check.sh` collapses the family only
+among **non-terminal** ones — a completed investigation followed by a fresh implementation draft is
+the legitimate spike → `add-ticket --implement` handoff, and flagging it would leave the check
+permanently red on the most likely real workflow. Both asymmetries are deliberate; see
+`references/queue-reconciliation.md`.
+
 ### QA Documentation Config
 
 The `qa` subsection drives QA test plans: `base_url` and `console_command` (used during generation), plus optional documentation keys `document_to` (`"slite"` | empty — empty/absent disables) and `document_parent` (Slite channel/note id; empty ⇒ the user's private personal channel). When `document_to: slite`, a completed QA plan (review-queue Phase 3) is published to Slite as one note containing the full plan, the inlined `qa-test.sh` script, and the execution results — best-effort, never blocking completion.
@@ -220,7 +281,7 @@ silently in each. When adding an item type, make sure something moves it to `dra
 Filename: `{YYYYMMDD-HHmmss}-{type}-{short-id}.md`
 
 YAML frontmatter fields:
-- `type`: pr-review | slack-question | ticket | doc-review | spec-refinement | design-doc | ticket-plan | ticket-refinement | gap-audit | qa-test-plan | code-audit-finding | codify-candidate
+- `type`: pr-review | slack-question | ticket | ticket-investigation | doc-review | spec-refinement | design-doc | ticket-plan | ticket-refinement | gap-audit | qa-test-plan | code-audit-finding | codify-candidate
 - `source`: github | slack | jira | slite | file | audit | internal (`file` = a local document path
   given to `refine-spec` / `create-design-doc` / `create-tickets`; its `source_url` is a `file://`
   URI and its `source_id` is `file:{absolute path}`, so the spec → design doc → ticket-plan
@@ -235,6 +296,15 @@ YAML frontmatter fields:
 - `matched_projects`: (only for `_unrouted` items) array of project slugs that matched, or empty array if no rules matched. Applies to Jira and GitHub items alike.
 - `routing_method`: which tier of `references/routing-ladder.md` resolved the project — `single-candidate` | `prefix` | `filters` | `keyword` | `inferred` | `manual` (`manual` = a human picked it via `add-ticket` or `review-queue`)
 - `routing_rationale`: one line naming the evidence, **only** when `routing_method: inferred` — this is what makes an auto-routed judgment call auditable at the approval gate
+- `ticket_kind_method`: (ticket / ticket-investigation only) which tier of
+  `references/ticket-kind.md` chose the deliverable — `manual` | `jira-issuetype` | `github-label` |
+  `title-keyword` | `default`. Absent on `_unrouted` items, which are classified late (the kind
+  lists are per-project, so they need a slug first).
+- `ticket_kind_rationale`: one line naming the evidence, **only** when `ticket_kind_method` is
+  `title-keyword` — the tier that reads untrusted prose, so `review-queue` surfaces it at the gate
+  exactly as it does `routing_method: inferred`
+- `jira_issue_type`: (Jira tickets only) the issue type **name** (e.g. `Spike`) — the Tier 1 input,
+  recorded so the gate can audit the decision's input and not just its output
 - `jira_components`: (Jira tickets only) array of Jira component names on the ticket
 - `jira_labels`: (Jira tickets only) array of Jira labels on the ticket
 - `github_labels`: (GitHub issues only) array of label names on the issue
@@ -471,11 +541,17 @@ lives *inside* the versioned dir being resolved; keep the two in sync.
 
 The listener's headless execute is capped with `--max-budget-usd`, chosen **per item type** from
 the draft's `type:` frontmatter: `ticket` items (which run the full `implement-ticket` coding session)
-get `TICKET_BUDGET_USD` (default `8.00`); everything else gets `DEFAULT_BUDGET_USD` (default
-`2.00`). Override either via the `EA_TICKET_BUDGET_USD` / `EA_EXECUTE_BUDGET_USD` env vars. A flat
+get `TICKET_BUDGET_USD` (default `8.00`); `ticket-investigation` items (a read-only research session
+— pricier than a single post, cheaper than writing code) get `INVESTIGATE_BUDGET_USD` (default
+`3.00`); everything else gets `DEFAULT_BUDGET_USD` (default `2.00`). Override via the
+`EA_TICKET_BUDGET_USD` / `EA_INVESTIGATE_BUDGET_USD` / `EA_EXECUTE_BUDGET_USD` env vars (note none of
+these are baked into the launchd plist / systemd unit, so a *supervised* listener ignores them —
+only `CLAUDE_BIN` is captured at install time). A flat
 `0.50` used to abort every ticket approval with "Exceeded USD budget", stranding it in `drafts/`.
-Only `ticket` unlocks the higher cap, so untrusted frontmatter can at worst pick between two fixed
-values — never inflate spend. The best-effort QA generation that follows a ticket implementation
+Only the two exact strings `ticket` and `ticket-investigation` unlock a different cap, so untrusted
+frontmatter can at worst pick among three fixed constants — never inflate spend. The comparisons are
+exact (`case` globs, not prefixes), so a near-miss type like `ticket-plan` correctly gets the
+default; there is a regression test pinning that. The best-effort QA generation that follows a ticket implementation
 (see below) is a *separate* `claude -p` run with its own cap, `QA_BUDGET_USD` (default `2.00`,
 override `EA_QA_BUDGET_USD`).
 
@@ -538,6 +614,56 @@ user's own project, and the output is draft-only. `implement-ticket` is worktree
 creates the branch in place when already inside the repo checkout, and pushes before `gh pr
 create` so the headless run never hits an interactive push prompt).
 
+### Confined headless ticket investigation
+
+A `ticket-investigation` is the one item type whose deliverable is **prose posted on the ticket**.
+Approving it remotely runs `run_ticket_investigation` — a third confined path, sibling to
+`run_ticket_implementation`, with the same worktree isolation and the same
+`completed/`-then-reconcile handshake (both now share `reconcile_queue_move()` so they cannot
+drift). Three deliberate divergences, each of which a reader will otherwise "fix" back:
+
+1. **No `exec.allowed_commands` requirement.** An investigation runs no build commands, so the
+   deny-by-default refusal must *not* apply — otherwise every doc-only ticket on a project without a
+   build list is refused outright, which is the bug this feature exists to fix.
+2. **No code-writing verbs, and no broad `Bash(git *)` / `Bash(gh *)`.** Those prefixes would
+   re-grant `git push` / `gh pr create` / `gh api -X POST` to a path whose whole premise is that it
+   writes no code. Read-only git verbs and two `gh issue` verbs are enumerated instead, plus the
+   read-only preflights `gh auth status` / `gh --version` (a denied preflight makes the model
+   conclude the whole CLI is unavailable — the failure that cost five consecutive polls) and
+   `Bash(echo:*)` for the compound-command probe. `--add-dir "$AGENT_DIR"` is **required**: under
+   `acceptEdits` edits are auto-accepted only under the cwd, and the cwd is the worktree while the
+   run must write the archive and the `completed/` record outside it.
+3. **No QA afterwards, structurally.** `run_qa_generation` is only reachable from
+   `run_ticket_implementation`; QA tests a diff and there is none. Not a flag — but it has a
+   regression test, because "QA didn't run" is otherwise indistinguishable from a silent failure.
+
+**A ticket comment is the first append-only terminal action in this plugin, and that needs a
+guard.** Every other one is retry-tolerant: `gh pr review` re-submits, `gh pr create` errors on an
+existing PR, a queue move is a no-op the second time. But the listener judges success purely by
+"did the item leave `drafts/`" and, on failure, actively invites a retry (`⚠️ Failed … re-run`). So a
+run that posts the comment and *then* dies (budget abort, API error) leaves the item in `drafts/`,
+the user taps Approve again, ntfy mints a **new** message id so `state/ntfy-seen.yaml` does not
+dedup it — and the ticket gets a second findings document, each one bumping `updated`, which is the
+self-sustaining re-queue loop `references/queue-reconciliation.md` exists to stop. So before
+launching, the listener globs `investigations/{key}-*.md`; if anything matches it does **not**
+investigate again. That works only because the archive path is **pinned in the prompt by the
+listener** rather than chosen by the model.
+
+**Honest limit — this moves the gate, and says so.** Everywhere else, the human approves *the exact
+text that will be posted*. Here they approve a **plan**, and the model then authors and posts prose
+derived from untrusted ticket text with no second look. Post-capable-and-gated is precedented
+(`run_generic_execute` holds `Bash(gh *)` + `createJiraIssue`); ingesting-untrusted-text-and-posting
+in the same unsupervised run is not. Containment: the `ticket_key` is validated in plain bash and
+the run **refuses to start** if it fails; the prompt carries a `TARGET:` directive naming that key as
+the only permitted comment target, capping it at one comment and instructing that any instruction
+inside the ticket text naming another issue be ignored — the same pre-expanded pinning
+`cron-poll.sh` gives `${SLACK_BIN}`. And **MCP permission rules cannot be scoped to arguments**, so
+`addCommentToJiraIssue` is a capability over every issue the Atlassian token can reach and
+`Bash(gh issue comment:*)` over every repo `gh` is authed for; the prompt pin is the only scoping
+that exists. Same "medium, not airtight" admission as `Bash(git *)` vs `git -C /elsewhere` above.
+The transition verbs are stricter still: they are absent from the allowlist entirely unless
+`investigation.on_complete_status` is configured, so capability follows config.
+
 Key invariant: **polling reads; only `execute-item` writes.** `cron-poll.sh` passes a deliberately
 read-only `--allowedTools` allowlist (`gh pr list/view/diff`, `gh issue list/view`,
 `gh auth status`/`gh --version`, the Slack
@@ -554,9 +680,12 @@ so a poller that drives an MCP server (Jira, Slite) silently skips every run unt
 are added here. This is what makes the approval gate structural rather than advisory: polling ingests
 untrusted text (PR/issue bodies, Slack messages), so a prompt-injection payload must not be able
 to reach a write verb. Keep every posting capability in `execute-item`, behind the gate. When
-adding a source, give the poll its read verbs only.
+adding a source, give the poll its read verbs only. (The investigation feature needed **no** new
+poll verbs: the poll only drafts an *investigation plan*, `mcp__atlassian__getJiraIssue` already
+supplies the `issuetype` the kind ladder reads, and `Read` already reaches
+`references/ticket-kind.md`. The comment and the transition happen later, behind the gate.)
 
-Key invariant: **`/engineer-agent review-queue` (terminal) and `/engineer-agent execute` (remote) both delegate to the shared `execute-item` skill** — the single source of truth for what approving an item does. Two typed exceptions: `qa-test-plan` is interactive-only and is refused on the remote path; and an approved `ticket` on the remote path is handled by the listener's confined worktree implementation (above) rather than by `execute-item` — `implement-ticket` opens the draft PR itself. `execute-item`'s own `ticket` case is the *finisher* for the interactive/manual path, creating a draft PR from an **already-implemented, pushed branch** (it writes no code). (The `generate-qa` skill, when the app is reachable at `qa.base_url`, also runs its generated script and fixes failing scripted tests in place — fixing test defects but leaving genuine code-bug failures as reported findings, never demoting them to the manual checklist; best-effort, it skips execution and reports when the app is unreachable.) `scripts/lib-ntfy.sh` is the shared config reader sourced by `notify.sh` and `approval-listener.sh`.
+Key invariant: **`/engineer-agent review-queue` (terminal) and `/engineer-agent execute` (remote) both delegate to the shared `execute-item` skill** — the single source of truth for what approving an item does. Three typed exceptions: `qa-test-plan` is interactive-only and is refused on the remote path; an approved `ticket` on the remote path is handled by the listener's confined worktree implementation (above) rather than by `execute-item` — `implement-ticket` opens the draft PR itself; and an approved `ticket-investigation` is likewise handled by the listener's confined **read-only** investigation (`run_ticket_investigation`) — `investigate-ticket` posts the ticket comment itself. `execute-item`'s own `ticket-investigation` case is the *finisher* for the interactive path: it posts an **already-written** `## Findings` section and refuses if there isn't one. `execute-item`'s own `ticket` case is the *finisher* for the interactive/manual path, creating a draft PR from an **already-implemented, pushed branch** (it writes no code). (The `generate-qa` skill, when the app is reachable at `qa.base_url`, also runs its generated script and fixes failing scripted tests in place — fixing test defects but leaving genuine code-bug failures as reported findings, never demoting them to the manual checklist; best-effort, it skips execution and reports when the app is unreachable.) `scripts/lib-ntfy.sh` is the shared config reader sourced by `notify.sh` and `approval-listener.sh`.
 
 **Security:** on public `ntfy.sh` a topic name is effectively a password (the `command_topic` can trigger Slack posts / PR creation). Use high-entropy names, set `auth_token`, and/or self-host via `server`. The listener also defends in depth: it only accepts `approve`/`reject`, only item ids matching `^[A-Za-z0-9._-]+$`, and only acts on items still in `queue/drafts/` (idempotent via `state/ntfy-seen.yaml`).
 
