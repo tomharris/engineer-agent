@@ -195,6 +195,19 @@ Items enter the queue either via polling (`/engineer-agent poll` or the cron) or
 
 Files move through: `~/.local/share/engineer-agent/queue/incoming/` → `queue/drafts/` → `queue/completed/` or `queue/rejected/`
 
+**Invariant: at most one item per `(type, source_id)`.** `references/queue-reconciliation.md` is the
+rule every poller follows to uphold it — skip / update-in-place / create, one branch each — and
+`scripts/queue-dedup-check.sh` is the executable check, run automatically at the end of each
+`cron-poll.sh`. A duplicate is otherwise invisible: queue filenames carry a `{YYYYMMDD-HHmmss}`
+minted at write time, so a second copy of a ticket never collides with the first — it just sits
+alongside it and the human reviews (or implements) the same work twice.
+
+Terminal state (`completed/`, `rejected/`) is **absorbing** for pollers. This is not fussiness: the
+previous "re-queue anything updated since last_checked" rule was self-sustaining, because
+engineer-agent recording its own findings as a Jira comment bumps `updated`, which re-queued the
+ticket it had just completed, which produced another comment. `add-ticket` is the deliberate
+human-only override.
+
 `incoming/` is for items that are detected but not yet drafted; a skill drafts them and moves
 them to `drafts/`. Skills that compose the full `## Draft Response` in the same run that
 discovers the item (`audit-code`) write directly to `drafts/` as `status: drafted` instead —

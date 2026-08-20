@@ -43,8 +43,14 @@ Call `mcp__slite__search-notes` to search for documents.
 Filter results for documents that:
 - Have labels matching `slite.doc_labels` (e.g., "needs-review")
 - Were updated after `projects.<slug>.slite.last_checked`
-- Are not already in `projects.<slug>.slite.seen_docs`
-- Don't already exist in any queue directory
+- Pass reconciliation per `${CLAUDE_PLUGIN_ROOT}/references/queue-reconciliation.md` (fall back to
+  `{this-skill-dir}/../../references/queue-reconciliation.md`) — a doc whose `source_id` sits in
+  `completed/` or `rejected/` is skipped unconditionally, and one already in `incoming/`/`drafts/`
+  is never written a second time. Note the interaction with the `last_checked` filter above:
+  **posting review comments back to the doc updates it**, so without this the doc you just reviewed
+  reappears every poll.
+- `projects.<slug>.slite.seen_docs` is a cheap pre-filter only — not authoritative, and a miss does
+  not license a write
 
 For each matching document, call `mcp__slite__get-note` with the document ID to fetch the full content.
 

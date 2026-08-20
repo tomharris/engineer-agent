@@ -51,8 +51,13 @@ For each repo in `projects.<slug>.github.repos`:
 2. Filter results:
    - Only PRs where review is requested from `review_requested_for`
    - Exclude PRs with any label in `ignore_labels`
-   - Exclude PRs whose `source_id` (`{owner}/{repo}#{number}`) already exists in any queue file (check with Glob across all queue subdirectories for files containing that source_id)
-   - Exclude PRs already in `projects.<slug>.github.seen_prs`
+   - Reconcile against the queue per `${CLAUDE_PLUGIN_ROOT}/references/queue-reconciliation.md`
+     (fall back to `{this-skill-dir}/../../references/queue-reconciliation.md`). In particular, a
+     `source_id` already in `completed/` or `rejected/` is **skipped unconditionally** — do not
+     re-queue a PR because it picked up new commits or comments; that is what makes the loop
+     self-sustaining. Never write a second file for a `source_id` already present.
+   - `projects.<slug>.github.seen_prs` is a cheap pre-filter only — not authoritative, and a miss
+     does not license a write
 
 3. For PRs with more than `agent.max_pr_files` changed files (default 50), skip and log a warning.
 

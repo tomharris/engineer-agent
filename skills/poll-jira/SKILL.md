@@ -110,11 +110,23 @@ For each unique Jira project key in the map:
 
 For each ticket returned from Phase 1:
 
-#### 5a. Check Global Dedup
+#### 5a. Reconcile Against the Queue
 
-- Exclude tickets whose `source_id` already exists in any queue file (check all queue directories via Glob)
+Read `${CLAUDE_PLUGIN_ROOT}/references/queue-reconciliation.md` and follow it verbatim (same path
+resolution as the routing ladder below — fall back to
+`{this-skill-dir}/../../references/queue-reconciliation.md` if the env var is unset). It decides,
+per ticket, whether to **skip**, **update an existing item in place**, or **create a new one**, and
+it is shared with every other poller. Do not re-derive those rules here.
 
-Also skip tickets already in `projects.<slug>.jira.seen_tickets` for **every** watcher of this Jira project key (unless the ticket has new comments or status changes since the last poll).
+`projects.<slug>.jira.seen_tickets` is a cheap pre-filter only: a hit lets you skip fetching detail,
+but it is **not** authoritative, and a miss does **not** license a write. Run the reconciliation
+lookup either way.
+
+> ⚠️ **Do not re-queue a ticket because it has new comments or a status change.** That rule used to
+> live here, and it is self-triggering: engineer-agent recording its own findings as a Jira comment
+> bumps `updated`, which re-queues the ticket it just completed, which produces another comment.
+> Terminal state is **absorbing** — see the reference. A genuinely reopened ticket comes back via
+> `/engineer-agent add-ticket {KEY}`, which is explicit and human.
 
 #### 5b. Route
 
@@ -235,10 +247,19 @@ Update `~/.local/share/engineer-agent/state/last-poll.yaml`:
    — use the caller-supplied timestamp verbatim if one was given (the cron passes one), otherwise the
    current ISO time
 2. For each routed ticket, append the ticket key to `projects.<slug>.jira.seen_tickets`
-3. For unrouted tickets, do NOT add to any project's `seen_tickets` (they'll be checked again on next poll until assigned)
+3. For unrouted tickets, do NOT add to any project's `seen_tickets` — they are re-examined on the
+   next poll until assigned. **That re-examination updates the existing `incoming/` file in place**
+   (queue-reconciliation.md), so it does not produce a second item for the same ticket. This is the
+   pairing that previously duplicated: the ticket was correctly re-checked, then incorrectly written
+   to a new timestamped filename.
 
 ### 8. Report
 
-Report: "Found N new Jira tickets across M Jira projects. R routed, U unrouted."
+Report: "Found N new Jira tickets across M Jira projects. R routed, U unrouted, S skipped (already
+handled), X unchanged."
+
+If `S > 0`, add the ids so a wrongly-absorbed ticket stays visible: "Skipped (terminal): WIRE-1234,
+WIRE-1235." Never report a skip as merely "0 new" — a poll that hides six already-handled tickets
+looks identical to a broken poll.
 
 If there are unrouted items: "Run `/engineer-agent review-queue` to assign unrouted tickets to projects."

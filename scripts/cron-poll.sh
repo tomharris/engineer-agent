@@ -358,4 +358,33 @@ else
   fi
 fi
 
+# Queue invariant: at most one item per (type, source_id). Unlike the receipt above this is a
+# MEASUREMENT, not an attestation — it reads the queue the poll actually produced, so it holds even
+# if the model misreports what it did. That distinction is the whole point: a duplicate is invisible
+# otherwise, because queue filenames carry a fresh {YYYYMMDD-HHmmss} minted at write time and so a
+# second copy of a ticket never collides with the first. It just sits there, and the human reviews
+# (or implements) the same work twice.
+#
+# Two spec contradictions produced exactly that, and one of them was self-sustaining: re-queueing
+# anything "updated since last_checked" fires for tickets engineer-agent itself touched, so posting
+# findings as a Jira comment re-queued the ticket that had just been completed, which produced
+# another comment. See references/queue-reconciliation.md.
+#
+# Advisory: a duplicate is a correctness bug in the poll, not a reason to fail the cron, and it
+# self-heals once the redundant copy is rejected. Normal priority — it should not wake anyone.
+DUP_OUT="$("${PLUGIN_ROOT}/scripts/queue-dedup-check.sh" 2>&1)" || DUP_RC=$?
+DUP_RC="${DUP_RC:-0}"
+if [ "$DUP_RC" -eq 1 ]; then
+  printf '%s\n' "$DUP_OUT" >> "$LOG_FILE"
+  echo "WARN: queue has duplicate items — see references/queue-reconciliation.md" >> "$LOG_FILE"
+  DUP_IDS="$(printf '%s\n' "$DUP_OUT" | awk '/^  [^ ]/ { print $1 }' | paste -sd, - | cut -c1-160)"
+  "${PLUGIN_ROOT}/scripts/notify.sh" \
+    --title 'engineer-agent: duplicate queue items' \
+    --message "Poll produced duplicate queue item(s): ${DUP_IDS:-see log}. Reject the redundant copy; keep the one a human has acted on." \
+    --priority normal --tags warning --fyi >> "$LOG_FILE" 2>&1 || true
+elif [ "$DUP_RC" -ne 0 ]; then
+  # rc 2 = queue dir missing / bad usage. Worth a log line, not a push.
+  echo "WARN: queue-dedup-check could not run (exit ${DUP_RC}): ${DUP_OUT}" >> "$LOG_FILE"
+fi
+
 echo "--- Poll finished at $(date -u +%Y-%m-%dT%H:%M:%SZ) ---" >> "$LOG_FILE"

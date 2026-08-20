@@ -75,16 +75,29 @@ For each unique `owner/repo` key in the map:
 
 For each issue returned from Phase 1:
 
-#### 5a. Check Global Dedup
+#### 5a. Reconcile Against the Queue
 
 - **Recency filter:** if `agent.max_issue_age_days` is set and greater than 0, exclude issues whose
   `updatedAt` is older than that many days before now. This structurally ignores a multi-year
   assigned backlog (e.g. hundreds of stale issues in a shared tracker) rather than requiring
   `seen_issues` to be pre-seeded — a first poll against such a repo would otherwise queue the entire
   backlog and can exhaust the run's budget. Absent or `0` ⇒ no age limit (all issues considered).
-- Exclude issues whose `source_id` (e.g. `"myorg/my-app#45"`) already exists in any queue file (check all queue directories via Glob)
-- Exclude issues whose `source_id` is already in **every** watching project's `projects.<slug>.github_issues.seen_issues`
-- Include issues that were previously seen but have `updatedAt` newer than the repo's `last_checked` (re-queue for updated context) — provided they also pass the recency filter above
+- For every issue that survives the recency filter, read
+  `${CLAUDE_PLUGIN_ROOT}/references/queue-reconciliation.md` and follow it verbatim (same path
+  resolution as the routing ladder below). It decides, per issue, whether to **skip**, **update an
+  existing item in place**, or **create a new one**. Do not re-derive those rules here.
+- `projects.<slug>.github_issues.seen_issues` is a cheap pre-filter only: a hit lets you skip
+  fetching detail, but it is **not** authoritative, and a miss does **not** license a write. Run the
+  reconciliation lookup either way.
+
+> ⚠️ **Do not re-queue an issue just because `updatedAt` is newer than `last_checked`.** This file
+> used to say *"Include issues that were previously seen but have `updatedAt` newer than the repo's
+> `last_checked` (re-queue for updated context)"* — which directly contradicted the exclusion above
+> it, and won for any touched issue. It is also self-triggering: engineer-agent commenting on an
+> issue bumps `updatedAt`, which re-queues the issue it just finished, which produces another
+> comment. Terminal state is **absorbing** — see the reference. Refreshing stale context is handled
+> by the in-place update branch, which never mints a second file. A genuinely reopened issue comes
+> back via `/engineer-agent add-ticket {owner}/{repo}#{number}`, which is explicit and human.
 
 #### 5b. Route
 
@@ -201,10 +214,16 @@ Update `~/.local/share/engineer-agent/state/last-poll.yaml`:
    use the caller-supplied timestamp verbatim if one was given (the cron passes one), otherwise the
    current ISO time
 2. For each routed issue, append its `source_id` to `projects.<slug>.github_issues.seen_issues`
-3. For unrouted issues, do NOT add to any project's `seen_issues` (they'll be checked again on next poll until assigned)
+3. For unrouted issues, do NOT add to any project's `seen_issues` — they are re-examined on the next
+   poll until assigned. **That re-examination updates the existing `incoming/` file in place**
+   (queue-reconciliation.md), so it does not produce a second item for the same issue.
 
 ### 8. Report
 
-Report: "Found N new GitHub issues across M repos. R routed, U unrouted."
+Report: "Found N new GitHub issues across M repos. R routed, U unrouted, S skipped (already
+handled), X unchanged."
+
+If `S > 0`, add the ids so a wrongly-absorbed issue stays visible: "Skipped (terminal):
+myorg/my-app#45." Never report a skip as merely "0 new".
 
 If there are unrouted items: "Run `/engineer-agent review-queue` to assign unrouted issues to projects."

@@ -68,7 +68,11 @@ For each channel in the project's `slack.channels`:
    - Only messages with a Slack timestamp newer than `projects.<slug>.slack.last_checked_ts`
    - Exclude bot messages if `slack.ignore_bots` is true
    - Exclude messages that already have a reply from the configured user (check thread replies)
-   - Exclude messages whose `source_id` (channel + timestamp) already exists in any queue file
+   - Reconcile against the queue per `${CLAUDE_PLUGIN_ROOT}/references/queue-reconciliation.md`
+     (fall back to `{this-skill-dir}/../../references/queue-reconciliation.md`): a `source_id`
+     (channel + timestamp) already present anywhere in the queue is never written twice, and one
+     already in `completed/` or `rejected/` is skipped unconditionally — a thread that gets more
+     replies after you answered it must not re-enter the queue
 
 3. For each matching message, read the thread context via
    `spy thread <channel_id> <ts> --json -w <workspace>` (use the message's `ts`, or its
