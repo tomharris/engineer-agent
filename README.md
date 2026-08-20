@@ -7,6 +7,7 @@ A Claude Code plugin that automates senior software engineer tasks with an appro
 - **PR Reviews** — Structured code reviews with severity levels (critical/important/suggestion)
 - **Slack Q&A** — Drafts answers to questions in configured channels
 - **Ticket Implementation** — Implements tickets (Jira or GitHub Issues) on feature branches, opens draft PRs
+- **Spikes, Decisions & Tasks** — Investigation-shaped tickets deliver a cited findings document posted as a **comment on the ticket** (plus a local archive), instead of a branch and a PR. Read-only: no code, no PR, no QA
 - **Doc Reviews** — Reviews Slite design documents with inline comments
 - **Spec Refinement** — Analyzes PM feature specs and drafts clarifying questions
 - **Ticket Refinement** — Analyzes existing tickets for scope clarity, feasibility, testability, and Fibonacci sizing
@@ -78,6 +79,12 @@ agent:
     mcp:                                  # method: mcp-proxy only
       server: "https://mcp-proxy.anthropic.com/v1/mcp"
       server_id: "mcpsrv_..."             # your Slack connector's mcpsrv id
+  investigation:                          # which tickets deliver a DOCUMENT instead of code
+    jira_types: ["Spike", "Decision", "Task"]   # ⚠ "Task" is ON by default — narrow it if your
+                                                #   Jira uses Task for ordinary code work
+    github_labels: ["spike", "research", "investigation", "decision", "adr", "rfc", "discovery"]
+    title_keywords: ["spike", "decision", "adr", "rfc", "investigate", "research",
+                     "evaluate", "compare", "assess", "determine"]
   autonomy:
     auto_execute: ["draft-pr"]            # action tiers allowed to run without approval
   notify:                                 # optional — omit to disable push notifications
@@ -121,6 +128,11 @@ projects:
     exec:                                 # optional — only for remote (ntfy) ticket approval
       allowed_commands: ["bin/rails", "bin/rspec", "bin/srb", "bundle"]  # build/test allowlist for the
                                           # confined headless coding session; omit ⇒ remote ticket approval refused
+    investigation:                        # optional — overrides agent.investigation for this project
+      jira_types: ["Spike", "Decision"]   #   (REPLACES the list, so you can narrow it — e.g. drop Task)
+      on_complete_status: ""              # Jira status to move the ticket to after a successful
+                                          # findings comment; empty ⇒ no transition, and the
+                                          # transition MCP verbs aren't even granted
 
   # Example: project using GitHub Issues
   my-frontend:
@@ -182,6 +194,36 @@ falls through to the next, and the last tier is always you:
 | **Keywords** | `routing.keywords` / `routing.paths` hints (below). |
 | **Inference** | Semantic match of the ticket against `routing.description` hints (below). |
 | **Unrouted** | Nothing resolved to one project → marked **unrouted** and parked in the review queue for you to assign. |
+
+#### Spikes, decisions, and tasks — what a ticket *delivers*
+
+Routing decides **which project** a ticket belongs to. A second, independent ladder decides **what it
+delivers**: a code change (branch → draft PR → QA) or a findings document (a `## Findings` comment on
+the ticket + a local archive under `~/.local/share/engineer-agent/investigations/`). Full rules in
+[`references/ticket-kind.md`](references/ticket-kind.md).
+
+| Tier | Basis | Recorded as |
+|---|---|---|
+| **Manual** | `add-ticket --investigate` / `--implement` | `manual` |
+| **Jira issue type** | the type name is in `investigation.jira_types` — **terminal for Jira** | `jira-issuetype` |
+| **GitHub label** | a label is in `investigation.github_labels` (after a `type:`/`kind/` strip) | `github-label` |
+| **Title keyword** | GitHub only: `Spike:` / `[Decision]` / a leading `Investigate…` | `title-keyword` |
+| **Default** | nothing matched ⇒ code work | `default` |
+
+Because a Jira issue always has a type, that tier always answers and title matching never runs for
+Jira — so a Story titled *"Add spike protection to the rate limiter"* stays code work. For GitHub,
+the title tier requires a **form** (a delimited prefix, or a leading imperative verb), never the bare
+presence of a keyword.
+
+> **`Task` is a trigger by default.** In many Jira projects `Task` is the catch-all for ordinary code
+> work. If that's yours, narrow the list — globally under `agent.investigation.jira_types` or per
+> project — to `["Spike", "Decision"]`. Until you do, such tickets are drafted as investigations; the
+> approval gate shows you an **Investigation Plan** saying "no branch, no PR" before anything runs.
+
+Approving an investigation runs a **read-only** confined session: it reads the code and the git
+history, writes a document whose every claim carries a `file:line` citation, posts it as one comment
+on the ticket, archives it locally, and optionally transitions the ticket. It never creates a branch,
+opens a PR, or generates a QA plan. Review with `/engineer-agent review-queue investigation`.
 
 #### Routing hints (optional)
 
@@ -247,7 +289,7 @@ Fetch new work items from configured sources.
 
 New items are detected, drafted, and placed in the review queue.
 
-### `/engineer-agent add-ticket <ref> [--project <slug>] [--no-draft]`
+### `/engineer-agent add-ticket <ref> [--project <slug>] [--no-draft] [--investigate|--implement]`
 
 Manually add a Jira ticket or GitHub issue to the implementation queue, bypassing poll filters. Useful for tickets outside your configured assignee/components/labels.
 
@@ -258,6 +300,8 @@ Manually add a Jira ticket or GitHub issue to the implementation queue, bypassin
 /engineer-agent add-ticket myorg/my-app#45
 /engineer-agent add-ticket ENG-789 --project my-api                 # Skip routing, force project
 /engineer-agent add-ticket ENG-789 --no-draft                       # Queue without generating a draft
+/engineer-agent add-ticket ENG-789 --investigate                    # Force the findings-document deliverable
+/engineer-agent add-ticket ENG-789 --implement                      # Force code work (escape hatch for a wrong guess)
 ```
 
 The command fetches the ticket, resolves a project using the same routing ladder as polling (see [Ticket Routing](#ticket-routing)), and writes a queue item identical in shape to a polled one. Because it's interactive, it prompts you to pick a project instead of marking the ticket unrouted — but only where the ladder genuinely can't tell, which should be rare. Active-queue dedup blocks adding a ticket already sitting in `incoming/` or `drafts/`, but completed/rejected tickets and `seen_tickets`/`seen_issues` state are bypassed so you can re-queue manually.
@@ -271,12 +315,18 @@ Review pending drafts and approve, edit, or reject them.
 /engineer-agent review-queue pr                 # Show only PR reviews
 /engineer-agent review-queue qa                 # Show only QA test plans
 /engineer-agent review-queue codify             # Show only codify candidates
+/engineer-agent review-queue investigation      # Show only Spike/Decision findings plans
 /engineer-agent review-queue --project my-api   # Show only my-api items
 /engineer-agent review-queue --all              # Include completed/rejected items
 ```
 
+Filters match the frontmatter `type` **exactly, not as a prefix** — so `ticket` means code-work
+tickets only, and `investigation` means `ticket-investigation`. Use `--all` to see both.
+
+
 For each item you can:
-- **Approve** — post the response (PR review, Slack message, draft PR, doc comments)
+- **Approve** — post the response (PR review, Slack message, draft PR, doc comments, or a findings
+  comment on a ticket for an investigation)
 - **Edit** — modify the draft inline, then approve
 - **Reject** — discard with a reason
 - **Skip** — leave for later
@@ -441,12 +491,19 @@ discoveries become compounding, reusable assets. Review via `/engineer-agent rev
 The end-to-end loop these commands are designed to chain into, per ticket:
 
 ```
+# code work (Story, Bug, …)
 /engineer-agent:implement-ticket <ticket>   # branch, implement iteratively, self-review, draft PR
         │  (in parallel)
         └─ /security-review                  # security pass on the diff
 /engineer-agent:qa <ticket>                  # generate + run QA test plan
 /engineer-agent:review-queue                 # approve/triage everything above
 /engineer-agent:codify --since last-week     # (weekly) fold learnings back into tooling
+
+# investigation work (Spike, Decision, Task) — short-circuits, no branch/PR/QA
+/engineer-agent:investigate-ticket <ticket>  # read-only research -> findings comment + archive
+/engineer-agent:review-queue investigation   # approve; posts the comment
+        └─ (if it turns out to be code work)
+           /engineer-agent add-ticket <ref> --implement   # re-queue on the code lane
 ```
 
 Each stage carries an **Intent block** (Goal / Key constraints / Definition of done /
@@ -489,6 +546,7 @@ Skills are auto-invoked during polling and processing:
 | `review-pr` | New PR detected | Generates structured review with severity levels |
 | `answer-slack` | New question detected | Drafts answer with confidence level |
 | `implement-ticket` | Ticket approved | Implements Jira or GitHub Issue on feature branch, runs tests, self-reviews the diff before the draft PR |
+| `investigate-ticket` | Spike/Decision/Task approved | Read-only research, then posts a cited `## Findings` document as a comment on the ticket + local archive |
 | `review-doc` | New doc detected | Reviews for accuracy, completeness, clarity |
 | `generate-standup` | On demand | Creates standup from yesterday's activity (all projects) |
 | `generate-digest` | `/engineer-agent digest` | Summarizes daily activity with metrics (all projects) |
@@ -593,7 +651,7 @@ highest installed version each time it starts. So after a `/plugin update`, **re
 (`launchctl kickstart -k gui/$UID/engineer-agent-listener` on macOS, `systemctl --user restart
 engineer-agent-listener` on Linux) to move onto the new version.
 
-By default the listener caps each headless approval at **$2.00**, or **$8.00** for `ticket` items (which run a full implementation). Tune via the `EA_EXECUTE_BUDGET_USD` / `EA_TICKET_BUDGET_USD` environment variables. The best-effort QA generation that follows a ticket (below) is a separate run with its own **$2.00** cap, tunable via `EA_QA_BUDGET_USD`.
+By default the listener caps each headless approval at **$2.00**, **$8.00** for `ticket` items (which run a full implementation), or **$3.00** for `ticket-investigation` items (a read-only research session). Tune via the `EA_EXECUTE_BUDGET_USD` / `EA_TICKET_BUDGET_USD` / `EA_INVESTIGATE_BUDGET_USD` environment variables — note these are *not* baked into the service definition the way `CLAUDE_BIN` is, so a supervised listener ignores them. The best-effort QA generation that follows a ticket (below) is a separate run with its own **$2.00** cap, tunable via `EA_QA_BUDGET_USD`.
 
 **Approving a `ticket` from your phone** is special: it runs the whole `implement-ticket` coding session (branch → inline iterative implementation → self-review of the diff → draft PR) unattended, so it gets its own confined execution path instead of the read/post one every other type uses:
 
@@ -602,7 +660,17 @@ By default the listener caps each headless approval at **$2.00**, or **$8.00** f
 - **Deny-by-default:** a project with no `exec.allowed_commands` has remote ticket approval *refused* — you get a `⚠️ Failed` push telling you to configure it, and you implement the ticket interactively instead. Nothing runs unconfined. (The interactive terminal path never consults this list — you're present to approve.)
 - **QA test plan (best-effort):** after the draft PR ships, and only if the project has a `qa.base_url` configured, the listener runs a *second, separate* confined session that drafts a `qa-test-plan` for the new branch (you get a 🧪 FYI push and review it in the terminal with `/engineer-agent review-queue qa`). It's decoupled — if QA generation fails or `qa` isn't configured, the ticket still reports ✅ Done; a shipped PR is never re-flagged as failed. That session's allowlist adds `curl` (to run the generated scripts) and a Jira read verb but drops the build commands — QA writes no code.
 
-Claude Code's `Bash()` permissions match on command prefix, not working directory, so this is defense-in-depth ("medium" isolation), not a hard jail — keep `allowed_commands` tight and treat your `command_topic` as a password (below).
+**Approving a Spike / Decision / Task from your phone** takes a third path — a confined **read-only** session, because its deliverable is a comment, not a PR:
+
+- Same throwaway **git worktree** isolation, so findings are cited against a deterministic commit rather than whatever branch your checkout happens to be on.
+- The allowlist is read-only: `Read`/`Grep`/`Glob`, enumerated read-only `git` verbs, `gh issue view`/`gh issue comment`, and the Jira comment verb. **No build commands, no `curl`, no `gh pr *`, no broad `Bash(git *)`** — nothing that could write code or open a PR.
+- **No `exec.allowed_commands` needed.** An investigation runs no build commands, so it is never refused for lacking a build list — that deny-by-default rule applies to the code-writing path only.
+- **Transition verbs follow config.** They're granted only when `investigation.on_complete_status` is set; otherwise they're absent from the allowlist entirely, so an injected "move this to Done" has nothing to call.
+- **No QA afterwards** — QA tests a diff and there is none. That's structural (the QA step is only reachable from the implementation path), not a toggle.
+- **You approve a plan, not the posted text.** This is the one place that's true, and it's the honest cost of doing the research at approval time. The comment target is validated in plain bash and pinned in the prompt, and the run refuses to start if the ticket key is malformed — but a comment is still model-authored prose derived from untrusted ticket text. Approve investigations from the terminal (`/engineer-agent review-queue investigation`) if you'd rather read the findings first.
+- **It won't double-post.** A ticket comment is append-only, and the listener invites a retry when a run fails. So before launching it checks for an existing archive under `investigations/{key}-*.md`; if one exists, it completes the item without re-running rather than leaving a second document on the ticket.
+
+Claude Code's `Bash()` permissions match on command prefix, not working directory, so this is defense-in-depth ("medium" isolation), not a hard jail — keep `allowed_commands` tight and treat your `command_topic` as a password (below). MCP permission rules are weaker still: they can't be scoped to arguments, so the Jira comment verb is a capability over every issue your token can reach, and the prompt pin is the only scoping there is.
 
 As with cron, set `CLAUDE_BIN` to pick a specific Claude Code binary — e.g. `CLAUDE_BIN=/opt/claude/bin/claude scripts/install-listener.sh`. Since the supervised service does not inherit your shell environment, the installer bakes the install-time value into the systemd unit (`Environment=`) or launchd plist (`EnvironmentVariables`).
 
@@ -664,6 +732,7 @@ skills/
   review-pr/SKILL.md           PR review generation
   answer-slack/SKILL.md        Slack answer drafting
   implement-ticket/SKILL.md    Ticket implementation
+  investigate-ticket/SKILL.md  Spike/Decision investigation -> findings comment (read-only)
   review-doc/SKILL.md          Document review
   generate-standup/SKILL.md    Standup generation
   generate-digest/SKILL.md     Digest generation
@@ -676,6 +745,8 @@ skills/
   execute-item/SKILL.md        Shared approve/reject action logic (terminal + remote)
 references/
   routing-ladder.md            Shared ticket→project routing logic (poll-jira, poll-github-issues, add-ticket)
+  ticket-kind.md               Shared code-work vs investigation logic (same callers + review-queue)
+  queue-reconciliation.md      Shared skip/update/create rule every poller follows
 hooks/
   hooks.json                   Claude Code hook registrations (turn-completion pushes)
 scripts/
@@ -701,6 +772,7 @@ config/
     drafts/                    Items with drafted responses
     completed/                 Approved and posted
     rejected/                  Rejected with reason
+  investigations/              Archived findings docs from ticket-investigation items
   state/
     last-poll.yaml             Dedup timestamps and seen IDs (per project + per Jira project key)
     last-poll-receipt.yaml     Liveness receipt from the last cron poll (run_id, status, item count, skipped, errors)

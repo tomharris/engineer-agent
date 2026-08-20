@@ -27,7 +27,7 @@ Read `~/.local/share/engineer-agent/engineer.yaml`. Extract the `projects` map a
 Scan all queue directories for items from the current day (or since the last digest):
 
 **Completed items** (`~/.local/share/engineer-agent/queue/completed/`):
-- Count by type and by project (pr-review, slack-question, ticket, doc-review)
+- Count by type and by project (pr-review, slack-question, ticket, ticket-investigation, doc-review, …). Count `ticket` and `ticket-investigation` **separately** — they are different deliverables (a PR vs a findings comment), so collapsing them hides which kind of work actually shipped.
 - List each with title, source, and project
 
 **Rejected items** (`~/.local/share/engineer-agent/queue/rejected/`):

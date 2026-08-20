@@ -1,7 +1,7 @@
 ---
 name: poll-github-issues
 description: "Poll GitHub Issues for new or updated issues assigned to the user. Use this skill when checking GitHub Issues for work, or during an engineer-agent poll cycle."
-version: 2.0.0
+version: 2.1.0
 model: haiku
 ---
 
@@ -99,6 +99,12 @@ For each issue returned from Phase 1:
 > by the in-place update branch, which never mints a second file. A genuinely reopened issue comes
 > back via `/engineer-agent add-ticket {owner}/{repo}#{number}`, which is explicit and human.
 
+**The lookup spans BOTH ticket types — `ticket` and `ticket-investigation`.** They are one
+`source_id` namespace: at most one live item across the pair, and a terminal item of either type
+absorbs the other. Looking up only the type you are about to write lets a retitled issue mint a
+second item for work already completed, because the `(type, source_id)` key changed underneath the
+absorbing rule. See `references/ticket-kind.md` → "Deciding once".
+
 #### 5b. Route
 
 Read the routing ladder and apply it. Resolve its path from `${CLAUDE_PLUGIN_ROOT}` (set by the
@@ -116,7 +122,30 @@ Apply it with:
 The ladder returns either a routed slug with a `routing_method` (and `routing_rationale` when the
 method is `inferred`), or `_unrouted` with `matched_projects`.
 
-#### 5c. Create Queue Items Based on the Ladder's Result
+#### 5c. Classify the Deliverable
+
+Read the ticket-kind ladder and apply it. Resolve its path from
+`${CLAUDE_PLUGIN_ROOT}/references/ticket-kind.md`, falling back to
+`{this-skill-dir}/../../references/ticket-kind.md` if the env var is unset — **not** a bare relative
+path, for the same reason as the routing ladder above.
+
+Apply it with:
+- `ticket.title` = issue title
+- `ticket.labels` = the issue's label names (already fetched — the `--json` list at Phase 1 includes
+  `labels`, so **no new fetch field is needed here**)
+- `ticket.jira_issue_type` = empty (Tier 1 does not apply to GitHub)
+- `manual_kind` = absent
+- `project` = the slug 5b resolved
+
+`ticket.body` is deliberately **not** an input. The ladder returns `type`
+(`ticket` | `ticket-investigation`) plus `ticket_kind_method` and — when the method is
+`title-keyword` — `ticket_kind_rationale`.
+
+**Run this only for routed items.** An `_unrouted` item has no slug, so its per-project
+`investigation` overrides cannot resolve; leave `type: ticket` as a placeholder, write no
+`ticket_kind_*` fields, and let `review-queue` classify it at assignment time.
+
+#### 5d. Create Queue Items Based on the Ladder's Result
 
 **Routed** — create a file in `~/.local/share/engineer-agent/queue/incoming/` with `project: "{slug}"` and the `routing_method` the ladder returned, then proceed to generate a draft (see Step 6).
 
@@ -130,12 +159,14 @@ Do NOT generate a draft. The item stays in `incoming/` until the user assigns a 
 
 #### Queue Item Format
 
-**Filename:** `{YYYYMMDD-HHmmss}-ticket-gh-{number}.md`
+**Filename:** `{YYYYMMDD-HHmmss}-{type}-gh-{number}.md` — so an investigation is
+`…-ticket-investigation-gh-45.md`. The filename must carry the real type: CLAUDE.md's format is
+`{type}-{short-id}` and `review-queue`'s filter reads it.
 
 **Content:**
 ```yaml
 ---
-type: ticket
+type: "{ticket|ticket-investigation}"
 source: github
 source_url: "{issue_url}"
 source_id: "{owner}/{repo}#{number}"
@@ -148,6 +179,8 @@ ticket_key: "#{number}"
 github_labels: ["{label1}", "{label2}"]
 routing_method: "{single-candidate|prefix|filters|keyword|inferred}"
 routing_rationale: "{one line}"            # only when routing_method is "inferred"
+ticket_kind_method: "{manual|github-label|title-keyword|default}"   # omit for _unrouted items
+ticket_kind_rationale: "{one line}"        # only when ticket_kind_method is "title-keyword"
 matched_projects: ["{slug1}", "{slug2}"]   # only for _unrouted items
 ---
 
@@ -159,6 +192,7 @@ matched_projects: ["{slug1}", "{slug2}"]   # only for _unrouted items
 **Project:** {slug or "_unrouted"}
 **Labels:** {comma-separated list or "none"}
 **Routing:** {routing_method}{" — " + routing_rationale if inferred}
+**Deliverable:** {code change + draft PR | findings document posted as a comment on the issue} ({ticket_kind_method}{" — " + ticket_kind_rationale if title-keyword})
 **URL:** {issue_url}
 
 ### Description
@@ -176,11 +210,18 @@ For items with a resolved project (not `_unrouted`):
 
 1. Read the issue details
 2. Identify which repo this issue applies to from `projects.<project>.github.owner` and `repos`
-3. Derive a branch slug from the title: lowercase, replace non-alphanumeric characters with hyphens, truncate to 40 chars, strip trailing hyphens
-4. Draft a brief implementation plan (which files to change, approach)
+3. **Only for `type: ticket`** — derive a branch slug from the title: lowercase, replace
+   non-alphanumeric characters with hyphens, truncate to 40 chars, strip trailing hyphens. Skip this
+   for an investigation: there is no branch, and a slug computed and never used is exactly the kind
+   of leftover that gets pasted into a template later.
+4. Draft the plan **matching the item's `type`** — an implementation plan for `ticket`, an
+   investigation plan for `ticket-investigation`. Do **not** perform the investigation here: the
+   poller drafts the plan only, so a poll cycle never pays for research on an issue the human then
+   rejects, and the research happens once, under the approval's own budget cap inside its confined
+   read-only worktree.
 5. Move to `drafts/` with status `drafted`
 
-The `## Draft Response` section for tickets:
+**If `type` is `ticket` (code work):**
 
 ```markdown
 ## Draft Response
@@ -201,6 +242,33 @@ This ticket will be implemented iteratively in-session (plan → edit → test �
 Approving this item implements the changes on a feature branch, then opens a draft PR.
 ```
 
+**If `type` is `ticket-investigation` (findings document):**
+
+```markdown
+## Draft Response
+
+### Investigation Plan
+
+**Target repo:** {repo}
+**Question:** {the unknown to resolve or the decision to make, one sentence}
+**Where to look:** {2–5 files/dirs/subsystems, each with why}
+**History to check:** {commits/PRs likely to explain the current shape, if any}
+**Method:** read-only inspection — Read/Grep/Glob plus `git log`/`show`/`diff`/`blame`. No branch,
+no code changes, no build or test commands.
+**Deliverable:** a `## Findings` document (Question / Answer / Evidence with file:line citations /
+Open Questions / Next Steps{, plus Options + Recommendation for a decision}), posted as a comment
+on #{number} and archived under `~/.local/share/engineer-agent/investigations/`.
+
+### Action on Approval
+Approving this item runs a read-only investigation and **posts the findings as a comment on
+#{number}**, plus a local archive. **No branch, no PR, no QA test plan.**
+```
+
+> The two hardcoded lines in the code-work template — "implemented iteratively in-session … ~10
+> passes" and "implements the changes on a feature branch, then opens a draft PR" — were
+> unconditional prose before this fork existed. They are what the human reads at the approval gate,
+> so an investigation carrying them would win approval for an action that never happens.
+
 ### 7. Update State (always, even for zero items)
 
 Run this for **every repo queried**, regardless of how many issues were found — a repo with no new
@@ -220,7 +288,7 @@ Update `~/.local/share/engineer-agent/state/last-poll.yaml`:
 
 ### 8. Report
 
-Report: "Found N new GitHub issues across M repos. R routed, U unrouted, S skipped (already
+Report: "Found N new GitHub issues across M repos. R routed (of which I investigations), U unrouted, S skipped (already
 handled), X unchanged."
 
 If `S > 0`, add the ids so a wrongly-absorbed issue stays visible: "Skipped (terminal):

@@ -51,6 +51,18 @@ fi
 # the two shapes, and is reported as such.
 is_terminal_dir() { case "$1" in completed|rejected) return 0 ;; *) return 1 ;; esac; }
 
+# type_family — `ticket` and `ticket-investigation` are two shapes of the SAME work (code change vs
+# findings document; see references/ticket-kind.md). A ticket's kind can change between polls — an
+# issue type edited, a title retitled to "Spike: …" — and because the invariant is keyed on
+# (type, source_id), the naive rule then mints a rival live item for work already queued. Collapsing
+# them into one family name makes that visible.
+#
+# Applied ONLY among non-terminal items (see the family check below), never across a terminal one.
+# A completed investigation followed by a fresh implementation draft — the documented spike →
+# `add-ticket --implement` flow — is legitimate, and flagging it would leave the check permanently
+# red on the most likely real workflow, which is the crying-wolf failure the note above warns about.
+type_family() { case "$1" in ticket|ticket-investigation) echo "ticket" ;; *) echo "$1" ;; esac; }
+
 # rejected/ is the DISPOSAL path, so it does not count toward the invariant.
 #
 # Rejecting the redundant copy is exactly how a human resolves a duplicate. If rejected items
@@ -98,7 +110,8 @@ for dir in incoming drafts completed rejected; do
     typ="$(fm "$f" type)"
     [ -n "$typ" ] || typ="(untyped)"
     if counts_toward_invariant "$dir"; then live=1; else live=0; fi
-    rows="${rows}${typ}	${sid}	${dir}/${base}	${dir}	${live}
+    fam="$(type_family "$typ")"
+    rows="${rows}${typ}	${sid}	${dir}/${base}	${dir}	${live}	${fam}
 "
   done
 done
@@ -113,6 +126,26 @@ fi
 # of the key, not ignored.
 # Only field 5 == 1 (a non-rejected item) is counted; rejected copies are context, not violations.
 dup_keys="$(printf '%s' "$rows" | awk -F'\t' 'NF>=5 && $5==1 { c[$1"\t"$2]++ } END { for (k in c) if (c[k]>1) print k }' | sort)"
+
+# Family check — the reclassification duplicate the exact-type key above cannot see. Restricted to
+# LIVE, NON-TERMINAL dirs (incoming/, drafts/) on purpose: two live items for one source_id across
+# the {ticket, ticket-investigation} pair is always the poller failing to update in place, whereas a
+# terminal item plus a live one of the other type is the legitimate spike -> implement handoff.
+# Keys already reported by the exact check are excluded so a duplicate is never printed twice.
+dup_fam_keys="$(printf '%s' "$rows" \
+  | awk -F'\t' 'NF>=6 && $5==1 && $4!="completed" && $4!="rejected" { c[$6"\t"$2]++ } END { for (k in c) if (c[k]>1) print k }' \
+  | sort)"
+if [ -n "$dup_fam_keys" ] && [ -n "$dup_keys" ]; then
+  remaining_fam=""
+  while IFS= read -r fkey; do
+    [ -n "$fkey" ] || continue
+    printf '%s' "$dup_keys" | grep -Fqx -- "$fkey" || remaining_fam="${remaining_fam}${fkey}
+"
+  done <<EOF
+$dup_fam_keys
+EOF
+  dup_fam_keys="$(printf '%s' "$remaining_fam" | sed '/^$/d')"
+fi
 
 # --- Baseline ---------------------------------------------------------------------------------
 # Pre-existing duplicates cannot always be cleaned. If a QA plan really was completed three times,
@@ -132,8 +165,9 @@ if [ "$UPDATE_BASELINE" -eq 1 ]; then
     echo "# These are historical duplicates that cannot be cleaned without falsifying the record."
     echo "# A pair listed here is NOT checked. Remove a line to re-enable checking for it."
     printf '%s\n' "$dup_keys"
+    [ -n "$dup_fam_keys" ] && printf '%s\n' "$dup_fam_keys"
   } > "$BASELINE_FILE"
-  n="$(printf '%s' "$dup_keys" | grep -c . || true)"
+  n="$(printf '%s\n%s' "$dup_keys" "$dup_fam_keys" | grep -c . || true)"
   say "queue-dedup-check: baseline updated — ${n} pair(s) recorded in ${BASELINE_FILE#"$EA_AGENT_DIR"/}."
   exit 0
 fi
@@ -155,13 +189,28 @@ $dup_keys
 EOF
   dup_keys="$(printf '%s' "$remaining" | sed '/^$/d')"
 fi
+if [ -f "$BASELINE_FILE" ] && [ -n "$dup_fam_keys" ]; then
+  remaining=""
+  while IFS= read -r key; do
+    [ -n "$key" ] || continue
+    if grep -v '^[[:space:]]*#' "$BASELINE_FILE" 2>/dev/null | grep -Fqx -- "$key"; then
+      suppressed=$((suppressed + 1))
+    else
+      remaining="${remaining}${key}
+"
+    fi
+  done <<EOF
+$dup_fam_keys
+EOF
+  dup_fam_keys="$(printf '%s' "$remaining" | sed '/^$/d')"
+fi
 
 suppressed_note=""
 if [ "$suppressed" -gt 0 ]; then
   suppressed_note=" (${suppressed} baselined pair(s) suppressed — see ${BASELINE_FILE#"$EA_AGENT_DIR"/})"
 fi
 
-if [ -z "$dup_keys" ]; then
+if [ -z "$dup_keys" ] && [ -z "$dup_fam_keys" ]; then
   total="$(printf '%s' "$rows" | grep -c . || true)"
   say "queue-dedup-check: ok — ${total} item(s), no duplicate (type, source_id).${suppressed_note}"
   exit 0
@@ -170,25 +219,50 @@ fi
 count=0
 say "queue-dedup-check: FAILED — duplicate queue items found."
 say ""
-while IFS="$(printf '\t')" read -r typ sid; do
-  [ -n "$sid" ] || continue
+
+# report_group KEY MODE — print one duplicated key and the files behind it.
+# MODE `exact` matches rows on field 1 (`type`); MODE `family` matches on field 6 (`type_family`)
+# and considers only non-terminal rows, mirroring exactly how each key set was computed. Getting
+# this wrong is silent: the key would be found but no row would match it, so the check would report
+# a duplicate and then list zero files.
+report_group() {
+  local key="$1" mode="$2" sid typ terminal_hit="" matched=0
+  typ="${key%%$(printf '\t')*}"
+  sid="${key#*$(printf '\t')}"
   count=$((count + 1))
-  say "  ${sid}  (type: ${typ})"
-  terminal_hit=""
-  while IFS="$(printf '\t')" read -r rtyp rsid rpath rdir rlive; do
-    [ "$rtyp" = "$typ" ] && [ "$rsid" = "$sid" ] || continue
+  if [ "$mode" = "family" ]; then
+    say "  ${sid}  (type family: ${typ} — ticket / ticket-investigation)"
+  else
+    say "  ${sid}  (type: ${typ})"
+  fi
+  while IFS="$(printf '\t')" read -r rtyp rsid rpath rdir rlive rfam; do
+    [ "$rsid" = "$sid" ] || continue
+    if [ "$mode" = "family" ]; then
+      [ "$rfam" = "$typ" ] || continue
+      is_terminal_dir "$rdir" && continue
+    else
+      [ "$rtyp" = "$typ" ] || continue
+    fi
+    matched=$((matched + 1))
     if [ "$rlive" != "1" ]; then
       say "    - ${rpath}   (rejected — not counted)"
     elif is_terminal_dir "$rdir"; then
       say "    - ${rpath}   <- already terminal (${rdir})"
       terminal_hit="$rdir"
     else
-      say "    - ${rpath}"
+      say "    - ${rpath}   (type: ${rtyp})"
     fi
   done <<EOF
 $(printf '%s' "$rows")
 EOF
-  if [ -n "$terminal_hit" ]; then
+  if [ "$matched" -eq 0 ]; then
+    say "    - (no rows matched this key — this is a bug in queue-dedup-check.sh, not in the queue)"
+  elif [ "$mode" = "family" ]; then
+    say "    => one ticket has TWO live items with different deliverables. A kind reclassification"
+    say "       (issue type edited, or retitled to 'Spike: …') must UPDATE the existing incoming/"
+    say "       item in place — including its type — never mint a rival. See"
+    say "       references/ticket-kind.md -> 'Deciding once'."
+  elif [ -n "$terminal_hit" ]; then
     say "    => a ${terminal_hit} item was re-queued. Terminal state must be absorbing:"
     say "       the poller should have skipped this source_id outright."
   else
@@ -196,8 +270,20 @@ EOF
     say "       updated the existing file in place rather than minting a new one."
   fi
   say ""
+}
+
+while IFS= read -r key; do
+  [ -n "$key" ] || continue
+  report_group "$key" exact
 done <<EOF
 $dup_keys
+EOF
+
+while IFS= read -r key; do
+  [ -n "$key" ] || continue
+  report_group "$key" family
+done <<EOF
+$dup_fam_keys
 EOF
 
 say "${count} duplicated source_id(s).${suppressed_note} See references/queue-reconciliation.md for"

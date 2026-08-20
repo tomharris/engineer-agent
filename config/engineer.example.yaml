@@ -12,6 +12,43 @@ agent:
   digest_channel: "C98765432"
   cron_interval_minutes: 15
 
+  # Which tickets deliver a DOCUMENT instead of code. A Spike/Decision/research-shaped ticket gets a
+  # `## Findings` comment posted on the ticket plus a local archive under
+  # ~/.local/share/engineer-agent/investigations/ — no branch, no PR, no QA. Everything else is code
+  # work, exactly as before. Detection is a ladder: manual --investigate/--implement flag → Jira
+  # issue type → GitHub label → title keyword → default (code work). Full rules, including the
+  # title-matching forms, live in references/ticket-kind.md.
+  #
+  # The three lists REPLACE the shipped defaults per key — they are NOT merged, so you can narrow
+  # them, not only extend them (narrowing is what fixes a false positive). Omitting a key keeps the
+  # shipped default; an explicitly EMPTY list ([]) DISABLES that tier. Per-project overrides at
+  # projects.<slug>.investigation.* replace these the same way.
+  investigation:
+    # Jira issue type NAMES (not ids), matched case-insensitively as a whole string. This tier is
+    # TERMINAL for Jira: a Jira issue always has a type, so a Jira ticket never reaches the title
+    # tier below.
+    #
+    # ⚠ "Task" is shipped ON, and it is the one aggressive default here. In many Jira projects Task
+    # is the default catch-all type for ordinary code work, so on such an instance a routine
+    # implementation ticket is drafted as an investigation — and if approved unread, gets a findings
+    # comment where you expected a PR. The approval gate shows you an "Investigation Plan" that says
+    # "no branch, no PR" first, so it is visible; but if your Task means code work, narrow this list
+    # (globally here, or per project below) to ["Spike", "Decision"].
+    jira_types: ["Spike", "Decision", "Task"]
+    # Label names, case-insensitive, compared after stripping a `type:`/`type/`/`kind:`/`kind/`
+    # prefix, so `type: spike` and `kind/spike` both match. Whole label, never a substring —
+    # otherwise `spike-protection` and `decision-log` would fire too. "question" is NOT shipped: it
+    # is used too loosely on GitHub to decide a deliverable.
+    github_labels: ["spike", "research", "investigation", "decision", "adr", "rfc", "discovery"]
+    # Matched against the TITLE only (never the body), and only in two low-false-positive forms:
+    #   1. a delimited prefix   — "Spike: cache invalidation", "[Decision] queue backend"
+    #   2. a leading imperative — "Investigate why checkout 500s", "Compare Sidekiq vs SQS"
+    # Never as a bare noun mid-title, which is why "Add spike protection to the rate limiter" stays
+    # code work. Reachable for GitHub issues only (Jira is decided by issue type). Set to [] to
+    # switch the title tier off and trust tracker metadata only.
+    title_keywords: ["spike", "decision", "adr", "rfc", "investigate", "research",
+                     "evaluate", "compare", "assess", "determine"]
+
   # Slack access. Optional block — omit it and the agent assumes method "spy" with `spy` on
   # PATH and a single signed-in workspace. Two backends, selected by `method`:
   #
@@ -110,6 +147,22 @@ projects:
     # (The interactive terminal path never uses this list — a human is present to approve.)
     exec:
       allowed_commands: ["bin/rails", "bin/rspec", "bin/srb", "bundle"]  # e.g. Rails; adjust per repo
+    # Investigation deliverable — OPTIONAL. Overrides agent.investigation.* for this project (per
+    # key, REPLACING the list rather than merging), and says what happens to the ticket after the
+    # findings comment is posted. Omit the whole block and the global lists apply with no transition.
+    # NOTE: an investigation needs NO exec.allowed_commands — it runs no build commands, so the
+    # deny-by-default refusal above does not apply to it. A doc-only ticket is never refused for
+    # lacking a build list.
+    investigation:
+      on_complete_status: ""       # optional: Jira status to move the ticket to AFTER a successful
+                                   # comment. Best-effort — a failed transition is reported but never
+                                   # un-completes the investigation, and the comment is NEVER
+                                   # re-posted to retry it. Empty/absent = no transition, and the
+                                   # transition MCP verbs are not even added to the confined run's
+                                   # allowlist. Jira only; ignored for GitHub Issues.
+      # jira_types: ["Spike", "Decision"]     # this project's "Task" means real code work
+      # github_labels: ["spike", "question"]
+      # title_keywords: []                    # titles here are noisy — trust the tracker only
     github:
       owner: "myorg"
       repos: ["my-api"]

@@ -25,6 +25,7 @@ fi
 # Create required directories
 mkdir -p "${AGENT_DIR}/queue/"{incoming,drafts,completed,rejected}
 mkdir -p "${AGENT_DIR}/state"
+mkdir -p "${AGENT_DIR}/investigations"   # archived findings docs from ticket-investigation items
 
 # Initialize last-poll.yaml if missing
 if [ ! -f "${AGENT_DIR}/state/last-poll.yaml" ]; then

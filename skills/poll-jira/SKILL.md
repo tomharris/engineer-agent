@@ -1,7 +1,7 @@
 ---
 name: poll-jira
 description: "Poll Jira for new or updated tickets assigned to the user. Use this skill when checking Jira for work, or during an engineer-agent poll cycle."
-version: 3.0.1
+version: 3.1.0
 model: haiku
 ---
 
@@ -102,6 +102,10 @@ For each unique Jira project key in the map:
 3. Call `mcp__atlassian__searchJiraIssuesUsingJql` with the JQL query
 4. For each ticket returned, call `mcp__atlassian__getJiraIssue` to fetch full details:
    - summary, description, status, priority
+   - **issuetype** — the issue type **NAME** (e.g. `Spike`), not its id. `references/ticket-kind.md`
+     Tier 1 matches names, and type ids are per-instance so a shared config cannot use them. Without
+     this field the entire highest-trust kind tier is silently unreachable and every Jira Spike is
+     drafted as an implementation ticket.
    - **components** (list of component names)
    - **labels** (list of label strings)
    - recent comments
@@ -121,6 +125,13 @@ it is shared with every other poller. Do not re-derive those rules here.
 `projects.<slug>.jira.seen_tickets` is a cheap pre-filter only: a hit lets you skip fetching detail,
 but it is **not** authoritative, and a miss does **not** license a write. Run the reconciliation
 lookup either way.
+
+**The lookup spans BOTH ticket types — `ticket` and `ticket-investigation`.** They are one
+`source_id` namespace: at most one live item across the pair, and a terminal item of either type
+absorbs the other. Looking up only the type you are about to write lets a retitled or retyped ticket
+(`ENG-789` → `Spike: …`) mint a second item for work already completed, because the
+`(type, source_id)` key changed underneath the absorbing rule. See `references/ticket-kind.md` →
+"Deciding once".
 
 > ⚠️ **Do not re-queue a ticket because it has new comments or a status change.** That rule used to
 > live here, and it is self-triggering: engineer-agent recording its own findings as a Jira comment
@@ -145,7 +156,32 @@ Apply it with:
 The ladder returns either a routed slug with a `routing_method` (and `routing_rationale` when the
 method is `inferred`), or `_unrouted` with `matched_projects`.
 
-#### 5c. Create Queue Items Based on the Ladder's Result
+#### 5c. Classify the Deliverable
+
+Read the ticket-kind ladder and apply it. Resolve its path from
+`${CLAUDE_PLUGIN_ROOT}/references/ticket-kind.md`, falling back to
+`{this-skill-dir}/../../references/ticket-kind.md` if the env var is unset — **not** a bare relative
+path, for the same reason as the routing ladder above (the cron runs from `$HOME`).
+
+Apply it with:
+- `ticket.title` = ticket summary
+- `ticket.jira_issue_type` = the issuetype **name** fetched in Phase 1
+- `manual_kind` = absent (polling has no human to pass a flag)
+- `project` = the slug 5b resolved
+
+Note what is deliberately **not** an input: `ticket.body` (long, most attacker-controlled, and full
+of the word "spike" for unrelated reasons) and Jira **labels** (already load-bearing for *routing*,
+so overloading them would mean a team cannot express one without disturbing the other).
+
+The ladder returns `type` (`ticket` | `ticket-investigation`) plus `ticket_kind_method` and — when
+the method is `title-keyword` — `ticket_kind_rationale`.
+
+**Run this only for routed items.** An `_unrouted` item has no slug, so its per-project
+`investigation` overrides cannot resolve; leave `type: ticket` as a placeholder, write no
+`ticket_kind_*` fields, and let `review-queue` classify it at assignment time (it already generates
+the draft there).
+
+#### 5d. Create Queue Items Based on the Ladder's Result
 
 **Routed** — create a file in `~/.local/share/engineer-agent/queue/incoming/` with `project: "{slug}"` and the `routing_method` the ladder returned, then proceed to generate a draft (see Step 6).
 
@@ -159,12 +195,15 @@ Do NOT generate a draft. The item stays in `incoming/` until the user assigns a 
 
 #### Queue Item Format
 
-**Filename:** `{YYYYMMDD-HHmmss}-ticket-{ticket_key}.md`
+**Filename:** `{YYYYMMDD-HHmmss}-{type}-{ticket_key}.md` — so an investigation is
+`…-ticket-investigation-ENG-789.md`. The filename must carry the real type: CLAUDE.md's format is
+`{type}-{short-id}`, `review-queue`'s filter reads it, and the ntfy listener's item-id regex
+`^[A-Za-z0-9._-]+$` still matches.
 
 **Content:**
 ```yaml
 ---
-type: ticket
+type: "{ticket|ticket-investigation}"
 source: jira
 source_url: "{ticket_url_from_mcp_response}"
 source_id: "{ticket_key}"
@@ -175,10 +214,13 @@ status: incoming
 project: "{slug_or__unrouted}"
 ticket_key: "{ticket_key}"
 jira_status: "{ticket_status}"
+jira_issue_type: "{issue type name}"       # the Tier 1 input, recorded so the gate can audit it
 jira_components: ["{component1}", "{component2}"]
 jira_labels: ["{label1}", "{label2}"]
 routing_method: "{single-candidate|prefix|filters|keyword|inferred}"
 routing_rationale: "{one line}"            # only when routing_method is "inferred"
+ticket_kind_method: "{manual|jira-issuetype|github-label|title-keyword|default}"   # omit for _unrouted
+ticket_kind_rationale: "{one line}"        # only when ticket_kind_method is "title-keyword"
 matched_projects: ["{slug1}", "{slug2}"]   # only for _unrouted items
 ---
 
@@ -186,11 +228,13 @@ matched_projects: ["{slug1}", "{slug2}"]   # only for _unrouted items
 
 **Ticket:** {ticket_key} — {ticket_summary}
 **Status:** {ticket_status}
+**Type:** {jira issue type name}
 **Priority:** {ticket_priority}
 **Components:** {comma-separated list or "none"}
 **Labels:** {comma-separated list or "none"}
 **Project:** {slug or "_unrouted"}
 **Routing:** {routing_method}{" — " + routing_rationale if inferred}
+**Deliverable:** {code change + draft PR | findings document posted as a comment on the ticket} ({ticket_kind_method}{" — " + ticket_kind_rationale if title-keyword})
 
 ### Description
 {ticket_description}
@@ -210,10 +254,14 @@ For items with a resolved project (not `_unrouted`):
 
 1. Read the ticket details
 2. Identify which repo this ticket applies to from `projects.<project>.github.owner` and `repos`
-3. Draft a brief implementation plan (which files to change, approach)
+3. Draft the plan **matching the item's `type`** — an implementation plan for `ticket`, an
+   investigation plan for `ticket-investigation`. Do **not** perform the investigation here: the
+   poller drafts the plan only, so a poll cycle never pays for research on a ticket the human then
+   rejects, and the research happens once, under the approval's own budget cap and inside its
+   confined read-only worktree.
 4. Move to `drafts/` with status `drafted`
 
-The `## Draft Response` section for tickets:
+**If `type` is `ticket` (code work):**
 
 ```markdown
 ## Draft Response
@@ -233,6 +281,35 @@ This ticket will be implemented iteratively in-session (plan → edit → test �
 ### Action on Approval
 Approving this item implements the changes on a feature branch, then opens a draft PR.
 ```
+
+**If `type` is `ticket-investigation` (findings document):**
+
+```markdown
+## Draft Response
+
+### Investigation Plan
+
+**Target repo:** {repo}
+**Question:** {the unknown to resolve or the decision to make, one sentence}
+**Where to look:** {2–5 files/dirs/subsystems, each with why}
+**History to check:** {commits/PRs likely to explain the current shape, if any}
+**Method:** read-only inspection — Read/Grep/Glob plus `git log`/`show`/`diff`/`blame`. No branch,
+no code changes, no build or test commands.
+**Deliverable:** a `## Findings` document (Question / Answer / Evidence with file:line citations /
+Open Questions / Next Steps{, plus Options + Recommendation for a decision}), posted as a comment
+on {ticket_key} and archived under `~/.local/share/engineer-agent/investigations/`.
+
+### Action on Approval
+Approving this item runs a read-only investigation and **posts the findings as a comment on
+{ticket_key}**, plus a local archive{, then transitions the ticket to {on_complete_status}}.
+**No branch, no PR, no QA test plan.**
+```
+
+> The two hardcoded lines in the code-work template — "implemented iteratively in-session … ~10
+> passes" and "implements the changes on a feature branch, then opens a draft PR" — were
+> unconditional prose before this fork existed. They are what the human reads at the approval gate,
+> so an investigation carrying them would win approval for an action that never happens. Never emit
+> the code-work template for a `ticket-investigation`.
 
 ### 7. Update State (always, even for zero items)
 
@@ -255,8 +332,9 @@ Update `~/.local/share/engineer-agent/state/last-poll.yaml`:
 
 ### 8. Report
 
-Report: "Found N new Jira tickets across M Jira projects. R routed, U unrouted, S skipped (already
-handled), X unchanged."
+Report: "Found N new Jira tickets across M Jira projects. R routed (of which I investigations), U
+unrouted, S skipped (already handled), X unchanged." Naming the investigation count makes a
+misclassification wave visible in the cron receipt, rather than only in the queue after the fact.
 
 If `S > 0`, add the ids so a wrongly-absorbed ticket stays visible: "Skipped (terminal): WIRE-1234,
 WIRE-1235." Never report a skip as merely "0 new" — a poll that hides six already-handled tickets

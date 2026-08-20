@@ -1,8 +1,8 @@
 ---
 description: "Review and approve/reject queued engineer-agent work items"
 model: sonnet
-argument-hint: "[filter: pr|slack|ticket|ticket-plan|doc|spec|design|refinement|gap|qa|audit|codify] [--all] [--project <slug>]"
-allowed-tools: ["Bash", "Read", "Write", "Edit", "Glob", "Grep", "Agent", "AskUserQuestion", "mcp__slite__append-blocks", "mcp__slite__create-note", "mcp__slite__list-channels"]
+argument-hint: "[filter: pr|slack|ticket|investigation|ticket-plan|doc|spec|design|refinement|gap|qa|audit|codify] [--all] [--project <slug>]"
+allowed-tools: ["Bash", "Read", "Write", "Edit", "Glob", "Grep", "Agent", "AskUserQuestion", "mcp__slite__append-blocks", "mcp__slite__create-note", "mcp__slite__list-channels", "mcp__atlassian__addCommentToJiraIssue", "mcp__atlassian__getTransitionsForJiraIssue", "mcp__atlassian__transitionJiraIssue"]
 ---
 
 # Engineer Agent: Review Queue
@@ -11,7 +11,10 @@ Review pending draft items and approve, edit, or reject them.
 
 ## Arguments
 
-- `$ARGUMENTS` may contain a filter: `pr`, `slack`, `ticket`, `ticket-plan`, `doc`, `spec`, `design`, `refinement`, `gap`, `qa`, `audit`, or `codify` to show only that type. `audit` matches `code-audit-finding`; `codify` matches `codify-candidate`.
+- `$ARGUMENTS` may contain a filter: `pr`, `slack`, `ticket`, `investigation`, `ticket-plan`, `doc`, `spec`, `design`, `refinement`, `gap`, `qa`, `audit`, or `codify` to show only that type. `audit` matches `code-audit-finding`; `codify` matches `codify-candidate`; `investigation` matches `ticket-investigation`.
+  **Match filters against the frontmatter `type` exactly, never as a prefix.** There are now three
+  types beginning `ticket`, so `ticket` means `type: ticket` **only** — it no longer means "all
+  ticket work". Use `--all`, or run the filter twice, to see both deliverable shapes.
 - `$ARGUMENTS` may contain `--all` to show all items including completed/rejected
 - `$ARGUMENTS` may contain `--project <slug>` to show only items for a specific project
 
@@ -45,7 +48,14 @@ Read each file's YAML frontmatter and display a numbered summary:
 | 1  | ⚠ ---   | Ticket (unrouted) | ENG-789       | Refactor auth middleware     | normal   | 1h ago  |
 | 2  | my-api  | PR Review  | org/repo#142       | Add caching layer to auth... | normal   | 2h ago  |
 | 3  | my-app  | Slack Q&A  | #engineering       | How does auth cache work?    | normal   | 45m ago |
+| 4  | my-api  | Investigation ⚑ | ENG-812      | Spike: can we drop Redis?    | normal   | 3h ago  |
 ```
+
+Render `ticket-investigation` as `Investigation` in the Type column, and append `⚑` when
+`ticket_kind_method` is `title-keyword` — the same marker convention `⚠ ---` already establishes for
+unrouted. `⚑` means exactly "this deliverable shape was inferred from prose the ticket's author
+wrote". A separate column would push the table past terminal width; the marker carries the same
+signal for free.
 
 Sort by: unrouted items first, then priority (urgent first), then by created_at (oldest first). Unrouted items display with `⚠ ---` in the Project column.
 
@@ -71,11 +81,20 @@ If the selected item has `project: _unrouted` in its frontmatter, run the assign
    - Set `project` to the selected slug
    - Set `routing_method: manual`
    - Remove the `matched_projects` field
-6. Generate a draft for the ticket:
+6. **Classify the deliverable, then** generate a draft for the ticket:
    - Read `projects.<selected_slug>` config for repo info
-   - Create the `## Draft Response` section with implementation plan (same as poll-jira step 6 for Jira items, poll-github-issues step 6 for GitHub items)
+   - Read `${CLAUDE_PLUGIN_ROOT}/references/ticket-kind.md` and apply it. **This is where an
+     `_unrouted` item's classification is deferred to:** the kind lists are per-project overridable,
+     so they could not be resolved during polling when the item had no slug. Set `type` and the
+     `ticket_kind_*` fields now.
+   - Create the `## Draft Response` section using the template matching that `type` — the
+     implementation plan, or the **Investigation Plan** (same blocks as poll-jira step 6 for Jira
+     items, poll-github-issues step 6 for GitHub items)
    - Update `status` to `drafted`
-   - Move the file from `incoming/` to `drafts/`
+   - Move the file from `incoming/` to `drafts/`. If the kind resolved to an investigation, correct
+     the `{type}` segment of the filename while **keeping the original `{YYYYMMDD-HHmmss}` prefix**,
+     so `created_at` ordering — and reconciliation's "keep the original filename" intent — survives
+     as far as it can.
 7. Continue to Step 5a (Show Full Draft) with the now-drafted item
 
 ### 5a. Show Full Draft
@@ -88,6 +107,16 @@ Read the selected file completely and display:
   a shared Jira key or repo, not a config rule, so the human approving the draft is the check on it:
   make it visible rather than letting a wrong guess ride through as if a rule had matched. For every
   other method, one word is enough (`single-candidate`, `prefix`, `filters`, `keyword`, `manual`).
+- **What will actually be delivered**, from `type` and `ticket_kind_method`. For `ticket`: a branch
+  and a draft PR. For `ticket-investigation`: **a comment posted on the ticket** plus a local
+  archive, and a Jira transition when `investigation.on_complete_status` is configured. Say the
+  comment out loud — approving this makes a public post on someone's ticket, and that is the single
+  fact the human most needs before tapping approve. When `ticket_kind_method` is `title-keyword`,
+  say so explicitly and show `ticket_kind_rationale` (e.g. `Deliverable: investigation
+  (title-keyword — leading imperative 'Compare')`) — the same treatment `routing_method: inferred`
+  gets, and for the same reason: that tier read untrusted prose, so the human at the gate is the
+  check on it. For every other method one word is enough (`manual`, `jira-issuetype`,
+  `github-label`, `default`).
 - The `## Context` section with source details
 - The `## Draft Response` section with the full proposed content
 - The source URL for reference

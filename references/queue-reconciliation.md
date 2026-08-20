@@ -26,6 +26,33 @@ covers it.
 types over its life (a `ticket` item, then a `qa-test-plan` for the same `ticket_key`). Those are
 not duplicates. Two `ticket` items for one `source_id` always are.
 
+### The one exception: `{ticket, ticket-investigation}` is a single type family
+
+`ticket` (code change → draft PR) and `ticket-investigation` (findings document → ticket comment)
+are two *shapes* of the same work, chosen by `references/ticket-kind.md`. A ticket's kind can change
+between polls — someone edits its Jira issue type, or retitles it `Spike: …` — and because the
+invariant is keyed on `(type, source_id)`, the naive rule then mints a rival item for work already
+queued or already finished. Terminal state would absorb nothing, because the key changed underneath
+it.
+
+So **a `source_id` may have at most one live item across the pair, and a terminal item of either
+type absorbs the other.** Two asymmetric consequences, and each needs its rationale stated or the
+next reader will "fix" one of them:
+
+- **The poller lookup is family-wide, *including* terminal items.** When the candidate is either
+  ticket type, look up existing items of **both** types for that `source_id` and apply the table
+  below to whatever you find. This is what keeps the absorbing rule working after a kind flip — and
+  it matters more here than anywhere else, because an investigation's own deliverable *is* a ticket
+  comment, i.e. the exact `updated` bump described above.
+- **`scripts/queue-dedup-check.sh` collapses the family only among *non-terminal* items.** Two live
+  items for one `source_id` across the pair is always a poller failure. But a *completed*
+  investigation followed by a fresh implementation draft is the legitimate spike → outcome handoff
+  (`/engineer-agent add-ticket {KEY} --implement`), and flagging it would leave the check
+  permanently red on the most likely real workflow — the crying-wolf failure described below.
+
+Changing the deliverable of an already-handled ticket is a **human** act, exactly like reopening
+one: `/engineer-agent add-ticket {ref} --investigate` / `--implement`.
+
 ### Why this needs stating
 
 A duplicate is invisible on disk. Queue filenames embed a `{YYYYMMDD-HHmmss}` minted at write time,
@@ -50,13 +77,15 @@ one explicit branch per outcome.
 For every candidate item, **before routing and before drafting**, look up existing queue files whose
 frontmatter `source_id` matches the candidate's, across **all four** directories
 (`incoming/`, `drafts/`, `completed/`, `rejected/`) — restricted to the same `type` the poller is
-about to write. Then take exactly one branch:
+about to write, **except for the two ticket types, which are looked up as one family** (see "The one
+exception" above: a `ticket` candidate must also find an existing `ticket-investigation` for that
+`source_id`, and vice versa). Then take exactly one branch:
 
 | Existing item | Action | Rationale |
 |---|---|---|
 | **In `completed/` or `rejected/`** | **Skip. Unconditionally.** Do not write, do not update. Count it and report it (see "Reporting"). | Terminal state is **absorbing**. The external action already ran or was explicitly declined. This is the branch that breaks the self-triggering loop: no amount of new activity — least of all the agent's own — may resurrect finished work. |
 | **In `drafts/`** | **Leave the file alone.** Do not write a second file. Do not modify it. Count it as `unchanged`. | A draft is human-owned: someone may be mid-review, or may have hand-edited the draft response. Silently rewriting it under them destroys work. Fresh tracker context is not worth that. |
-| **In `incoming/` and still `_unrouted`** | **Update that file in place.** Refresh the `## Context` section from the tracker, retry routing, and if it now resolves, set `project` / `routing_method` / `routing_rationale`, remove `matched_projects`, generate the draft, set `status: drafted`, and move the **same** file to `drafts/`. Keep the original filename. | This is the legitimate re-check intent. It just has to mutate the existing item instead of minting a rival. Keeping the filename preserves the original `created_at` ordering, so a long-unrouted ticket does not keep jumping to the top of the queue. |
+| **In `incoming/` and still `_unrouted`** | **Update that file in place.** Refresh the `## Context` section from the tracker, retry routing, and if it now resolves, set `project` / `routing_method` / `routing_rationale`, remove `matched_projects`, classify the deliverable per `references/ticket-kind.md` (only now possible — the kind lists are per-project, so they need the slug), set `type` and the `ticket_kind_*` fields, generate the matching draft, set `status: drafted`, and move the file to `drafts/`. Keep the original `{YYYYMMDD-HHmmss}` prefix; the `{type}` segment of the filename is corrected if the kind resolved to an investigation. An item that already *has* a kind never has it re-decided here — only one it never had is filled in. | This is the legitimate re-check intent. It just has to mutate the existing item instead of minting a rival. Keeping the filename preserves the original `created_at` ordering, so a long-unrouted ticket does not keep jumping to the top of the queue. |
 | **In `incoming/` with a resolved project** | **Leave it alone.** Count as `unchanged`. | Already routed and awaiting draft generation; a second write would race the drafting step. |
 | **Nothing anywhere** | **Create a new item** as the poller's write step describes. | The only case that mints a file. |
 
