@@ -55,6 +55,8 @@ Run `/engineer-agent review-queue` to act on it, or remove the file first.
 
 Do **not** consult `completed/`, `rejected/`, or the `seen_tickets`/`seen_issues` state — manual add is the user's explicit override for re-queueing.
 
+This is the deliberate exception to `references/queue-reconciliation.md`, which the **pollers** follow: for them terminal state is absorbing, precisely so a completed ticket cannot be re-queued by later activity (including engineer-agent's own comments). This command is how a human re-opens one on purpose. It still must not create a *second live* item, which is what the incoming/ + drafts/ check above enforces.
+
 ### 4. Resolve Project
 
 **If `--project <slug>` was supplied:** validate that the slug exists in the `projects` map. If not, error and list available slugs. Otherwise use it.
