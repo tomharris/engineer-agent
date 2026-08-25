@@ -574,16 +574,31 @@ state) happens in bash instead, leaving the model to do only what needs judgment
 ```yaml
 agent:
   poll:
-    scripted_sources: ["github-issues", "github"]
+    scripted_sources: ["github-issues", "github", "jira", "slite"]
 ```
 
 - **When a poll finds nothing new and every configured source is scripted, no model runs at all.**
   A full poll of a five-repo config takes a few seconds instead of a model session.
 - The receipt written to `state/last-poll-receipt.yaml` is identical in shape to the model's, so
   `/engineer-agent status` and the cron health check are unaffected.
-- Supported sources are `github-issues` and `github` (PR review). Jira and Slite are MCP-only with
-  no CLI, so they stay model-driven; any configured source that is not scripted keeps the model in
-  the loop for that run.
+- Supported sources are `github-issues`, `github` (PR review), `jira` and `slite`. Any configured
+  source that is not scripted keeps the model in the loop for that run, so on a typical config you
+  need to list every source you actually use before a quiet poll can skip the model entirely.
+- **Jira and Slite need one extra step.** The GitHub collectors reuse the already-authenticated `gh`
+  CLI; Jira and Slite have no CLI, so their collectors call the REST APIs directly and need an API
+  credential plus `agent.jira.site` / `agent.jira.email`. Store the credential with:
+
+  ```bash
+  /path/to/engineer-agent/scripts/setup-credentials.sh jira    # then: ... slite
+  /path/to/engineer-agent/scripts/setup-credentials.sh check   # what resolves; prints no secrets
+  ```
+
+  The token goes into your **login keychain**, not into `engineer.yaml`. That is deliberate: cron and
+  launchd hand the poll a minimal environment, so a token exported from your shell profile works in
+  every terminal you test from and is silently absent in the supervised poll. `check` warns when
+  your token resolves only from the environment.
+- Missing credential, missing `jq`/`curl`, or an unreachable API is a **clean skip**: that source is
+  left to the model for the run, exactly as before. Listing a source here cannot break polling.
 - **Off by default.** Omit the block and polling behaves exactly as before. `EA_POLL_SCRIPTED_SOURCES`
   overrides it at runtime (space- or comma-separated), which is handy for a side-by-side comparison.
 

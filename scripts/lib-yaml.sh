@@ -40,11 +40,19 @@
 # shipped example. No error, nothing to notice. Continuation lines are accumulated until the
 # collection closes.
 #
-# KNOWN LIMITATION — block sequences of MAPPINGS ("- project: ENG") are not modelled. The only
-# such key is projects.<slug>.jira.sources, and Jira polling is deliberately left model-driven,
-# so nothing reads it. Rather than emit a plausible-looking wrong value, such an item is marked
-# "[]#map-unsupported" so a future reader hits something loud instead of something silently
-# truncated.
+# BLOCK SEQUENCES OF MAPPINGS ("- project: ENG") are modelled as INDEXED sub-paths:
+#     projects.my-api.jira.sources[0].project=ENG
+#     projects.my-api.jira.sources[0].components[]=api
+#     projects.my-api.jira.sources[1].project=PLAT
+# plus a "path[N]{}" mapping line per element, which is what yaml_seq_len counts.
+#
+# This was previously refused outright — such an item emitted "[]#map-unsupported" on the reasoning
+# that the only such key is projects.<slug>.jira.sources and Jira polling was model-driven, so
+# nothing read it. scripts/poll-jira.sh now does. The indexed form is used rather than flattening
+# the element into its parent because the elements are a SET whose members must stay distinct:
+# `sources: [{project: ENG, components: [api]}, {project: PLAT}]` means ENG-with-a-component-filter
+# and PLAT-as-catch-all. Flattened to jira.sources.project[]=ENG/PLAT + components[]=api, the pairing
+# is gone and PLAT silently inherits ENG's filter — an N:M routing config that quietly collapses.
 #
 # BLOCK *AND* FLOW SEQUENCES ARE BOTH REQUIRED. A real engineer.yaml mixes them:
 #   exec.allowed_commands:  is block   ("- \"bin/rails\"")
@@ -137,6 +145,22 @@ yaml_dump() {
     {
       line = $0
       sub(/\r$/, "", line)
+
+      # Continuation of a BLOCK SCALAR (see the emitter below). Checked before the blank-line and
+      # comment skips, because inside a block scalar a blank line and a leading "#" are DATA.
+      if (blk_path != "") {
+        if (line ~ /^[ \t]*$/) { blk_buf = blk_buf " "; next }
+        match(line, /^ */); rind = RLENGTH
+        if (rind > blk_indent) {
+          seg = line; sub(/^[ \t]+/, "", seg); sub(/[ \t]+$/, "", seg)
+          blk_buf = (blk_buf == "") ? seg : blk_buf " " seg
+          next
+        }
+        print blk_path "=" trim(blk_buf)
+        blk_path = ""
+        # fall through: this line belongs to the enclosing mapping
+      }
+
       if (line ~ /^[ \t]*$/) next
       if (line ~ /^[ \t]*#/) next          # full-line comment (a col-0 "#" is NOT a dedent)
 
@@ -160,17 +184,45 @@ yaml_dump() {
       #     key:            key:
       #       - item        - item
       if (substr(content, 1, 1) == "-" && (length(content) == 1 || substr(content, 2, 1) == " ")) {
-        if (list_path != "" && ind >= list_indent) {
-          item = trim(substr(content, 2))
-          # "- key: value" is a sequence of mappings (only jira.sources). Flag it rather than
-          # emitting "key: value" as if it were a scalar item.
-          if (item ~ /^[A-Za-z0-9_-]+:([ \t]|$)/) print list_path "[]#map-unsupported"
-          else print list_path "[]=" yaml_scalar(item)
+        item = trim(substr(content, 2))
+
+        # "- key: value" opens a sequence of MAPPINGS (jira.sources). Give the element its own
+        # indexed path and push it on the stack, so the key on this line AND every deeper line
+        # that follows nest inside that element rather than inside the parent of the sequence.
+        if (item ~ /^[A-Za-z0-9_.-]+:([ \t]|$)/) {
+          # Braces on every arm: a bare statement followed by a newline and `else` is rejected by
+          # some awks (BSD awk on macOS among them), and this file must parse identically there.
+          if (seq_path != "" && ind == seq_indent) {
+            owner = seq_path
+          } else if (list_path != "" && ind >= list_indent) {
+            owner = list_path; seq_path = list_path; seq_indent = ind; seq_n[owner] = 0
+          } else {
+            next
+          }
+          base = owner "[" seq_n[owner] "]"
+          seq_n[owner]++
+          print base "{}"
+          while (top > 0 && ind_stack[top] >= ind) top--
+          top++; ind_stack[top] = ind; path_stack[top] = base
+          # Re-enter as an ordinary mapping key, indented two past the dash that introduced it —
+          # which is exactly where the key physically sits ("- project:").
+          content = item
+          ind = ind + 2
+          in_seq_item = 1
+          # fall through to the mapping-key branch
+        } else {
+          if (list_path != "" && ind >= list_indent) print list_path "[]=" yaml_scalar(item)
+          next
         }
-        next
       }
 
       # --- mapping key ---------------------------------------------------------------
+      # A key at or above the indent of the open sequence CLOSES it. Without this, a later block
+      # sequence introduced at the same depth under a different key would keep appending to the
+      # index space of the previous one (statuses items landing inside sources[2], say).
+      if (!in_seq_item && seq_path != "" && ind <= seq_indent) seq_path = ""
+      in_seq_item = 0
+
       ci = index(content, ":")
       if (ci == 0) next
       key  = trim(substr(content, 1, ci - 1))
@@ -187,6 +239,22 @@ yaml_dump() {
       top++
       ind_stack[top]  = ind
       path_stack[top] = path
+
+      # --- block scalar ("key: >-" / "key: |") ---------------------------------------
+      # A real installed engineer.yaml writes projects.<slug>.routing.description as a FOLDED
+      # block scalar, and this reader used to return the literal indicator ">-" as the value,
+      # silently discarding the prose. That description is the sole input to Tier 3b of
+      # references/routing-ladder.md, so the failure mode is a routing tier that looks configured
+      # and decides on the two characters ">-".
+      #
+      # Both styles are FOLDED to one space-joined line: the flat output format is one line per
+      # node and cannot represent an embedded newline. For the scalars this config actually holds
+      # (descriptions, prose hints) that is lossless in every way a consumer cares about.
+      if (rest ~ /^[|>][0-9]*[+-]?([ \t]+#.*)?$/) {
+        blk_path = path; blk_indent = ind; blk_buf = ""
+        list_path = ""
+        next
+      }
 
       if (rest == "") {
         print path "{}"
@@ -205,6 +273,9 @@ yaml_dump() {
         emit_value(path, rest)
       }
     }
+
+    # A block scalar running to EOF has no dedent to close it.
+    END { if (blk_path != "") print blk_path "=" trim(blk_buf) }
   ' "$file"
 }
 
@@ -234,6 +305,15 @@ yaml_get_list() {
 yaml_has_list() {
   local path="$1" file="${2:-}"
   _yaml_lines "$file" | grep -qE "^$(printf '%s' "$path" | sed 's/[][\.*^$/]/\\&/g')\[\](=|#empty)"
+}
+
+# yaml_seq_len <path> [file] — number of elements in a block sequence of MAPPINGS, i.e. the count
+# of "path[N]{}" lines. Prints 0 for an absent key or for a sequence of plain scalars (those are
+# yaml_get_list's job). Callers iterate `for i in $(seq 0 $((n-1)))` over "path[$i].key".
+yaml_seq_len() {
+  local path="$1" file="${2:-}"
+  _yaml_lines "$file" \
+    | grep -cE "^$(printf '%s' "$path" | sed 's/[][\.*^$/]/\\&/g')\[[0-9]+\]\{\}$"
 }
 
 # yaml_keys <path> [file] — immediate child mapping keys (e.g. the project slugs under

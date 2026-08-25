@@ -135,6 +135,22 @@ cmd_dump() {
   v="$(_get agent.slack.bin)";           printf 'agent.slack.bin=%s\n'          "${v:-spy}"
   printf 'agent.slack.workspace=%s\n'    "$(_get agent.slack.workspace)"
   _emit_list agent.autonomy.auto_execute agent.autonomy.auto_execute
+
+  # --- Jira / Slite REST access (scripts/poll-jira.sh, scripts/poll-slite.sh) ----------------
+  # POINTERS ONLY, never the credential itself. The token lives in the Keychain, a 0600 file, or an
+  # env var, and lib-secret.sh resolves it at use time — see the SECURITY note at the top of this
+  # file for why the normalized view must stay safe to log.
+  printf 'agent.jira.site=%s\n'            "$(_get agent.jira.site)"
+  printf 'agent.jira.email=%s\n'           "$(_get agent.jira.email)"
+  printf 'agent.jira.api_token_env=%s\n'   "$(_get agent.jira.api_token_env)"
+  printf 'agent.jira.api_token_file=%s\n'  "$(_get agent.jira.api_token_file)"
+  # API v2, not v3, and this is deliberate: v3 returns `description` as an Atlassian Document
+  # Format object, which would mean reconstructing prose from a JSON tree in bash. v2 returns it as
+  # text, which is what a queue item's ### Description needs. Both are supported on Jira Cloud.
+  v="$(_get agent.jira.api_base)";  printf 'agent.jira.api_base=%s\n'  "${v:-/rest/api/2}"
+  v="$(_get agent.slite.api_base)"; printf 'agent.slite.api_base=%s\n' "${v:-https://api.slite.com/v1}"
+  printf 'agent.slite.api_key_env=%s\n'    "$(_get agent.slite.api_key_env)"
+  printf 'agent.slite.api_key_file=%s\n'   "$(_get agent.slite.api_key_file)"
   # Which sources are collected by a deterministic script instead of by the model. Absent or empty
   # => today's prompt-driven path, unchanged. Deny-by-default, matching the posture of
   # agent.autonomy.auto_execute and projects.<slug>.exec.allowed_commands.
@@ -162,6 +178,44 @@ cmd_dump() {
     printf 'projects.%s.slack.ignore_bots=%s\n' "$slug" "${v:-true}"
     _emit_list "projects.${slug}.slack.channels" "projects.${slug}.slack.channels"
     _emit_list "projects.${slug}.slack.keywords" "projects.${slug}.slack.keywords"
+
+    # --- Jira sources, with the backward-compat normalization applied ONCE -------------------
+    # poll-jira step 3 states this rule in prose: `jira.sources` (array) is used as-is, and the
+    # legacy `jira.project` (string) becomes a single catch-all source with no filters. Resolving
+    # it here means the collector never sees the legacy shape, so it cannot handle it differently
+    # from the way add-ticket or a model-driven poll would.
+    #
+    # Emitted as `jira.source.<N>.…` rather than passed through as the parser's `sources[N].…`
+    # because the two shapes must be indistinguishable downstream — a legacy install has no
+    # `sources` node at all, and a consumer that had to branch on which form was present would be
+    # re-implementing exactly the compat rule this normalizer exists to absorb.
+    printf 'projects.%s.jira.assignee=%s\n' "$slug" "$(_get "projects.${slug}.jira.assignee")"
+    _emit_list "projects.${slug}.jira.statuses" "projects.${slug}.jira.statuses"
+    local jn i jkey
+    jn="$(yaml_seq_len "projects.${slug}.jira.sources")"
+    if [ "${jn:-0}" -gt 0 ] 2>/dev/null; then
+      i=0
+      while [ "$i" -lt "$jn" ]; do
+        jkey="$(_get "projects.${slug}.jira.sources[${i}].project")"
+        if [ -n "$jkey" ]; then
+          printf 'projects.%s.jira.source.%s.project=%s\n' "$slug" "$i" "$jkey"
+          _emit_list "projects.${slug}.jira.source.${i}.components" "projects.${slug}.jira.sources[${i}].components"
+          _emit_list "projects.${slug}.jira.source.${i}.labels"     "projects.${slug}.jira.sources[${i}].labels"
+        fi
+        i=$((i+1))
+      done
+      printf 'projects.%s.jira.source_count=%s\n' "$slug" "$jn"
+    else
+      jkey="$(_get "projects.${slug}.jira.project")"
+      if [ -n "$jkey" ]; then
+        printf 'projects.%s.jira.source.0.project=%s\n' "$slug" "$jkey"
+        printf 'projects.%s.jira.source_count=1\n' "$slug"
+      else
+        printf 'projects.%s.jira.source_count=0\n' "$slug"
+      fi
+    fi
+
+    _emit_list "projects.${slug}.slite.doc_labels" "projects.${slug}.slite.doc_labels"
 
     printf 'projects.%s.routing.description=%s\n' "$slug" "$(_get "projects.${slug}.routing.description")"
     _emit_list "projects.${slug}.routing.keywords" "projects.${slug}.routing.keywords"
