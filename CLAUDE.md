@@ -22,9 +22,13 @@ This repo IS the plugin.
 commands/                      — Slash commands (/engineer-agent <command>)
 skills/                        — Auto-invoked skills by task type
 references/                    — Shared procedural docs skills Read at runtime (routing-ladder.md,
-                                 ticket-kind.md, queue-reconciliation.md)
+                                 ticket-kind.md, queue-reconciliation.md). These are the SPEC;
+                                 scripts/lib-routing.sh and scripts/lib-ticket-kind.sh are the
+                                 executable implementation of their deterministic tiers.
 hooks/hooks.json               — Claude Code hook registrations (turn-completion pushes)
-scripts/                       — Cron polling, ntfy notify/listener, and setup scripts
+scripts/                       — Cron polling, ntfy notify/listener, setup scripts, and the
+                                 deterministic collector stack (see "Deterministic polling")
+tests/                         — Shell test suites; `bash tests/run-all.sh` runs every one
 config/engineer.example.yaml   — Config template
 ```
 
@@ -93,6 +97,9 @@ Two `agent` subsections drive autonomy (both optional):
   Jira type `Task`. Per-project `projects.<slug>.investigation.*` **replaces** a list rather than
   merging it, so a project can *narrow* the triggers (the operation that fixes a false positive); an
   explicitly empty list disables that tier. See "Ticket Kind" below.
+- `agent.poll.scripted_sources` — a list of sources collected by a **deterministic script**
+  rather than by the model (`github-issues`, `github`). Absent/empty ⇒ the prompt-driven path,
+  unchanged. Env override `EA_POLL_SCRIPTED_SOURCES`. See "Deterministic polling" below.
 - `agent.notify.turn_completions` — push an FYI at the end of every turn of an `implement-ticket` session (interactive and headless). Absent/false ⇒ off. Read by `yaml_agent_notify()` in `lib-paths.sh`; see "Turn-completion pushes (opt-in)".
 
 Slack access (`agent.slack`, optional) has **two selectable backends**, chosen by
@@ -752,6 +759,129 @@ Key invariant: **`/engineer-agent review-queue` (terminal) and `/engineer-agent 
 - Jira: `mcp__atlassian__*` tools (optional — either Jira or GitHub Issues per project)
 - Slite: `mcp__slite__*` tools
 - ntfy (optional): push notifications + remote approval via `curl` (publish) and `scripts/approval-listener.sh` (subscribe). Listener requires `jq`. Turn-completion pushes (`hooks/hooks.json` → `scripts/turn-notify-hook.sh`) add **no** hard dependency — jq is used only to decode the message excerpt, and its absence degrades to a label-only push.
+
+
+## Deterministic polling (scripted collectors)
+
+A poll used to be one `claude -p` session that read ~87KB of instructions (`commands/poll.md`, five
+`skills/poll-*/SKILL.md`, three `references/*.md`) plus every raw API response, on **every fire,
+every 15 minutes**, to do work that is almost entirely string comparison and file writing. The
+steady state of a healthy queue is `items_queued: 0`, so most of that spend bought the answer
+"nothing new".
+
+`agent.poll.scripted_sources` moves the mechanical half into bash. The run becomes two phases:
+
+```
+cron-poll.sh
+  ├─ PHASE A  scripts/poll-github-issues.sh / poll-github-prs.sh   (no model)
+  │           fetch → filter → reconcile → route → classify → write queue file → state + receipt
+  │           emits queue/incoming/*.md + state/poll-manifest.tsv
+  └─ PHASE B  claude -p, ONLY if the manifest is non-empty
+              drafts each manifest item and moves it to drafts/
+```
+
+**When Phase A finds nothing and every configured source is scripted, `claude` is never started.**
+A full 5-repo poll of a real config takes ~6s and writes a receipt byte-identical to the model's.
+
+### What is scripted and what is not
+
+| Work | Where |
+|---|---|
+| Config parse, tracker inference, per-source configured/skipped decision | bash (`ea-config.sh`) |
+| Fetch (`gh issue list`, `gh pr list`), all filters, priority mapping | bash |
+| Reconciliation table (skip / unchanged / update-in-place / create) | bash (`lib-queue.sh`) |
+| Routing ladder **tiers 0–3a** | bash (`lib-routing.sh`) |
+| Ticket-kind **tiers 0–2 and 3 Form A** | bash (`lib-ticket-kind.sh`) |
+| Filename, frontmatter, `## Context`, branch slug | bash (`lib-queue-write.sh`) |
+| State + receipt | bash (`lib-state.sh`, `cron-poll.sh`) |
+| Routing **tier 3b** (semantic), kind **Form B** (imperative-vs-noun), Slack relevance | **model** |
+| **All draft prose** | **model** |
+
+The three judgment tiers are **flagged in the manifest**, never guessed. `needs_routing=1` writes
+the item as `project: _unrouted` with `matched_projects`, which the model finishes through the
+already-documented `incoming/` + `_unrouted` → update-in-place branch of
+`references/queue-reconciliation.md` — no new state, no new code path.
+
+### The scripts
+
+| File | Role |
+|---|---|
+| `lib-yaml.sh` | one generic indent-stack YAML reader (`yaml_get`/`yaml_get_list`/`yaml_keys`) |
+| `ea-config.sh` | normalizes `engineer.yaml` to flat greppable lines, applying defaults, tracker inference and the `investigation.*` replace-not-merge rule **once** |
+| `lib-queue.sh` | frontmatter access + `queue_disposition` (the reconciliation table) + `poll_resume_candidates` |
+| `lib-queue-write.sh` | queue-item construction, with real YAML escaping |
+| `lib-routing.sh` / `lib-ticket-kind.sh` | the deterministic ladder tiers |
+| `lib-state.sh` | round-trips `state/last-poll.yaml`, preserving model-written sections |
+| `lib-time.sh` | GNU/BSD-portable timestamp helpers |
+| `poll-github-issues.sh` / `poll-github-prs.sh` | the collectors |
+| `queue-status.sh` / `queue-list.sh` | the data behind `status` / `review-queue` |
+
+> **`ea-config.sh dump` emits a CURATED view and deliberately omits `agent.notify.ntfy.*`.** On
+> public ntfy.sh the `command_topic` is effectively a password for remote approval, and a poller
+> has no use for it. Keeping it out means the normalized config can be logged or cached while
+> debugging without leaking the credential.
+
+### Invariants that survive the move
+
+- **Polling still only reads.** The collectors call `gh issue list` / `gh pr list` and write files
+  under `$EA_AGENT_DIR`. No posting verb is reachable from Phase A at all — the read-only guarantee
+  is now structural in bash rather than enforced by an `--allowedTools` allowlist.
+- **Injection containment is stronger, not weaker.** The routing candidate set is computed from
+  config alone and every tier can only narrow it, so a scripted route can only ever emit a slug the
+  config already permits. The kind ladder's entire output alphabet is two fixed strings.
+- **Terminal state stays absorbing.** `queue_disposition` looks up the whole `{ticket,
+  ticket-investigation}` family *including* `completed/` and `rejected/`, so the self-sustaining
+  re-queue loop (engineer-agent's own comment bumps `updatedAt`) cannot restart.
+
+### Two hazards the design has to handle
+
+**1. Nothing may be stranded in `incoming/`.** Only `drafts/` is reachable by the approval gate, and
+the reconciliation table says a resolved `incoming/` item is "leave alone" — so an item written by
+Phase A whose drafting phase died would sit there **forever, invisibly**. Two guards:
+`poll_resume_candidates()` re-emits any `incoming/` item lacking a `## Draft Response` into every
+subsequent manifest (self-healing on the next tick), and `queue-status.sh` reports the count as a
+warning. `tests/lib-queue.test.sh` and `tests/poll-github-issues.test.sh` both pin it.
+
+**2. `gh --jq`, not `jq`.** The collectors use gh's *embedded* jq engine, so they add no dependency
+and stay inside the "the cron path is jq-free" policy `cron-poll.sh` sets. A Slack collector would
+need real `jq` and must gate on it softly (fall back to the model), never hard-fail.
+
+### Gotchas learned while building this — each cost a real debugging cycle
+
+- **Flow *and* block sequences.** A real `engineer.yaml` mixes them (`exec.allowed_commands:` is a
+  block list; `github.repos: ["a", "b"]` is flow). `lib-paths.sh`'s `yaml_project_list()` handles
+  block only and gets away with it because its one caller reads `exec.allowed_commands`. A reader
+  that missed flow would poll **zero repos, silently**.
+- **Multi-line flow sequences.** `config/engineer.example.yaml` ships `title_keywords` wrapped
+  across two lines. A single-line-only parser returns an empty list and silently disables the whole
+  title tier of `references/ticket-kind.md` for anyone who copied the example.
+- **`while read` drops an unterminated final line.** `read` returns non-zero at EOF without a
+  newline, so the loop body never runs for that line. This silently produced `github_labels: []` —
+  a valid-looking value that degrades Tier 2 routing and Tier 2 kind classification. Producers emit
+  a trailing newline; consumers use `|| [ -n "$var" ]`.
+- **`date -d` is GNU-only** and macOS runs LaunchAgents. A BSD fallback that merely strips a UTC
+  offset is *six hours wrong* rather than failing, so `lib-time.sh` normalizes offsets in shell and
+  both platforms take one path.
+- **`exit` still runs awk's `END` block**, so an `END` that also prints emits the count twice.
+- **`set -o pipefail` + `grep -q`** reports a *successful* match as a failed pipeline, because
+  `grep -q` closes the pipe and the upstream dies of SIGPIPE. Capture output first, then grep.
+- **`close` is a reserved word in awk** and cannot be a parameter name.
+
+### A spec ambiguity this surfaced
+
+`references/ticket-kind.md` gives Form A as a regex ending
+`… [ \] ) ]? \s* ( : | — | – | - | \| | · | end-of-title )`, but also lists `[Decision] queue
+backend` among the titles that **fire** — and under the literal regex it does not, since what
+follows the bracket is `queue`. `lib-ticket-kind.sh` implements the doc's **worked examples** (a
+closing bracket is itself a delimiter) and says so at the implementation site;
+`tests/ticket-kind.test.sh` pins every fires/does-not-fire example verbatim. A model reading the doc
+resolved this by intuition each run; a script has to pick, which is how the ambiguity became visible.
+
+## Tests
+
+`tests/run-all.sh` runs every suite (there is no CI). Each is self-isolating: `set -uo pipefail`,
+`PASS`/`FAIL` counters, an `mktemp -d` sandbox and `export EA_AGENT_DIR=…`, with PATH shims for
+external binaries (`gh`, `claude`, `curl`, `security`). Follow that shape when adding one.
 
 ## Documentation Maintenance
 

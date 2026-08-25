@@ -5,6 +5,18 @@ version: 2.1.0
 model: haiku
 ---
 
+> **A deterministic collector now exists for this source.** When `agent.poll.scripted_sources`
+> includes `github-issues`, `scripts/poll-github-issues.sh` does the fetching, filtering, reconciliation, routing
+> (ladder tiers 0-3a), kind classification (tiers 0-2 and 3 Form A), queue-file writing and state
+> updates *before* any model runs — and the model is handed a manifest naming only the items that
+> still need a **draft**, plus the handful flagged `needs_routing` (ladder tier 3b) or
+> `needs_kind_check` (kind tier 3 Form B).
+>
+> The steps below remain the source of truth for the **prompt-driven** path, which is still the
+> default and runs whenever this source is not listed in `scripted_sources`. Keep the two in sync:
+> if you change a rule here, change it in the script (and its test) too.
+
+
 # Poll GitHub Issues for Assigned Issues
 
 Check GitHub Issues for issues assigned to the configured user that need implementation. Supports

@@ -5,6 +5,23 @@ version: 1.0.0
 model: haiku
 ---
 
+> **A deterministic collector now exists for this source.** When `agent.poll.scripted_sources`
+> includes `github`, `scripts/poll-github-prs.sh` does the fetching, the reviewer/`ignore_labels`/
+> `max_pr_files` filtering, reconciliation, routing (ladder tiers 0-3a), queue-file writing and
+> state updates *before* any model runs — and the model is handed a manifest naming only the PRs
+> that still need a **review draft**, plus any flagged `needs_routing` (ladder tier 3b). There is no
+> kind ladder for PRs.
+>
+> Note the collector deliberately does **not** run `gh pr view` / `gh pr diff`. Step 3c below fetches
+> the diff and writes the review inline on every poll, which is the most expensive thing a poll
+> does; on the scripted path the diff is read once, by the drafting phase, only for PRs that
+> actually need a new review.
+>
+> The steps below remain the source of truth for the **prompt-driven** path, which is still the
+> default and runs whenever this source is not listed in `scripted_sources`. Keep the two in sync:
+> if you change a rule here, change it in the script (and its test) too.
+
+
 # Poll GitHub for New PRs
 
 Check configured GitHub repos for pull requests that need review and create queue items for each. Iterates over all projects that have GitHub configured.

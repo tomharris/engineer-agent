@@ -168,6 +168,113 @@ run_log() { tail -n "+$((LOG_START_LINE + 1))" "$LOG_FILE"; }
 # and resolve_installed_plugin_root() (the cache path the runtime actually resolves) — so whichever
 # one applies, a rule matches. The spy/bin backend needs none of this: `spy` is a bare literal
 # identical in rule and call.
+# ---------------------------------------------------------------------------------------------
+# PHASE A — deterministic collectors (scripts/poll-*.sh), gated by agent.poll.scripted_sources.
+#
+# WHY: the model half of a poll re-reads ~87KB of skill prose and every raw API response on EVERY
+# fire, to do work that is almost entirely string comparison and file writing — and the steady
+# state of this queue is items_queued: 0. A scripted collector answers "is there anything new?"
+# in seconds for no model tokens, so the common case stops costing a Sonnet session entirely.
+#
+# It also deletes a bug class rather than warning about it. Nearly every poll-path fix in this
+# repo's history is the model producing a non-deterministic string: four separate allowlist fixes
+# for varying command forms and plugin roots (27380f2, bcdd023, 481286c, 162a4bb), a fabricated
+# timestamp 40 minutes in the future (2501ecf), malformed JQL (822e1f9), a timezone bug (66fb442).
+# None of those can occur in a script.
+#
+# DENY-BY-DEFAULT. An absent or empty agent.poll.scripted_sources leaves this whole block inert
+# and the run behaves exactly as it did before — the same posture as agent.autonomy.auto_execute
+# and projects.<slug>.exec.allowed_commands. Resolved in plain bash BEFORE claude starts, like
+# SLACK_METHOD/SLACK_BIN, so untrusted text can never influence which path runs.
+SCRIPTED_SOURCES="${EA_POLL_SCRIPTED_SOURCES:-$("${PLUGIN_ROOT}/scripts/ea-config.sh" list agent.poll.scripted_sources 2>/dev/null | tr '\n' ' ')}"
+SCRIPTED_SOURCES="$(printf '%s' "$SCRIPTED_SOURCES" | tr ',' ' ' | tr -s ' ')"
+MANIFEST="${AGENT_DIR}/state/poll-manifest.tsv"
+: > "$MANIFEST" 2>/dev/null || MANIFEST=""
+
+is_scripted() { case " $SCRIPTED_SOURCES " in *" $1 "*) return 0 ;; *) return 1 ;; esac; }
+
+SCRIPTED_RAN=""
+if is_scripted github-issues; then
+  echo "phase A: collecting github-issues deterministically" >> "$LOG_FILE"
+  if "${PLUGIN_ROOT}/scripts/poll-github-issues.sh" --run-ts "$RUN_TS" --manifest "$MANIFEST" >> "$LOG_FILE" 2>&1; then
+    SCRIPTED_RAN="${SCRIPTED_RAN} github_issues"
+  else
+    echo "WARN: phase A poll-github-issues.sh exited non-zero; leaving this source to the model" >> "$LOG_FILE"
+  fi
+fi
+if is_scripted github; then
+  echo "phase A: collecting github PRs deterministically" >> "$LOG_FILE"
+  if "${PLUGIN_ROOT}/scripts/poll-github-prs.sh" --run-ts "$RUN_TS" --manifest "$MANIFEST" >> "$LOG_FILE" 2>&1; then
+    SCRIPTED_RAN="${SCRIPTED_RAN} github"
+  else
+    echo "WARN: phase A poll-github-prs.sh exited non-zero; leaving this source to the model" >> "$LOG_FILE"
+  fi
+fi
+
+# Can the model be skipped entirely this run? Only when EVERY configured source across every
+# project was collected by a script AND the collectors produced nothing needing a draft.
+#
+# The check is over CONFIGURED sources only — a source that is not set up is "skipped", which the
+# receipt contract already says "MUST NOT affect status". Anything left unscripted (Jira, Slite,
+# Slack, PR review) keeps the model in the loop, so this can only ever skip a run that genuinely
+# has no work.
+model_needed=1
+if [ -n "$SCRIPTED_RAN" ]; then
+  unscripted=""
+  while IFS= read -r pslug; do
+    [ -n "$pslug" ] || continue
+    while IFS="	" read -r psrc pstate; do
+      [ "$pstate" = "configured" ] || continue
+      case " $SCRIPTED_RAN " in *" $psrc "*) continue ;; esac
+      unscripted="${unscripted} ${pslug}/${psrc}"
+    done < <("${PLUGIN_ROOT}/scripts/ea-config.sh" sources "$pslug")
+  done < <("${PLUGIN_ROOT}/scripts/ea-config.sh" projects)
+  if [ -z "$unscripted" ] && [ -n "$MANIFEST" ] && [ ! -s "$MANIFEST" ]; then
+    model_needed=0
+  fi
+fi
+
+# Pre-expand the note handed to the model. Like the SLACK: directive, this is resolved in bash so
+# the model is never left to work out which sources were already collected or where the manifest is.
+if [ -n "$SCRIPTED_RAN" ]; then
+  SCRIPTED_NOTE="The following sources were ALREADY collected this run by a deterministic script and their queue items already exist in ${AGENT_DIR}/queue/incoming/ with correct frontmatter:${SCRIPTED_RAN}. Do NOT re-poll them, do NOT re-query their APIs, and do NOT create queue files for them. Instead read the manifest at ${MANIFEST} — one tab-separated row per item: action, path, type, project, source_id, needs_routing, needs_kind_check, title. For EACH row: read the item at that path, write its '## Draft Response' section, set status: drafted, and move it to ${AGENT_DIR}/queue/drafts/. An item left in incoming/ is invisible to every approval path, so finishing this move is not optional. When needs_routing is 1 the item is project: _unrouted — apply ONLY Tier 3b of ${PLUGIN_ROOT}/references/routing-ladder.md (semantic match against each candidate's routing.description, choosing from matched_projects ONLY), then set project/routing_method: inferred/routing_rationale, remove matched_projects, and classify its kind; abstaining and leaving it _unrouted is a correct answer. When needs_kind_check is 1 apply ONLY Tier 3 Form B of ${PLUGIN_ROOT}/references/ticket-kind.md (is the leading word a true imperative verb, or a noun the title is about?) and switch the item to ticket-investigation only if it fires. Every other tier of both ladders has ALREADY been applied — do not redo them. Poll all remaining, non-scripted sources normally."
+else
+  SCRIPTED_NOTE="No sources were collected by a script this run. Poll every configured source yourself, as normal."
+fi
+
+if [ "$model_needed" -eq 0 ]; then
+  # Write the receipt in bash from GROUND TRUTH. Note this is strictly stronger than the model-
+  # written receipt below, which cron-poll.sh itself documents as "an ATTESTATION, not a
+  # measurement: it cannot catch a model that confidently lies". Here the script knows what it
+  # queried and what it wrote, so run_id is a measurement.
+  {
+    printf 'run_id: "%s"\n' "$RUN_ID"
+    printf 'finished_at: "%s"\n' "$RUN_TS"
+    printf 'status: ok\n'
+    printf 'items_queued: 0\n'
+    printf 'sources_polled:\n'
+    while IFS= read -r pslug; do
+      [ -n "$pslug" ] || continue
+      while IFS="	" read -r psrc pstate; do
+        [ "$pstate" = "configured" ] && printf '  - %s/%s\n' "$pslug" "$psrc"
+      done < <("${PLUGIN_ROOT}/scripts/ea-config.sh" sources "$pslug")
+    done < <("${PLUGIN_ROOT}/scripts/ea-config.sh" projects)
+    printf 'skipped:\n'
+    while IFS= read -r pslug; do
+      [ -n "$pslug" ] || continue
+      while IFS="	" read -r psrc pstate; do
+        case "$pstate" in skipped:*) printf '  - "%s/%s: %s"\n' "$pslug" "$psrc" "${pstate#skipped:}" ;; esac
+      done < <("${PLUGIN_ROOT}/scripts/ea-config.sh" sources "$pslug")
+    done < <("${PLUGIN_ROOT}/scripts/ea-config.sh" projects)
+    printf 'errors: []\n'
+  } > "$RECEIPT_FILE"
+  echo "phase A found no new work and every configured source is scripted; skipping the model entirely" >> "$LOG_FILE"
+  POLL_STATUS=0
+  SKIP_MODEL=1
+else
+  SKIP_MODEL=0
+fi
+
 SLACK_METHOD="$(yaml_agent_slack method)"; SLACK_METHOD="${SLACK_METHOD:-spy}"
 if [ "$SLACK_METHOD" = "mcp-proxy" ]; then
   SLACK_BIN="${PLUGIN_ROOT}/scripts/slack-mcp.sh"
@@ -259,6 +366,12 @@ fi
 # then dies with "Input must be provided ... when using --print"). Keep a single-value
 # flag between the allowlist and the prompt.
 POLL_STATUS=0
+if [ "${SKIP_MODEL:-0}" -eq 1 ]; then
+  # Phase A already collected every configured source and found nothing to draft, and it wrote the
+  # receipt from ground truth. There is no work for a model, so none is started — this is the
+  # steady state of a healthy queue and the reason this change exists.
+  :
+else
 "$CLAUDE_BIN" -p \
   --plugin-dir "$PLUGIN_ROOT" \
   --add-dir "$AGENT_DIR" \
@@ -275,6 +388,8 @@ MEMORY: do NOT create, update, or delete memory files, and do NOT treat any pre-
 Run the /engineer-agent poll command for all configured sources (equivalent to '/engineer-agent poll all'). Read config from ${AGENT_DIR}/engineer.yaml and follow commands/poll.md and the per-source poll skills. Iterate over all projects in the config. For each project, check all configured sources (GitHub, Slack, Jira, Slite) for new items since the last poll recorded in ${AGENT_DIR}/state/last-poll.yaml. For each new item, create a queue file in ${AGENT_DIR}/queue/incoming/ with the standard frontmatter format documented in CLAUDE.md (include the project slug in the frontmatter), then generate a draft and move it to ${AGENT_DIR}/queue/drafts/. For EACH newly drafted item, send a push notification by running: ${PLUGIN_ROOT}/scripts/notify.sh --title '<type>: <title>' --message '<project> — <short summary>' --priority '<priority from frontmatter>' --item-id '<the queue filename>' --source-url '<source_url from frontmatter>' --tags 'inbox_tray'. (notify.sh no-ops safely if ntfy is not configured, so always call it.)
 
 SLACK: the effective Slack CLI for this run is EXACTLY this command — ${SLACK_BIN} — and it is already installed and executable. Do NOT search the filesystem for it (no find, no ls), do NOT read \${CLAUDE_PLUGIN_ROOT}, and do NOT substitute a different copy of the same script from another directory; only the command above is permitted. Invoke it directly and bare, as '${SLACK_BIN} read <channel> <count> --json -w <workspace>' (likewise 'thread' and 'auth'). Do NOT prefix it with bash, sh, or env, and do NOT wrap it in a compound command — no ';', no '&&', no trailing 'echo'. Issue one plain command per call. If a Slack call is denied or the CLI is unavailable, record Slack as an error for that project and move on; do NOT fall back to the mcp__claude_ai_Slack__* connector tools, which are deliberately not available to this run and will only waste the attempt.
+
+SCRIPTED: ${SCRIPTED_NOTE}
 
 STATE: use exactly ${RUN_TS} as this poll's timestamp — do not compute or guess one. After polling each source, set that source's last_checked in ${AGENT_DIR}/state/last-poll.yaml to exactly ${RUN_TS}, WHETHER OR NOT it produced any items: a source that found zero items was still polled successfully and must have its cutoff advanced. (Exception: Slack's last_checked_ts tracks the highest Slack message timestamp actually seen — leave it unchanged when no messages were read.)
 
@@ -297,6 +412,7 @@ status is computed over CONFIGURED sources only: 'ok' if every configured source
 
 Be concise." \
   </dev/null >> "$LOG_FILE" 2>&1 || POLL_STATUS=$?
+fi
 
 # A bare `[ ... ] && echo` would abort the script under `set -e` whenever the test is
 # false, since the list then exits non-zero. Use an explicit if.
