@@ -564,6 +564,33 @@ Skills are auto-invoked during polling and processing:
 
 `/engineer-agent setup` installs cron polling automatically with the interval from your config (default: 15 minutes). One cron job polls all projects.
 
+### Fast polling (deterministic collectors)
+
+By default every poll starts a model session that reads the polling instructions and every raw API
+response — even when there is nothing new, which is most of the time. Opt into scripted collection
+and the mechanical work (fetch, filter, deduplicate, route, classify, write the queue file, update
+state) happens in bash instead, leaving the model to do only what needs judgment: **drafting**.
+
+```yaml
+agent:
+  poll:
+    scripted_sources: ["github-issues", "github"]
+```
+
+- **When a poll finds nothing new and every configured source is scripted, no model runs at all.**
+  A full poll of a five-repo config takes a few seconds instead of a model session.
+- The receipt written to `state/last-poll-receipt.yaml` is identical in shape to the model's, so
+  `/engineer-agent status` and the cron health check are unaffected.
+- Supported sources are `github-issues` and `github` (PR review). Jira and Slite are MCP-only with
+  no CLI, so they stay model-driven; any configured source that is not scripted keeps the model in
+  the loop for that run.
+- **Off by default.** Omit the block and polling behaves exactly as before. `EA_POLL_SCRIPTED_SOURCES`
+  overrides it at runtime (space- or comma-separated), which is handy for a side-by-side comparison.
+
+Anything the scripts cannot decide is *flagged*, never guessed — an ambiguous project routing or an
+ambiguous "is this title an imperative?" is handed to the model with the rest of the ladder already
+applied.
+
 To customize the interval or reinstall manually:
 
 ```bash
@@ -725,6 +752,17 @@ commands/
   create-tickets.md            /engineer-agent create-tickets command
   audit-gaps.md                /engineer-agent audit-gaps command
   qa.md                        /engineer-agent qa command
+scripts/
+  cron-poll.sh                 Scheduled headless poll
+  ea-config.sh                 Normalizes engineer.yaml to a flat, greppable view
+  poll-github-issues.sh        Deterministic GitHub Issues collector
+  poll-github-prs.sh           Deterministic GitHub PR collector
+  queue-status.sh              Queue counts / poll times / receipt health
+  queue-list.sh                Sorted review-queue table
+  queue-dedup-check.sh         Asserts the one-item-per-(type, source_id) invariant
+  lib-*.sh                     Shared libraries (yaml, time, queue, routing, ticket-kind, state)
+tests/
+  run-all.sh                   Runs every test suite
 skills/
   poll-github/SKILL.md         GitHub polling
   poll-slack/SKILL.md          Slack polling

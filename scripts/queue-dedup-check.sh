@@ -26,6 +26,11 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib-paths.sh
 . "${SCRIPT_DIR}/lib-paths.sh"
+# is_terminal_dir / type_family / counts_toward_invariant / fm now live in lib-queue.sh so that
+# THIS check and the scripted pollers that must uphold the invariant share one implementation
+# rather than two. The rationale comments moved with them; see lib-queue.sh.
+# shellcheck source=lib-queue.sh
+. "${SCRIPT_DIR}/lib-queue.sh"
 
 QUIET=0
 UPDATE_BASELINE=0
@@ -45,56 +50,6 @@ if [ ! -d "$QUEUE" ]; then
   echo "queue-dedup-check.sh: no queue directory at $QUEUE" >&2
   exit 2
 fi
-
-# Terminal directories. An item here is DONE: the external action ran (or was explicitly declined),
-# so nothing should ever re-draft it. A duplicate whose sibling is terminal is the more serious of
-# the two shapes, and is reported as such.
-is_terminal_dir() { case "$1" in completed|rejected) return 0 ;; *) return 1 ;; esac; }
-
-# type_family — `ticket` and `ticket-investigation` are two shapes of the SAME work (code change vs
-# findings document; see references/ticket-kind.md). A ticket's kind can change between polls — an
-# issue type edited, a title retitled to "Spike: …" — and because the invariant is keyed on
-# (type, source_id), the naive rule then mints a rival live item for work already queued. Collapsing
-# them into one family name makes that visible.
-#
-# Applied ONLY among non-terminal items (see the family check below), never across a terminal one.
-# A completed investigation followed by a fresh implementation draft — the documented spike →
-# `add-ticket --implement` flow — is legitimate, and flagging it would leave the check permanently
-# red on the most likely real workflow, which is the crying-wolf failure the note above warns about.
-type_family() { case "$1" in ticket|ticket-investigation) echo "ticket" ;; *) echo "$1" ;; esac; }
-
-# rejected/ is the DISPOSAL path, so it does not count toward the invariant.
-#
-# Rejecting the redundant copy is exactly how a human resolves a duplicate. If rejected items
-# counted, every correctly-resolved duplicate would stay red forever — and a permanently-red check
-# is one nobody reads, which would take the live-duplicate signal down with it. (This repo already
-# has that scar: see cron-poll.sh on the sha256 fingerprint that false-warned on every quiet poll.)
-#
-# The cost is real and accepted: "a rejected item got re-drafted" is not detected, because on disk
-# it is identical to "a duplicate was resolved by rejection" — one rejected file plus one live file,
-# with timestamps unable to separate them. That case is already forbidden by
-# queue-reconciliation.md's absorbing-terminal rule, and if it slips through the human sees a draft
-# for something they declined and rejects it again. Visible and self-correcting; a dead check is not.
-counts_toward_invariant() { [ "$1" != "rejected" ]; }
-
-# Read one frontmatter scalar from the leading --- block. Tolerates quoted and bare values, stops
-# at the closing delimiter so a body mention of `type:` cannot be picked up.
-fm() {
-  awk -v key="$2" '
-    NR==1 && $0 ~ /^---[[:space:]]*$/ { inside=1; next }
-    inside && $0 ~ /^---[[:space:]]*$/ { exit }
-    inside {
-      line=$0; sub(/^[ \t]+/,"",line)
-      k=line; sub(/:.*/,"",k)
-      if (k != key) next
-      v=substr(line, index(line,":")+1); sub(/^[ \t]+/,"",v)
-      if (substr(v,1,1)=="\"") { v=substr(v,2); q=index(v,"\""); if (q>0) v=substr(v,1,q-1) }
-      else if (substr(v,1,1)=="\x27") { v=substr(v,2); q=index(v,"\x27"); if (q>0) v=substr(v,1,q-1) }
-      else { sub(/[ \t]+#.*$/,"",v); sub(/[ \t]+$/,"",v) }
-      print v; exit
-    }
-  ' "$1"
-}
 
 # Collect "type<TAB>source_id<TAB>dir/filename<TAB>dir" for every queue item.
 rows=""

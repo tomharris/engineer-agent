@@ -24,40 +24,32 @@ Review pending draft items and approve, edit, or reject them.
 
 Read `~/.local/share/engineer-agent/engineer.yaml`. If missing, tell the user to run `/engineer-agent setup` and stop. Extract `agent.branch_prefix` (required — read the literal string from the yaml; do not assume a default. If missing or empty, stop and tell the user to set `agent.branch_prefix`). When substituting `{branch_prefix}` in the `gh pr create --head` arguments below, use this exact value verbatim.
 
-### 2. List Draft and Unrouted Items
+### 2-3. List and display the queue
 
-Use Glob to find all `.md` files in `~/.local/share/engineer-agent/queue/drafts/` (excluding `.gitkeep`).
+Run:
 
-Also scan `~/.local/share/engineer-agent/queue/incoming/` for items with `project: _unrouted` in their frontmatter. These are tickets that could not be automatically routed to a project and need manual assignment.
-
-If a filter was provided in `$ARGUMENTS`, only show items matching that type in their YAML frontmatter `type` field.
-
-If `--project <slug>` was provided, only show items whose `project` frontmatter field matches the slug. Note: `_unrouted` items are always shown regardless of project filter (since they have no project yet).
-
-If no items found, report: "No items to review. Run `/engineer-agent poll` to check for new work."
-
-### 3. Display Summary Table
-
-Read each file's YAML frontmatter and display a numbered summary:
-
-```
-# Engineer Agent Queue (N items)
-
-| #  | Project | Type       | Source             | Title                        | Priority | Age     |
-|----|---------|------------|--------------------|------------------------------|----------|---------|
-| 1  | ⚠ ---   | Ticket (unrouted) | ENG-789       | Refactor auth middleware     | normal   | 1h ago  |
-| 2  | my-api  | PR Review  | org/repo#142       | Add caching layer to auth... | normal   | 2h ago  |
-| 3  | my-app  | Slack Q&A  | #engineering       | How does auth cache work?    | normal   | 45m ago |
-| 4  | my-api  | Investigation ⚑ | ENG-812      | Spike: can we drop Redis?    | normal   | 3h ago  |
+```bash
+${CLAUDE_PLUGIN_ROOT}/scripts/queue-list.sh [--type <type>] [--project <slug>]
 ```
 
-Render `ticket-investigation` as `Investigation` in the Type column, and append `⚑` when
-`ticket_kind_method` is `title-keyword` — the same marker convention `⚠ ---` already establishes for
-unrouted. `⚑` means exactly "this deliverable shape was inferred from prose the ticket's author
-wrote". A separate column would push the table past terminal width; the marker carries the same
-signal for free.
+Pass `--type` / `--project` through from `$ARGUMENTS`. The script enumerates `drafts/` plus any
+`_unrouted` items in `incoming/`, applies the filters, sorts, and renders the numbered table with
+relative ages. **Do not re-derive any of that** — in particular do not re-implement the type
+filter, which must match the frontmatter `type` **exactly and never as a prefix** (otherwise
+`--type ticket` sweeps up `ticket-plan`, `ticket-refinement` and `ticket-investigation`). Empty
+output means "No items to review. Run `/engineer-agent poll` to check for new work."
 
-Sort by: unrouted items first, then priority (urgent first), then by created_at (oldest first). Unrouted items display with `⚠ ---` in the Project column.
+`--tsv` gives the same rows machine-readably: `unrouted_rank`, `priority_rank`, `created_at`,
+`filename`, `type`, `project`, `priority`, `source_id`, `title`. Use it when you need the filename
+for a selected row.
+
+Note `_unrouted` items are listed first and shown with `**_unrouted**` in the Project column: they
+are blocked on a human choosing a project, which is what step 5 does. They are always shown, even
+when `--project` was given, since they have no project yet.
+
+After printing the table, add one line per item that carries `ticket_kind_method: title-keyword`,
+naming its `ticket_kind_rationale` — that tier reads untrusted prose, so its evidence belongs at
+the approval gate. Do the same for any item with `routing_method: inferred`.
 
 ### 4. User Selects Item
 

@@ -77,6 +77,27 @@ agent:
                                 # Find it via claude.ai → Connectors, or Claude Code's /mcp.
                                 # Verify with: scripts/slack-mcp.sh auth
 
+  # Which sources are collected by a DETERMINISTIC SCRIPT instead of by the model.
+  #
+  # A poll normally starts a model session that reads ~87KB of skill instructions and every raw API
+  # response, to do work that is almost entirely string comparison and file writing. Listing a
+  # source here hands that job to scripts/poll-<source>.sh, which fetches, filters, deduplicates,
+  # routes, classifies and writes the queue file itself. The model is then invoked ONLY to draft
+  # responses — and when a poll finds nothing new AND every configured source is scripted, it is
+  # not invoked at all. That is the common case: most polls find nothing.
+  #
+  # Supported: "github-issues" (GitHub Issues) and "github" (PR review). Jira and Slite are
+  # MCP-only with no CLI to shell out to, so they always stay model-driven.
+  #
+  # The skip is ALL-OR-NOTHING per run: if any configured source is not scripted, the model still
+  # runs. So enabling only one of the two GitHub sources will not skip anything on a typical config,
+  # because both are usually configured.
+  #
+  # DENY-BY-DEFAULT: omit this block (or leave the list empty) and polling behaves exactly as it
+  # always has. Override at runtime with EA_POLL_SCRIPTED_SOURCES (space- or comma-separated).
+  poll:
+    scripted_sources: []          # e.g. ["github-issues", "github"]
+
   # Autonomy tiers — action types the agent may execute WITHOUT a human approval gate.
   # Only "draft-pr" is supported today: a draft PR merges nothing and requests no review,
   # so it is safe to create automatically (you review it on GitHub and mark it ready).

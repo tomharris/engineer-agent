@@ -36,6 +36,14 @@ Default to `all` sources if no source argument provided.
 
 ### 3. Poll Each Project and Source
 
+> **Skip any source already collected by a script.** When `agent.poll.scripted_sources` lists a
+> source, `scripts/poll-<source>.sh` has already fetched, filtered, routed, classified and written
+> its queue items, and `state/poll-manifest.tsv` names what is left to do. Re-polling it would
+> duplicate the API calls the script just made. Draft the manifest's items and move them to
+> `drafts/`; poll only the remaining sources yourself.
+
+#### Prompt-driven sources
+
 For each project in scope, for each selected source:
 
 Check if the project has that integration configured (e.g., `projects.<slug>.github` exists and has values). Skip sources with empty or missing config and report which were skipped.
