@@ -97,6 +97,87 @@ route_candidates_github_prs() {
   done < <(_rt_cfg_list project)
 }
 
+# route_candidates_jira <jira_key> — Tier 0 for Jira. Every project whose tracker resolves to jira
+# and one of whose NORMALIZED jira sources watches this Jira project key.
+#
+# Reads the `jira.source.<N>.project` form that ea-config.sh emits, never the raw config, so the
+# legacy `jira.project` string and the modern `jira.sources` array are already indistinguishable
+# here. That N:M mapping is the whole reason this tier exists: in a real config six engineer-agent
+# projects watch the single key WIRE, so Tier 0 legitimately returns six candidates and the ladder
+# has to keep going.
+route_candidates_jira() {
+  local key="$1" slug n i
+  while IFS= read -r slug; do
+    [ -n "$slug" ] || continue
+    [ "$(_rt_cfg_get "projects.${slug}.tracker")" = "jira" ] || continue
+    n="$(_rt_cfg_get "projects.${slug}.jira.source_count")"; n="${n:-0}"
+    i=0
+    while [ "$i" -lt "$n" ] 2>/dev/null; do
+      if [ "$(_rt_lower "$(_rt_cfg_get "projects.${slug}.jira.source.${i}.project")")" = "$(_rt_lower "$key")" ]; then
+        printf '%s\n' "$slug"; break
+      fi
+      i=$((i+1))
+    done
+  done < <(_rt_cfg_list project)
+}
+
+# _rt_jira_tier2 <slug> <jira_key> <components-file> <labels-file> — rc 0 if this candidate claims
+# the ticket by its configured Jira component/label filters.
+#
+# Only the candidate sources that watch THIS key are consulted: a project watching both BUGS and
+# WIRE must not have its BUGS component filter decide a WIRE ticket. A source with no filters is a
+# catch-all and always claims — matching how github.issues.labels behaves in the tier below, and
+# matching the config comment ("A source with no filters is a catch-all for that Jira project").
+_rt_jira_tier2() {
+  local slug="$1" key="$2" f_comps="$3" f_labels="$4" n i want_c want_l v
+  n="$(_rt_cfg_get "projects.${slug}.jira.source_count")"; n="${n:-0}"
+  i=0
+  while [ "$i" -lt "$n" ] 2>/dev/null; do
+    if [ "$(_rt_lower "$(_rt_cfg_get "projects.${slug}.jira.source.${i}.project")")" = "$(_rt_lower "$key")" ]; then
+      want_c="$(_rt_cfg_list "projects.${slug}.jira.source.${i}.components")"
+      want_l="$(_rt_cfg_list "projects.${slug}.jira.source.${i}.labels")"
+      if [ -z "$want_c" ] && [ -z "$want_l" ]; then return 0; fi   # catch-all
+      if [ -n "$want_c" ] && [ -n "${f_comps:-}" ] && [ -f "$f_comps" ]; then
+        while IFS= read -r v || [ -n "$v" ]; do
+          [ -n "$v" ] || continue
+          printf '%s\n' "$want_c" | _rt_list_has "$v" && return 0
+        done < "$f_comps"
+      fi
+      if [ -n "$want_l" ] && [ -n "${f_labels:-}" ] && [ -f "$f_labels" ]; then
+        while IFS= read -r v || [ -n "$v" ]; do
+          [ -n "$v" ] || continue
+          printf '%s\n' "$want_l" | _rt_list_has "$v" && return 0
+        done < "$f_labels"
+      fi
+    fi
+    i=$((i+1))
+  done
+  return 1
+}
+
+# route_candidates_slite <labels-file> — Tier 0 for Slite docs. Every project whose configured
+# slite.doc_labels intersect the labels this document actually carries.
+#
+# skills/poll-slite/SKILL.md iterates PER PROJECT and queues a matching doc for each, which is the
+# shared-repo trap in a different costume: in a real config all six projects set
+# doc_labels: ["needs-review"], so the global source_id dedup would hand each doc to whichever
+# project the loop reached first — an arbitrary assignment that looks like a decision, with no
+# _unrouted escape. Collecting docs once and routing them through the ladder gives the ambiguous
+# case the same visible, resolvable outcome every other source already has.
+route_candidates_slite() {
+  local f_labels="$1" slug want l
+  while IFS= read -r slug; do
+    [ -n "$slug" ] || continue
+    want="$(_rt_cfg_list "projects.${slug}.slite.doc_labels")"
+    [ -n "$want" ] || continue          # no doc_labels => this project does not watch Slite
+    [ -n "${f_labels:-}" ] && [ -f "$f_labels" ] || continue
+    while IFS= read -r l || [ -n "$l" ]; do
+      [ -n "$l" ] || continue
+      if printf '%s\n' "$want" | _rt_list_has "$l"; then printf '%s\n' "$slug"; break; fi
+    done < "$f_labels"
+  done < <(_rt_cfg_list project)
+}
+
 # _rt_title_prefix <title> — the leading [<token>], trimmed. Empty when absent.
 _rt_title_prefix() {
   local t; t="$(_rt_trim "$1")"
@@ -110,18 +191,21 @@ _rt_title_prefix() {
 #   --candidates "<slug> <slug> ..."   (required; from a route_candidates_* helper)
 #   --title <title>
 #   --body <body>
-#   --labels-file <file>               GitHub labels, one per line (Tier 2)
-#
-# Jira's Tier 2 (source.components / source.labels) is intentionally absent: Jira polling stays
-# model-driven, and a half-implemented Jira path would be worse than none — it would look supported.
+#   --labels-file <file>               labels, one per line (Tier 2)
+#   --tracker github|jira              which flavour of Tier 2 to apply (default github)
+#   --jira-key <KEY>                   the ticket's Jira project key (required when tracker=jira)
+#   --components-file <file>           Jira components, one per line (Tier 2, jira only)
 route_ticket() {
-  local cands="" title="" body="" f_labels=""
+  local cands="" title="" body="" f_labels="" tracker="github" jkey="" f_comps=""
   while [ $# -gt 0 ]; do
     case "$1" in
       --candidates) cands="$2"; shift 2 ;;
       --title) title="$2"; shift 2 ;;
       --body) body="$2"; shift 2 ;;
       --labels-file) f_labels="$2"; shift 2 ;;
+      --tracker) tracker="$2"; shift 2 ;;
+      --jira-key) jkey="$2"; shift 2 ;;
+      --components-file) f_comps="$2"; shift 2 ;;
       *) shift ;;
     esac
   done
@@ -151,21 +235,34 @@ route_ticket() {
   fi
 
   # --- Tier 2: explicit config filters -----------------------------------------------------
-  # github.issues.labels applied HERE as a routing predicate against an already-fetched issue —
-  # never as a `gh issue list --label` flag, which means AND and cannot union several watchers.
-  hits=()
-  for slug in "${list[@]}"; do
-    local want; want="$(_rt_cfg_list "projects.${slug}.github.issues.labels")"
-    if [ -z "$want" ]; then hits+=("$slug"); continue; fi     # absent/empty => catch-all
-    if [ -n "${f_labels:-}" ] && [ -f "$f_labels" ]; then
-      local l
-      while IFS= read -r l || [ -n "$l" ]; do
-        [ -n "$l" ] || continue
-        if printf '%s\n' "$want" | _rt_list_has "$l"; then hits+=("$slug"); break; fi
-      done < "$f_labels"
-    fi
-  done
-  if [ "${#hits[@]}" -eq 1 ]; then printf '%s\tfilters\tlabel filter\t0\t%s\n' "${hits[0]}" "$matched"; return 0; fi
+  # GitHub: github.issues.labels applied HERE as a routing predicate against an already-fetched
+  # issue — never as a `gh issue list --label` flag, which means AND and cannot union several
+  # watchers. Jira: the per-source components/labels filters, scoped to the sources watching this
+  # key. Either way an absent/empty filter is a catch-all, and ambiguity falls through.
+  hits=(); local why2="label filter"
+  if [ "$tracker" = "slite" ]; then
+    # The doc_labels intersection IS Tier 0 for Slite, so re-applying it here would just re-derive
+    # the candidate set. Every candidate passes and the decision falls to the hint tiers below.
+    hits=("${list[@]}")
+  elif [ "$tracker" = "jira" ]; then
+    why2="component/label filter"
+    for slug in "${list[@]}"; do
+      _rt_jira_tier2 "$slug" "$jkey" "${f_comps:-}" "${f_labels:-}" && hits+=("$slug")
+    done
+  else
+    for slug in "${list[@]}"; do
+      local want; want="$(_rt_cfg_list "projects.${slug}.github.issues.labels")"
+      if [ -z "$want" ]; then hits+=("$slug"); continue; fi     # absent/empty => catch-all
+      if [ -n "${f_labels:-}" ] && [ -f "$f_labels" ]; then
+        local l
+        while IFS= read -r l || [ -n "$l" ]; do
+          [ -n "$l" ] || continue
+          if printf '%s\n' "$want" | _rt_list_has "$l"; then hits+=("$slug"); break; fi
+        done < "$f_labels"
+      fi
+    done
+  fi
+  if [ "${#hits[@]}" -eq 1 ]; then printf '%s\tfilters\t%s\t0\t%s\n' "${hits[0]}" "$why2" "$matched"; return 0; fi
 
   # --- Tier 3a: deterministic hints --------------------------------------------------------
   # Skipped ENTIRELY when no candidate has a routing block: inference is opt-in, and this is what

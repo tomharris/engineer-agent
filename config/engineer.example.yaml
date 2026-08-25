@@ -86,17 +86,54 @@ agent:
   # responses — and when a poll finds nothing new AND every configured source is scripted, it is
   # not invoked at all. That is the common case: most polls find nothing.
   #
-  # Supported: "github-issues" (GitHub Issues) and "github" (PR review). Jira and Slite are
-  # MCP-only with no CLI to shell out to, so they always stay model-driven.
+  # Supported: "github-issues", "github" (PR review), "jira" and "slite".
+  #
+  # The two GitHub sources shell out to the already-authenticated `gh` CLI and need no extra setup.
+  # Jira and Slite have no CLI, so their collectors call the REST APIs directly and require BOTH
+  # `agent.jira.*` / `agent.slite.*` below AND an API credential (see those blocks). Missing any of
+  # that — or a missing `jq` / `curl` — is a CLEAN SKIP: the collector exits and the model polls
+  # that source exactly as it always has. You cannot break polling by listing a source here.
   #
   # The skip is ALL-OR-NOTHING per run: if any configured source is not scripted, the model still
-  # runs. So enabling only one of the two GitHub sources will not skip anything on a typical config,
-  # because both are usually configured.
+  # runs. So on a typical config you need every source you actually use listed here before a quiet
+  # poll can skip the model entirely.
   #
   # DENY-BY-DEFAULT: omit this block (or leave the list empty) and polling behaves exactly as it
   # always has. Override at runtime with EA_POLL_SCRIPTED_SOURCES (space- or comma-separated).
   poll:
-    scripted_sources: []          # e.g. ["github-issues", "github"]
+    scripted_sources: []          # e.g. ["github-issues", "github", "jira", "slite"]
+
+  # Jira REST access — ONLY used by the scripted collector (agent.poll.scripted_sources: ["jira"]).
+  # Everything else in the plugin reaches Jira through mcp__atlassian__*, which needs none of this.
+  # Omit the whole block and Jira polling stays model-driven, exactly as before.
+  #
+  # ⚠ NEVER put the API token in this file. This document gets pasted into issues when asking for
+  # help, and ea-config.sh's normalized dump is designed to be safe to log. The keys below name
+  # WHERE the secret is; scripts/lib-secret.sh reads it at use time. Resolution order is
+  # env var -> file -> macOS Keychain, and the RECOMMENDED route on macOS is the Keychain:
+  #
+  #     scripts/setup-credentials.sh jira        # prompts, stores in the login keychain
+  #
+  # because cron/launchd hand the poll a MINIMAL environment. An `export EA_JIRA_API_TOKEN=...` in
+  # your shell profile works in every terminal you test from and is ABSENT in the supervised poll —
+  # so the env route resolves by hand and silently yields nothing every 15 minutes forever. (Same
+  # class of bug as the missing $USER that once broke every cron poll; see CLAUDE.md.) The poll
+  # already runs as a gui-session LaunchAgent, so it can read the login keychain.
+  #
+  # Mint a token at https://id.atlassian.com/manage-profile/security/api-tokens
+  jira:
+    site: "yourco.atlassian.net"      # your Jira Cloud host
+    email: "me@example.com"           # the Atlassian account the token belongs to
+    api_token_env: ""                 # optional: name of an env var holding the token
+    api_token_file: ""                # optional: path to a 0600 file containing it (Linux)
+    # api_base: "/rest/api/2"         # v2 deliberately: v3 returns descriptions as ADF JSON
+
+  # Slite REST access — ONLY used by the scripted collector (scripted_sources: ["slite"]).
+  # Same credential rules as Jira above. Key: https://app.slite.com → Settings → API.
+  slite:
+    api_key_env: ""                   # optional: name of an env var holding the key
+    api_key_file: ""                  # optional: path to a 0600 file containing it
+    # api_base: "https://api.slite.com/v1"
 
   # Autonomy tiers — action types the agent may execute WITHOUT a human approval gate.
   # Only "draft-pr" is supported today: a draft PR merges nothing and requests no review,

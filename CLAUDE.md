@@ -26,8 +26,9 @@ references/                    — Shared procedural docs skills Read at runtime
                                  scripts/lib-routing.sh and scripts/lib-ticket-kind.sh are the
                                  executable implementation of their deterministic tiers.
 hooks/hooks.json               — Claude Code hook registrations (turn-completion pushes)
-scripts/                       — Cron polling, ntfy notify/listener, setup scripts, and the
-                                 deterministic collector stack (see "Deterministic polling")
+scripts/                       — Cron polling, ntfy notify/listener, setup scripts, credential
+                                 storage, and the deterministic collector stack (see
+                                 "Deterministic polling")
 tests/                         — Shell test suites; `bash tests/run-all.sh` runs every one
 config/engineer.example.yaml   — Config template
 ```
@@ -98,8 +99,15 @@ Two `agent` subsections drive autonomy (both optional):
   merging it, so a project can *narrow* the triggers (the operation that fixes a false positive); an
   explicitly empty list disables that tier. See "Ticket Kind" below.
 - `agent.poll.scripted_sources` — a list of sources collected by a **deterministic script**
-  rather than by the model (`github-issues`, `github`). Absent/empty ⇒ the prompt-driven path,
-  unchanged. Env override `EA_POLL_SCRIPTED_SOURCES`. See "Deterministic polling" below.
+  rather than by the model (`github-issues`, `github`, `jira`, `slite`). Absent/empty ⇒ the
+  prompt-driven path, unchanged. Env override `EA_POLL_SCRIPTED_SOURCES`. See "Deterministic
+  polling" below.
+- `agent.jira` / `agent.slite` — REST access for the **scripted** Jira/Slite collectors only
+  (`site`, `email`, `api_token_env`, `api_token_file`, `api_base`; Slite takes `api_key_env`,
+  `api_key_file`, `api_base`). Every other Jira/Slite surface in the plugin uses `mcp__atlassian__*`
+  / `mcp__slite__*` and needs none of this. **The credential is never in `engineer.yaml`** — these
+  keys name *where* the secret is and `scripts/lib-secret.sh` resolves it (env → file → macOS
+  Keychain) at use time. `scripts/setup-credentials.sh` stores and checks it.
 - `agent.notify.turn_completions` — push an FYI at the end of every turn of an `implement-ticket` session (interactive and headless). Absent/false ⇒ off. Read by `yaml_agent_notify()` in `lib-paths.sh`; see "Turn-completion pushes (opt-in)".
 
 Slack access (`agent.slack`, optional) has **two selectable backends**, chosen by
@@ -320,6 +328,12 @@ YAML frontmatter fields:
 - `audit_confidence`: (code-audit-finding only) `medium` | `high` (low is filtered out)
 - `audit_file`: (code-audit-finding only) repo-relative path to the offending file
 - `audit_line_range`: (code-audit-finding only) e.g. `"42-58"`
+- `jira_status`: (Jira tickets only) the ticket's current status name
+- `doc_id`: (doc-review only) the Slite note id (`source_id` is the prefixed `slite:{doc_id}`)
+- `doc_labels`: (doc-review only) array of labels the doc carries
+- `label_source`: (doc-review only) `tags` | `query` — whether the doc's label match came from a
+  real tag comparison or only from the search term that found it. Recorded because the Slite REST
+  API does not reliably expose tags, and the gate should see when the match was the weaker kind
 - `codify_target`: (codify-candidate only) `memory-file` | `skill-note` | `claude-md`
 - `codify_path`: (codify-candidate only) absolute path of the file the learning will be written to on approval
 
@@ -801,7 +815,7 @@ steady state of a healthy queue is `items_queued: 0`, so most of that spend boug
 
 ```
 cron-poll.sh
-  ├─ PHASE A  scripts/poll-github-issues.sh / poll-github-prs.sh   (no model)
+  ├─ PHASE A  scripts/poll-{github-issues,github-prs,jira,slite}.sh   (no model)
   │           fetch → filter → reconcile → route → classify → write queue file → state + receipt
   │           emits queue/incoming/*.md + state/poll-manifest.tsv
   └─ PHASE B  claude -p, ONLY if the manifest is non-empty
@@ -816,9 +830,11 @@ A full 5-repo poll of a real config takes ~6s and writes a receipt byte-identica
 | Work | Where |
 |---|---|
 | Config parse, tracker inference, per-source configured/skipped decision | bash (`ea-config.sh`) |
-| Fetch (`gh issue list`, `gh pr list`), all filters, priority mapping | bash |
+| Fetch (`gh issue list`/`pr list`; Jira + Slite REST via curl), all filters, priority mapping | bash |
 | Reconciliation table (skip / unchanged / update-in-place / create) | bash (`lib-queue.sh`) |
-| Routing ladder **tiers 0–3a** | bash (`lib-routing.sh`) |
+| Routing ladder **tiers 0–3a**, for GitHub, Jira *and* Slite | bash (`lib-routing.sh`) |
+| Jira JQL construction, quoting, and the account-timezone conversion | bash (`poll-jira.sh`) |
+| Credential resolution (env → file → Keychain), read-only | bash (`lib-secret.sh`) |
 | Ticket-kind **tiers 0–2 and 3 Form A** | bash (`lib-ticket-kind.sh`) |
 | Filename, frontmatter, `## Context`, branch slug | bash (`lib-queue-write.sh`) |
 | State + receipt | bash (`lib-state.sh`, `cron-poll.sh`) |
@@ -834,14 +850,15 @@ already-documented `incoming/` + `_unrouted` → update-in-place branch of
 
 | File | Role |
 |---|---|
-| `lib-yaml.sh` | one generic indent-stack YAML reader (`yaml_get`/`yaml_get_list`/`yaml_keys`) |
+| `lib-yaml.sh` | one generic indent-stack YAML reader (`yaml_get`/`yaml_get_list`/`yaml_keys`/`yaml_seq_len`), including block sequences of mappings (`jira.sources`) and block scalars (`routing.description`) |
 | `ea-config.sh` | normalizes `engineer.yaml` to flat greppable lines, applying defaults, tracker inference and the `investigation.*` replace-not-merge rule **once** |
 | `lib-queue.sh` | frontmatter access + `queue_disposition` (the reconciliation table) + `poll_resume_candidates` |
 | `lib-queue-write.sh` | queue-item construction, with real YAML escaping |
 | `lib-routing.sh` / `lib-ticket-kind.sh` | the deterministic ladder tiers |
 | `lib-state.sh` | round-trips `state/last-poll.yaml`, preserving model-written sections |
 | `lib-time.sh` | GNU/BSD-portable timestamp helpers |
-| `poll-github-issues.sh` / `poll-github-prs.sh` | the collectors |
+| `poll-github-issues.sh` / `poll-github-prs.sh` / `poll-jira.sh` / `poll-slite.sh` | the collectors |
+| `lib-secret.sh` / `setup-credentials.sh` | resolve (read-only) and store the Jira/Slite API credentials |
 | `queue-status.sh` / `queue-list.sh` | the data behind `status` / `review-queue` |
 
 > **`ea-config.sh dump` emits a CURATED view and deliberately omits `agent.notify.ntfy.*`.** On
@@ -851,15 +868,73 @@ already-documented `incoming/` + `_unrouted` → update-in-place branch of
 
 ### Invariants that survive the move
 
-- **Polling still only reads.** The collectors call `gh issue list` / `gh pr list` and write files
-  under `$EA_AGENT_DIR`. No posting verb is reachable from Phase A at all — the read-only guarantee
-  is now structural in bash rather than enforced by an `--allowedTools` allowlist.
+- **Polling still only reads.** The collectors call `gh issue list` / `gh pr list`, and — for Jira
+  and Slite — `GET`/`POST /search` REST endpoints that return data only. No posting verb is
+  reachable from Phase A at all; the read-only guarantee is structural in bash rather than enforced
+  by an `--allowedTools` allowlist. The Jira credential is an API token whose scope is the account's
+  own permissions, so this is the one place where "read-only" is a property of the *verbs used*
+  rather than of the *capability held* — keep it that way: no collector may ever call
+  `POST /issue/{key}/comment` or a transition.
 - **Injection containment is stronger, not weaker.** The routing candidate set is computed from
   config alone and every tier can only narrow it, so a scripted route can only ever emit a slug the
   config already permits. The kind ladder's entire output alphabet is two fixed strings.
 - **Terminal state stays absorbing.** `queue_disposition` looks up the whole `{ticket,
   ticket-investigation}` family *including* `completed/` and `rejected/`, so the self-sustaining
   re-queue loop (engineer-agent's own comment bumps `updatedAt`) cannot restart.
+
+### Jira and Slite: what REST changes
+
+These two have no CLI to shell out to, which is why they were previously listed as permanently
+model-driven. Four consequences that a reader will otherwise try to "simplify" away:
+
+- **Jira REST API v2, not v3.** v3 returns `description` as an Atlassian Document Format *tree*;
+  reconstructing prose from that in bash would be a parser of its own, and its failure mode is a
+  queue item with an empty or mangled `### Description` that a human then approves work from. v2
+  returns text. Both are supported on Jira Cloud.
+- **`jq` is a hard dependency of these two collectors and a soft one for the poll.** The GitHub
+  collectors use `gh --jq` (gh's embedded engine) to honour the "the cron path is jq-free" policy;
+  there is no equivalent for curl. So a missing `jq` exits 3 and the model polls that source, which
+  is what the policy actually protects.
+- **The JQL timezone conversion is load-bearing.** A bare datetime in JQL is read in the *account's*
+  Jira profile timezone, not UTC, so feeding it a UTC watermark's clock digits shifts the window by
+  the account offset — six hours into the **future** for a Denver account, after which every ticket
+  updated during working hours falls before the cutoff. The poll then queues nothing and reports
+  `status: ok`, which is indistinguishable from a quiet day. The offset is read off a real returned
+  timestamp (DST-correct, no tz database); a **failed** bootstrap exits 3 rather than assuming UTC,
+  because silently assuming +00:00 on a non-UTC account reintroduces the bug with no signal at all.
+- **Slite's tag exposure is not guaranteed.** The note object is read for several plausible tag
+  shapes; when none is present the doc is matched on the search query that found it and the item
+  records `label_source: query`, so the approval gate can see the match was weaker than a real tag
+  comparison. An *unrecognisable* response shape exits 3 rather than yielding zero docs — "no docs
+  need review" must never be something a parse failure can say.
+
+**A bug fixed in passing:** `skills/poll-slite/SKILL.md` iterates per project and queues a matching
+doc for each. In a real config all six projects set `doc_labels: ["needs-review"]`, so every review
+doc matches every project and the global `source_id` dedup silently awards it to whichever project
+the loop reached first — the shared-repo trap in a different costume. `poll-slite.sh` collects docs
+once and routes them through the ladder, so the ambiguous case becomes a visible `_unrouted` item
+instead of an invisible arbitrary assignment.
+
+### Credentials
+
+`agent.jira.*` / `agent.slite.*` name **where** the token is, never what it is: `engineer.yaml` is a
+file people paste into issues when asking for help, and `ea-config.sh dump` is documented as safe to
+log. `lib-secret.sh` resolves env var → file → macOS Keychain and never writes; `setup-credentials.sh`
+is the single (interactive) writer, and its `check` subcommand reports what resolves without printing
+a secret.
+
+> **Prefer the Keychain on macOS.** cron/launchd/systemd hand the run a minimal environment, so a
+> token exported from a shell profile is present in every terminal you test from and ABSENT in the
+> supervised poll — the collector then skips cleanly every 15 minutes forever, and the only symptom
+> is that Jira is never actually scripted. This is the same class of bug as the missing `$USER` that
+> once broke every cron poll. The poll already runs as a `gui/$UID` LaunchAgent specifically so it
+> can read the login keychain (`slack-mcp.sh` relies on the same property), so this needs no
+> scheduler change. `setup-credentials.sh check` warns when a token resolves only from the
+> environment.
+
+Credentials are passed to curl via `--config -` (**stdin**), never `-u`/`-H` in argv: an argv
+credential is readable by any other process on the box via `ps`, and this runs unattended every 15
+minutes. Both test suites assert the secret never appears in argv.
 
 ### Two hazards the design has to handle
 
@@ -894,6 +969,23 @@ need real `jq` and must gate on it softly (fall back to the model), never hard-f
 - **`set -o pipefail` + `grep -q`** reports a *successful* match as a failed pipeline, because
   `grep -q` closes the pipe and the upstream dies of SIGPIPE. Capture output first, then grep.
 - **`close` is a reserved word in awk** and cannot be a parameter name.
+- **No apostrophes inside the awk program.** `lib-yaml.sh` holds its whole awk script in a
+  single-quoted string, so an apostrophe in a *comment* terminates it and the file stops parsing.
+  That is why the existing code writes `\047` for a literal quote. A comment reading "the
+  sequence's parent" is a syntax error.
+- **A bare statement before `else` is not portable awk.** `if (c) x = 1` on its own line followed by
+  `else` is rejected by BSD awk (which is what macOS LaunchAgents run). Brace every arm.
+- **`"maxResults":1` is a substring of `"maxResults":100`.** A test stub dispatching on the former
+  served the timezone fixture to every search page, so the collector saw zero issues and every
+  assertion after it failed. Anchor on the trailing comma.
+- **Jira `jira.sources` is a block sequence of MAPPINGS**, which `lib-yaml.sh` refused outright
+  before this work (`[]#map-unsupported`). It is now modelled as indexed sub-paths
+  (`…sources[0].project`) rather than flattened, because the elements are a set whose filters must
+  stay attached to their own project key — flattened, a catch-all source silently inherits the
+  previous one's component filter.
+- **`routing.description` is written as a folded block scalar (`>-`) in a real config**, and the
+  reader returned the literal `>-` as the value. Tier 3b of the routing ladder has no other input,
+  so the tier looked configured while deciding on two characters of punctuation.
 
 ### A spec ambiguity this surfaced
 

@@ -80,6 +80,28 @@ projects:
     path: "/tmp/beta"
     routing:
       keywords: ["void", "payroll"]
+      description: >-
+        PHP payroll workflows service. Orchestrator layer between
+        treasury and everything else. Abbreviated "WF".
+      paths: ["app/payroll/**"]
+    literal_block: |
+      line one
+      line two
+    jira:
+      sources:
+        - project: "ENG"
+          components: ["api", "backend"]
+          labels: []
+        - project: "PLAT"
+        - project: "OPS"
+          labels: ["infra"]
+      assignee: "me@example.com"
+      statuses:
+        - "To Do"
+        - "In Progress"
+  gamma:
+    jira:
+      project: "LEGACY"
 YAML
 
 echo "== scalars =="
@@ -115,8 +137,57 @@ if yaml_has_list agent.investigation.nonexistent  "$FIX"; then bad "absent list 
 eq "empty list yields no items" "" "$(yaml_get_list agent.investigation.github_labels "$FIX")"
 if yaml_has_list projects.alpha.github.ignore_labels "$FIX"; then ok "empty flow list PRESENT"; else bad "empty flow list should be PRESENT"; fi
 
+echo "== block sequences of MAPPINGS (jira.sources) =="
+# Previously refused outright: such an item emitted "[]#map-unsupported" because nothing read
+# jira.sources while Jira polling was model-driven. scripts/poll-jira.sh reads it now.
+#
+# The property that matters is PAIRING. `sources` is a set whose elements each carry their own
+# filters, and an N:M routing config depends on those staying attached to the right project key —
+# flatten them and PLAT silently inherits ENG's component filter, which is a misroute that looks
+# like a confident decision.
+eq "element count"            "3" "$(yaml_seq_len projects.beta.jira.sources "$FIX")"
+eq "element 0 key"            "ENG"  "$(yaml_get projects.beta.jira.sources[0].project "$FIX")"
+eq "element 1 key"            "PLAT" "$(yaml_get projects.beta.jira.sources[1].project "$FIX")"
+eq "element 2 key"            "OPS"  "$(yaml_get projects.beta.jira.sources[2].project "$FIX")"
+eq "filters stay with their element" "api backend" \
+   "$(yaml_get_list projects.beta.jira.sources[0].components "$FIX" | tr '\n' ' ' | sed 's/ $//')"
+eq "element 2 labels"         "infra" \
+   "$(yaml_get_list projects.beta.jira.sources[2].labels "$FIX" | tr '\n' ' ' | sed 's/ $//')"
+# A catch-all element must have NO filters — not the previous element's.
+eq "catch-all inherits nothing (components)" "" "$(yaml_get_list projects.beta.jira.sources[1].components "$FIX")"
+eq "catch-all inherits nothing (labels)"     "" "$(yaml_get_list projects.beta.jira.sources[1].labels "$FIX")"
+# An explicitly empty filter list is still PRESENT, same contract as everywhere else.
+if yaml_has_list projects.beta.jira.sources[0].labels "$FIX"; then ok "empty filter list PRESENT"; else bad "empty filter list should be PRESENT"; fi
+
+# A key at or above the sequence indent CLOSES it. Without that, `statuses` items would land
+# inside sources[3] and both lists would be wrong — silently, with no parse error.
+eq "sibling scalar after the sequence" "me@example.com" "$(yaml_get projects.beta.jira.assignee "$FIX")"
+eq "sibling BLOCK LIST after the sequence" "To Do In Progress" \
+   "$(yaml_get_list projects.beta.jira.statuses "$FIX" | tr '\n' ' ' | sed 's/ $//')"
+eq "sequence did not absorb the sibling list" "3" "$(yaml_seq_len projects.beta.jira.sources "$FIX")"
+
+# Backward compat: the legacy scalar form stays a scalar, so poll-jira can detect and normalize it.
+eq "legacy jira.project scalar" "LEGACY" "$(yaml_get projects.gamma.jira.project "$FIX")"
+eq "legacy form has no sequence" "0" "$(yaml_seq_len projects.gamma.jira.sources "$FIX")"
+eq "absent sequence counts 0"    "0" "$(yaml_seq_len projects.alpha.jira.sources "$FIX")"
+
+echo "== block scalars =="
+# NOT hypothetical: a real installed engineer.yaml writes routing.description as a folded block
+# scalar, and this reader used to return the literal indicator ">-" as the value. Tier 3b of
+# references/routing-ladder.md has no other input, so the tier looked configured and was deciding
+# on two characters of punctuation.
+eq "folded block scalar is folded, not truncated" \
+   'PHP payroll workflows service. Orchestrator layer between treasury and everything else. Abbreviated "WF".' \
+   "$(yaml_get projects.beta.routing.description "$FIX")"
+eq "literal block scalar" "line one line two" "$(yaml_get projects.beta.literal_block "$FIX")"
+# The dedent that ends a block scalar must hand the line back to the enclosing mapping, or every
+# key after a description silently vanishes.
+eq "key after a block scalar is still reachable" "app/payroll/**" \
+   "$(yaml_get_list projects.beta.routing.paths "$FIX" | tr '\n' ' ' | sed 's/ $//')"
+eq "sibling of the block-scalar owner survives" "/tmp/beta" "$(yaml_get projects.beta.path "$FIX")"
+
 echo "== keys =="
-eq "project slugs"  "alpha beta" "$(yaml_keys projects "$FIX" | tr '\n' ' ' | sed 's/ $//')"
+eq "project slugs"  "alpha beta gamma" "$(yaml_keys projects "$FIX" | tr '\n' ' ' | sed 's/ $//')"
 eq "top-level keys" "agent projects" "$(yaml_keys "" "$FIX" | tr '\n' ' ' | sed 's/ $//')"
 # A slug header carrying a trailing comment must still be seen as a mapping key. lib-paths.sh's
 # projects.* family compares the raw trimmed line and misses exactly this.
@@ -138,6 +209,12 @@ if [ -f "$EX" ]; then
   eq "example: repos flow seq"       "my-api" \
      "$(yaml_get_list projects.my-api.github.repos "$EX" | tr '\n' ' ' | sed 's/ $//')"
   eq "example: deep mcp scalar"      "REPLACE_ME" "$(yaml_get agent.slack.mcp.server_id "$EX")"
+  eq "example: jira.sources parses"  "1"   "$(yaml_seq_len projects.my-api.jira.sources "$EX")"
+  eq "example: jira source key"      "ENG" "$(yaml_get projects.my-api.jira.sources[0].project "$EX")"
+  eq "example: jira source filters"  "api backend" \
+     "$(yaml_get_list projects.my-api.jira.sources[0].components "$EX" | tr '\n' ' ' | sed 's/ $//')"
+  eq "example: statuses survive the sequence" "To Do In Progress" \
+     "$(yaml_get_list projects.my-api.jira.statuses "$EX" | tr '\n' ' ' | sed 's/ $//')"
 else
   bad "config/engineer.example.yaml missing"
 fi

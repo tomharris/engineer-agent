@@ -210,6 +210,31 @@ if is_scripted github; then
     echo "WARN: phase A poll-github-prs.sh exited non-zero; leaving this source to the model" >> "$LOG_FILE"
   fi
 fi
+# Jira and Slite reach their APIs over REST with curl+jq rather than through a CLI, so they have
+# MORE ways to be legitimately unavailable than the GitHub collectors: no jq, no credential, no
+# `agent.jira.site`. Each of those exits 3, which lands here as "leave this source to the model" —
+# the same graceful degradation an unset agent.poll.scripted_sources already gives.
+#
+# Invoked via `bash` rather than executed directly: unlike the GitHub pair these are new files, and
+# a lost executable bit (a zip download, a checkout with core.fileMode off, a `/plugin update` that
+# does not preserve modes) would otherwise fail silently-by-degradation forever — the source would
+# just never be scripted, with a one-line WARN in a log nobody reads.
+if is_scripted jira; then
+  echo "phase A: collecting Jira deterministically" >> "$LOG_FILE"
+  if bash "${PLUGIN_ROOT}/scripts/poll-jira.sh" --run-ts "$RUN_TS" --manifest "$MANIFEST" >> "$LOG_FILE" 2>&1; then
+    SCRIPTED_RAN="${SCRIPTED_RAN} jira"
+  else
+    echo "WARN: phase A poll-jira.sh exited non-zero; leaving this source to the model" >> "$LOG_FILE"
+  fi
+fi
+if is_scripted slite; then
+  echo "phase A: collecting Slite deterministically" >> "$LOG_FILE"
+  if bash "${PLUGIN_ROOT}/scripts/poll-slite.sh" --run-ts "$RUN_TS" --manifest "$MANIFEST" >> "$LOG_FILE" 2>&1; then
+    SCRIPTED_RAN="${SCRIPTED_RAN} slite"
+  else
+    echo "WARN: phase A poll-slite.sh exited non-zero; leaving this source to the model" >> "$LOG_FILE"
+  fi
+fi
 
 # Can the model be skipped entirely this run? Only when EVERY configured source across every
 # project was collected by a script AND the collectors produced nothing needing a draft.
