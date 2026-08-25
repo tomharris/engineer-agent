@@ -480,27 +480,55 @@ from a run that failed silently):
   in-session agent: it only polls while the user is logged into the GUI. This is why we **do NOT
   re-add the reverted `auth.env`/`CLAUDE_CODE_OAUTH_TOKEN` loader** — the launchd path keeps no
   long-lived secret on disk.
-- **`forceLoginOrgUUID` is a separate, orthogonal wall that blocks *all* headless auth — keychain
-  and env-token alike — so no scheduler choice helps while it is present.** When an org deploys a
-  root-owned `/Library/Application Support/ClaudeCode/managed-settings.json` with
-  `forceLoginMethod: claudeai` + `forceLoginOrgUUID: <uuid>`, Claude Code restricts login to that
-  org, **exits at startup if the active credential isn't a verified member**, and per the official
-  docs *blocks all environment credentials* (`ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`,
-  `apiKeyHelper`, `CLAUDE_CODE_OAUTH_TOKEN`) "since organization membership can't be verified for an
-  environment credential." It surfaces as `Unable to verify organization for the current
-  authentication token. This machine requires organization <uuid> but the token could not be
-  validated` and `claude` exits 1 — a **freshly-minted, org-valid `claude setup-token` still fails
-  identically** (verified 2026-07-16), because it is an environment credential regardless of which
-  org minted it. Under this policy the interactive GUI keychain login passes but a scheduler can't
-  reach it, so a token on disk was a genuine dead end. **This policy was removed from this machine
-  on 2026-07-17**; with it gone, the residual "Not logged in" was purely the out-of-session keychain
-  problem above, fixed by the launchd migration. If the policy is ever re-deployed, the only
-  surviving headless paths are (a) a cloud-provider inference path (Bedrock/Vertex/Foundry, via
+- **`forceLoginOrgUUID` blocks *environment* credentials only — it does NOT block a keychain
+  credential, so it is not a headless dead end.** When an org deploys a root-owned
+  `/Library/Application Support/ClaudeCode/managed-settings.json` with `forceLoginMethod: claudeai`
+  + `forceLoginOrgUUID: <uuid>`, Claude Code restricts login to that org, **exits at startup if the
+  active credential isn't a verified member**, and per the official docs *blocks all environment
+  credentials* (`ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `apiKeyHelper`,
+  `CLAUDE_CODE_OAUTH_TOKEN`) "since organization membership can't be verified for an environment
+  credential." It surfaces as `Unable to verify organization for the current authentication token.
+  This machine requires organization <uuid> but the token could not be validated` and `claude`
+  exits 1 — a **freshly-minted, org-valid `claude setup-token` still fails identically** (verified
+  2026-07-16), because it is an environment credential regardless of which org minted it.
+  **But the login-keychain credential is not an environment credential.** When it belongs to a
+  verified member of the named org it passes under the policy, and a `gui/$UID` LaunchAgent can read
+  it — so the in-session scheduler above is sufficient *with the policy in force*. **Verified
+  2026-08-25** on a machine where the policy was present and Jamf-re-enforced: pristine `claude -p`
+  under `env -i` (HOME/USER/PATH only) authenticated, then a full poll ran `status: ok` /
+  `errors: []` across 21 sources. This corrects an earlier claim here that the policy "blocks *all*
+  headless auth … no scheduler choice helps", and a companion claim that the policy had been
+  *removed* from this machine on 2026-07-17 — it returned 2026-07-24 via Jamf and is active now.
+  Wall A (policy) and Wall B (out-of-session keychain) were never stacked: **clearing B was
+  sufficient.** Practical consequence: **the two walls fail differently, so read the error.**
+  `Unable to verify organization…` = an environment credential is in play (remove it; don't add
+  one). Plain `Not logged in` = the keychain isn't reachable — an out-of-session scheduler, a
+  missing `USER`, or a GUI session that isn't logged in. Only if a keychain credential is genuinely
+  unavailable (no interactive login possible, e.g. a headless build box) do the fallbacks apply:
+  (a) a cloud-provider inference path (Bedrock/Vertex/Foundry, via
   `CLAUDE_CODE_USE_BEDROCK`/`_VERTEX`/`_FOUNDRY`), which the docs exempt, or (b) an org/IT exemption
-  or org-scoped headless credential. If a root-owned `managed-settings.json` is present, do **not**
-  delete or shim around it — it is an intentional corporate security control.
+  or org-scoped headless credential. Do **not** re-add an `auth.env`/`CLAUDE_CODE_OAUTH_TOKEN`
+  loader — that is precisely the credential class the policy rejects. If a root-owned
+  `managed-settings.json` is present, do **not** delete, truncate, or shim around it (and do not
+  patch the `claude` binary's `managed/settings` string to make it unreadable) — it is an
+  intentional corporate security control, and MDM restores it anyway.
 
 Both `cron-poll.sh` and `approval-listener.sh` resolve the Claude Code binary from `PATH` by default, but honor a `CLAUDE_BIN` env var override (a specific shim/wrapper/install path). Because cron, systemd, and launchd do not inherit the interactive shell environment, `install-cron.sh` and `install-listener.sh` capture `CLAUDE_BIN` when set at install time and bake it into the launchd `EnvironmentVariables` (macOS) / systemd `Environment=` (Linux listener) / crontab entry (Linux poll) so the supervised runs use the same binary. On macOS `install-cron.sh` also accepts `EA_POLL_HOURS` (comma-separated clock hours) + `EA_POLL_MINUTE` to emit a `StartCalendarInterval` schedule confined to business hours instead of the default `StartInterval` every-N-minutes; this caps how much a first poll on a large assigned backlog can spend.
+
+> **Changing `CLAUDE_BIN` (or any `EnvironmentVariables` entry) in a LaunchAgent plist does not
+> affect the running job — you must `bootout` + `bootstrap`, not `kickstart`.** launchd caches a
+> job's environment block when the job is loaded, so an edited plist is inert until the job
+> definition is re-read. `launchctl kickstart -k` restarts the *process* but reuses the *cached
+> definition*, so it silently does not pick up the change. This burned a real migration: both
+> `engineer-agent-poll` and `engineer-agent-listener` ran for hours with a live
+> `CLAUDE_BIN` pointing at a wrapper whose target binary had been moved away, while the plists on
+> disk had already been corrected — the poll wrote no receipt and the listener failed every
+> approval with `No such file or directory` and left the item in `drafts/`. Note the
+> `approval-listener.sh` mtime self-reexec **cannot** catch this class of staleness: the script file
+> is unchanged, it is the job environment that is stale. So always verify with
+> `launchctl print gui/$UID/<job> | grep CLAUDE_BIN` — reading the plist proves nothing about what
+> is running. `install-cron.sh` / `install-listener.sh` do a full bootout+bootstrap, so a
+> re-install is also a valid fix; a hand-edited plist is not.
 
 The poll's own per-run budget is capped with `--max-budget-usd`, default **`6.00`**, overridable via
 `EA_POLL_BUDGET_USD` (captured at install time and baked into launchd/crontab like `CLAUDE_BIN`). A
