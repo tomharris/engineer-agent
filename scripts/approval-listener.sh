@@ -314,6 +314,29 @@ reconcile_queue_move() {
   fi
 }
 
+# reconcile_incoming_draft_move — the incoming/ -> drafts/ half of the same problem.
+# run_qa_generation's confined run creates its queue item in incoming/ and must then move it to
+# drafts/, but drafts/ is the ONLY dir the approval gate reads, and the move is a delete outside
+# the worktree cwd — which the sandbox refuses regardless of the `Bash(mv *)` rule. So the run
+# writes the drafts/ copy and the incoming/ original survives: a live duplicate of the exact same
+# (type, source_id), reported by queue-dedup-check.sh on every poll from then on.
+#
+# Same resolution as reconcile_queue_move: the run states intent by writing the destination, and
+# the listener finishes the move here in plain bash. Guarded on the drafts/ counterpart existing
+# under the identical basename — same timestamp, type and id means it IS the same item mid-move,
+# never a different one. Scoped by glob to the type this run produces, so an unrelated item parked
+# in incoming/ is left for poll_resume_candidates to heal.
+reconcile_incoming_draft_move() {
+  local pattern="$1" f base
+  for f in "${AGENT_DIR}/queue/incoming/"$pattern; do
+    [ -e "$f" ] || continue
+    base="$(basename "$f")"
+    if [ -e "${AGENT_DIR}/queue/drafts/${base}" ]; then
+      rm -f "$f" && log "reconciled: removed stale incoming/${base} (drafts/ copy present)"
+    fi
+  done
+}
+
 # run_ticket_investigation — confined READ-ONLY investigation of an approved `ticket-investigation`.
 # A Spike / Decision / documentation Task delivers a findings DOCUMENT, not code: the output is a
 # `## Findings` comment on the ticket plus a local archive. So it can use neither the read/post
@@ -520,7 +543,7 @@ run_qa_generation() {
 The current working directory is an isolated git worktree of the target repo, checked out on the ticket branch. \
 Read config from ${EA_CONFIG_FILE}. Follow skills/generate-qa/SKILL.md via the engineer-agent qa command (commands/qa.md): \
 project '${project}', base branch '${base}', deriving the ticket from the current branch / the queue item — gather the ticket AC, any PR, and the branch diff, create a qa-test-plan queue item, and draft it. \
-Use 'mv' (not rm) for the incoming/ -> drafts/ queue move. \
+Leave the drafted item in ${AGENT_DIR}/queue/drafts/ (write it there directly); you do NOT need to delete the incoming/ original — the listener reconciles that afterward; do not spend effort trying to remove it. \
 Do NOT modify the already-completed ticket record at ${AGENT_DIR}/queue/completed/${item}. Operate only inside this working directory and the engineer-agent queue. \
 ${NO_MEMORY_RULE} Be concise."
 
@@ -532,6 +555,9 @@ ${NO_MEMORY_RULE} Be concise."
       --max-budget-usd "$budget" \
       "$prompt" \
       </dev/null ) >> "$LOG_FILE" 2>&1
+
+  # Finish the incoming/ -> drafts/ move the confined run could not complete (see above).
+  reconcile_incoming_draft_move '*qa-test-plan*.md'
 
   # Judge success by a real side effect (never by claude -p's exit code): a new qa-test-plan
   # draft landing in the queue. FYI only — qa-test-plan is interactive-only for approval, so we
