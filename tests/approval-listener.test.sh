@@ -16,7 +16,7 @@ bad()  { echo "  FAIL: $1"; FAIL=$((FAIL+1)); }
 setup() {
   TMP="$(mktemp -d)"
   export EA_AGENT_DIR="$TMP/agent"
-  mkdir -p "$EA_AGENT_DIR/queue/drafts" "$EA_AGENT_DIR/queue/completed" "$EA_AGENT_DIR/state"
+  mkdir -p "$EA_AGENT_DIR/queue/incoming" "$EA_AGENT_DIR/queue/drafts" "$EA_AGENT_DIR/queue/completed" "$EA_AGENT_DIR/state"
 
   # ntfy settings via env so resolve_ntfy_settings is satisfied (no real network).
   export EA_NTFY_SERVER="https://example.invalid"
@@ -62,6 +62,12 @@ fi
 if printf '%s' "$*" | grep -q "Generate a QA test plan"; then
   if [ "${FAKE_QA_DRAFT:-0}" = "1" ]; then
     printf 'type: qa-test-plan\n' > "$EA_AGENT_DIR/queue/drafts/20260716-000000-qa-test-plan-fake.md"
+  fi
+  # The real confined run cannot delete outside its worktree, so the incoming/ original it
+  # was told to `mv` survives alongside the drafts/ copy it wrote. See the WIRE-2194 duplicate.
+  if [ "${FAKE_QA_INCOMING_LEFTOVER:-0}" = "1" ]; then
+    mkdir -p "$EA_AGENT_DIR/queue/incoming"
+    printf 'type: qa-test-plan\nstatus: drafted\n' > "$EA_AGENT_DIR/queue/incoming/20260716-000000-qa-test-plan-fake.md"
   fi
   exit 0
 fi
@@ -269,6 +275,31 @@ test_ticket_generates_qa() {
   grep -q "Done" "$NOTIFY_LOG" && ! grep -q "Failed" "$NOTIFY_LOG" \
     && ok "ticket still reports Done (QA is best-effort)" || bad "wrong ticket ack"
   unset FAKE_TICKET_RECONCILE FAKE_QA_DRAFT
+  teardown
+}
+
+# --- Case 4e: the QA run leaves its incoming/ original behind -> listener reconciles it ---
+# The confined QA run writes the drafted item into drafts/ but cannot delete the incoming/
+# original: that path is outside the worktree cwd. Left alone it is a live duplicate of the
+# drafts/ copy, and queue-dedup-check.sh reports the same (type, source_id) every poll forever.
+test_ticket_qa_reconciles_incoming_stub() {
+  echo "test_ticket_qa_reconciles_incoming_stub:"
+  setup
+  write_ticket_config with-allowlist with-qa
+  install_fake_git
+  local item="20260716-000000-ticket-gh-5.md"
+  printf 'type: ticket\nproject: wayfinder-api\n' > "$EA_AGENT_DIR/queue/drafts/$item"
+  export FAKE_TICKET_RECONCILE=1
+  export FAKE_QA_DRAFT=1
+  export FAKE_QA_INCOMING_LEFTOVER=1   # realistic: sandbox blocked the mv, both copies survive
+  handle_line "$(msg_event id-ticket-qa-leftover "approve|$item")"
+
+  compgen -G "$EA_AGENT_DIR/queue/drafts/*qa-test-plan*" >/dev/null \
+    && ok "qa-test-plan draft present in drafts/" || bad "qa-test-plan draft missing"
+  compgen -G "$EA_AGENT_DIR/queue/incoming/*qa-test-plan*" >/dev/null \
+    && bad "incoming/ QA original left behind — duplicate of the drafts/ copy" \
+    || ok "incoming/ QA original reconciled away"
+  unset FAKE_TICKET_RECONCILE FAKE_QA_DRAFT FAKE_QA_INCOMING_LEFTOVER
   teardown
 }
 
@@ -547,6 +578,7 @@ test_ticket_confined_run
 test_ticket_reconciles_stub
 test_ticket_generates_qa
 test_ticket_qa_skipped_without_config
+test_ticket_qa_reconciles_incoming_stub
 test_ticket_refused_without_allowlist
 test_default_budget
 test_investigation_confined_run

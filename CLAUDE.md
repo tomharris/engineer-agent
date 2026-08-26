@@ -655,6 +655,16 @@ actionable Approve/Reject). It is **best-effort and decoupled**: a failure or an
 is logged and skipped, and never flips the ticket's ✅/⚠️ ack — a shipped PR is never re-flagged as
 failed because QA hiccuped.
 
+**Its queue move is reconciled in bash too, for the same reason the implementation's is.** The QA
+run creates its item in `incoming/` and must move it to `drafts/` — the only dir the approval gate
+reads — but that delete is outside the worktree cwd and the sandbox refuses it regardless of the
+`Bash(mv *)` rule. Told to `mv`, the run wrote the `drafts/` copy, left the `incoming/` original,
+and reported the leftover in prose; the result was a live duplicate of one `(qa-test-plan,
+source_id)` that `queue-dedup-check.sh` then flagged on every poll forever. So the prompt now says
+what the implementation prompt says — write the destination, don't try to remove the original — and
+`reconcile_incoming_draft_move()` finishes the move on the privileged side, guarded on the `drafts/`
+counterpart existing under the identical basename.
+
 **Honest limit — this is "medium," not airtight.** Claude Code `Bash()` rules are command-prefix
 matches, *not* cwd-scoped, so `Bash(git *)` also permits `git -C /elsewhere`. The worktree bounds
 the *default* target and the command *set* is curated, but that prefix-vs-path gap is the residual
