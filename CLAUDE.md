@@ -665,6 +665,13 @@ what the implementation prompt says — write the destination, don't try to remo
 `reconcile_incoming_draft_move()` finishes the move on the privileged side, guarded on the `drafts/`
 counterpart existing under the identical basename.
 
+**And its success check asks "did THIS run touch a QA draft", not "does the queue contain one".**
+`drafts/` accumulates `qa-test-plan` items until a human reviews them, so a bare
+`drafts/*qa-test-plan*` glob is true in the steady state — it reported success whenever any older
+plan was still pending, including on a run that produced nothing. The run is bracketed by a marker
+file and the check is `find -newer`, which also catches the update-in-place case a before/after
+filename snapshot would miss.
+
 **Honest limit — this is "medium," not airtight.** Claude Code `Bash()` rules are command-prefix
 matches, *not* cwd-scoped, so `Bash(git *)` also permits `git -C /elsewhere`. The worktree bounds
 the *default* target and the command *set* is curated, but that prefix-vs-path gap is the residual

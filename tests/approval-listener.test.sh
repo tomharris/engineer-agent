@@ -303,6 +303,38 @@ test_ticket_qa_reconciles_incoming_stub() {
   teardown
 }
 
+# --- Case 4f: a stale QA draft from an earlier ticket must not read as this run's success ---
+# drafts/ accumulates qa-test-plan items until a human reviews them, so "does the queue contain
+# a qa-test-plan" is true in the steady state. The check has to be about THIS run.
+test_ticket_qa_ignores_stale_draft() {
+  echo "test_ticket_qa_ignores_stale_draft:"
+  setup
+  write_ticket_config with-allowlist with-qa
+  install_fake_git
+  # An unrelated QA plan left over from an earlier ticket, still awaiting review.
+  printf 'type: qa-test-plan\nsource_id: "ENG-99"\n' \
+    > "$EA_AGENT_DIR/queue/drafts/20260701-000000-qa-test-plan-ENG-99.md"
+  local item="20260716-000000-ticket-gh-6.md"
+  printf 'type: ticket\nproject: wayfinder-api\n' > "$EA_AGENT_DIR/queue/drafts/$item"
+  export FAKE_TICKET_RECONCILE=1
+  export FAKE_QA_DRAFT=0   # the QA run produces nothing this time
+  handle_line "$(msg_event id-ticket-qa-stale "approve|$item")"
+
+  grep -q "Generate a QA test plan" "$CLAUDE_ARGS_LOG" \
+    && ok "QA run launched" || bad "QA run not launched"
+  grep -q "QA test plan drafted" "$NOTIFY_LOG" \
+    && bad "stale QA draft reported as this run's success" \
+    || ok "stale QA draft not counted as success"
+  grep -q "produced no qa-test-plan draft" "$LOG_FILE" 2>/dev/null \
+    && ok "WARN logged for the empty QA run" || bad "no WARN logged (log: $(cat "$LOG_FILE" 2>/dev/null))"
+  [ -e "$EA_AGENT_DIR/queue/drafts/20260701-000000-qa-test-plan-ENG-99.md" ] \
+    && ok "stale QA draft left untouched" || bad "stale QA draft removed"
+  grep -q "Done" "$NOTIFY_LOG" && ! grep -q "Failed" "$NOTIFY_LOG" \
+    && ok "ticket still reports Done (QA is best-effort)" || bad "wrong ticket ack"
+  unset FAKE_TICKET_RECONCILE FAKE_QA_DRAFT
+  teardown
+}
+
 # --- Case 4d: no qa config — QA generation is skipped, ticket still completes ---
 test_ticket_qa_skipped_without_config() {
   echo "test_ticket_qa_skipped_without_config:"
@@ -579,6 +611,7 @@ test_ticket_reconciles_stub
 test_ticket_generates_qa
 test_ticket_qa_skipped_without_config
 test_ticket_qa_reconciles_incoming_stub
+test_ticket_qa_ignores_stale_draft
 test_ticket_refused_without_allowlist
 test_default_budget
 test_investigation_confined_run

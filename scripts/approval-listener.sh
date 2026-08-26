@@ -547,6 +547,16 @@ Leave the drafted item in ${AGENT_DIR}/queue/drafts/ (write it there directly); 
 Do NOT modify the already-completed ticket record at ${AGENT_DIR}/queue/completed/${item}. Operate only inside this working directory and the engineer-agent queue. \
 ${NO_MEMORY_RULE} Be concise."
 
+  # Success marker, stamped immediately before the run. The side-effect check below asks "did
+  # THIS run touch a QA draft", not "does the queue contain one" — drafts/ accumulates
+  # qa-test-plan items from every previous ticket, so a bare glob reports success whenever any
+  # older plan is still awaiting review, which is the steady state. `find -newer` also catches
+  # the update-in-place case (the run reconciling an existing draft for this source_id rather
+  # than minting a new file), which a before/after filename snapshot would miss.
+  local marker="${AGENT_DIR}/state/.qa-run-marker.$$"
+  mkdir -p "${AGENT_DIR}/state"
+  : > "$marker"
+
   ( cd "$wt" && "$CLAUDE_BIN" -p \
       --plugin-dir "$PLUGIN_ROOT" \
       --model sonnet \
@@ -559,10 +569,14 @@ ${NO_MEMORY_RULE} Be concise."
   # Finish the incoming/ -> drafts/ move the confined run could not complete (see above).
   reconcile_incoming_draft_move '*qa-test-plan*.md'
 
-  # Judge success by a real side effect (never by claude -p's exit code): a new qa-test-plan
-  # draft landing in the queue. FYI only — qa-test-plan is interactive-only for approval, so we
+  local fresh_qa
+  fresh_qa="$(find "${AGENT_DIR}/queue/drafts" -maxdepth 1 -name '*qa-test-plan*.md' -newer "$marker" -print 2>/dev/null | head -n 1)"
+  rm -f "$marker"
+
+  # Judge success by a real side effect (never by claude -p's exit code): a qa-test-plan draft
+  # this run actually wrote. FYI only — qa-test-plan is interactive-only for approval, so we
   # surface it as information, never as an actionable Approve/Reject push.
-  if compgen -G "${AGENT_DIR}/queue/drafts/*qa-test-plan*" >/dev/null 2>&1; then
+  if [ -n "$fresh_qa" ]; then
     log "QA test plan drafted for ${item} (project ${project})"
     push_ack normal "🧪 QA test plan drafted for ${item} — review in terminal"
   else
