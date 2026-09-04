@@ -635,9 +635,83 @@ test_near_miss_type_budget() {
   teardown
 }
 
+# --- macOS TCC preflight: warn once per new claude binary, never on first sight ---
+#
+# The failure this guards: macOS keys folder-access grants on the RESOLVED executable, and
+# `claude` auto-updates into a new versions/<ver> file behind the ~/.local/bin/claude symlink.
+# A post-update approval is then denied folder access and the user gets a bare "⚠️ Failed" with
+# no hint that a privacy grant, not the item, was the problem.
+#
+# Both directions matter. No warning => the cause stays invisible. A warning on every dispatch
+# => a push per approval on the topic the user taps Approve on, which trains them to ignore it.
+test_tcc_preflight_reports_change() {
+  echo "test_tcc_preflight_reports_change:"
+  setup
+  # Pre-seed the record with a DIFFERENT path: the state left by a run under the old binary.
+  echo "$TMP/claude-old" > "$EA_AGENT_DIR/state/claude-bin.path"
+  local item="20260716-000000-pr-review-tcc.md"
+  touch "$EA_AGENT_DIR/queue/drafts/$item"
+  export FAKE_SUCCEED=1
+  handle_line "$(msg_event id-tcc-changed "approve|$item")"
+
+  if [ "$(uname -s)" = "Darwin" ]; then
+    grep -q "Full Disk Access" "$NOTIFY_LOG" \
+      && ok "a changed binary warns about the stale grants" \
+      || bad "no TCC warning (acks: $(cat "$NOTIFY_LOG"))"
+    grep -qF "$CLAUDE_BIN" "$EA_AGENT_DIR/state/claude-bin.path" \
+      && ok "the record advances to the new binary" || bad "record not advanced"
+  else
+    grep -q "Full Disk Access" "$NOTIFY_LOG" \
+      && bad "warned on a non-Darwin host (no TCC there)" \
+      || ok "non-Darwin does not warn (no TCC grants to go stale)"
+  fi
+  # The warning must not disturb the normal acks the approval already sends.
+  grep -q "Done" "$NOTIFY_LOG" && ok "approval still reports Done" || bad "missing Done ack"
+  teardown
+}
+
+test_tcc_preflight_silent_on_first_sight() {
+  echo "test_tcc_preflight_silent_on_first_sight:"
+  setup   # fresh sandbox => no state/claude-bin.path
+  local item="20260716-000000-pr-review-tcc2.md"
+  touch "$EA_AGENT_DIR/queue/drafts/$item"
+  export FAKE_SUCCEED=1
+  handle_line "$(msg_event id-tcc-first "approve|$item")"
+
+  grep -q "Full Disk Access" "$NOTIFY_LOG" \
+    && bad "warned on first sight (would fire on every fresh install)" \
+    || ok "first sight records silently"
+  local n; n="$(wc -l < "$NOTIFY_LOG")"
+  [ "$n" -eq 2 ] && ok "still exactly 2 acks (receipt + outcome)" || bad "expected 2 acks, got $n"
+  teardown
+}
+
+test_tcc_preflight_warns_once() {
+  echo "test_tcc_preflight_warns_once:"
+  setup
+  echo "$TMP/claude-old" > "$EA_AGENT_DIR/state/claude-bin.path"
+  export FAKE_SUCCEED=1
+  local a="20260716-000000-pr-review-tcc3.md" b="20260716-000000-pr-review-tcc4.md"
+  touch "$EA_AGENT_DIR/queue/drafts/$a" "$EA_AGENT_DIR/queue/drafts/$b"
+  handle_line "$(msg_event id-tcc-once-1 "approve|$a")"
+  handle_line "$(msg_event id-tcc-once-2 "approve|$b")"
+
+  local w; w="$(grep -c "Full Disk Access" "$NOTIFY_LOG")"
+  if [ "$(uname -s)" = "Darwin" ]; then
+    [ "$w" -eq 1 ] && ok "warns once across two approvals, not per dispatch" \
+      || bad "expected 1 TCC warning across 2 approvals, got $w"
+  else
+    [ "$w" -eq 0 ] && ok "non-Darwin never warns" || bad "non-Darwin warned $w times"
+  fi
+  teardown
+}
+
 test_success
 test_failure
 test_invalid
+test_tcc_preflight_reports_change
+test_tcc_preflight_silent_on_first_sight
+test_tcc_preflight_warns_once
 test_ticket_confined_run
 test_ticket_dispatches_via_execute_item
 test_ticket_reconciles_stub
