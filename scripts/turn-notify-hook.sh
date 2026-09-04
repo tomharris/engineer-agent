@@ -99,9 +99,17 @@ sanitize_label() {
 
 # sanitize_text — invariant 3. Order matters: kill links BEFORE flattening whitespace, so a URL
 # broken across lines cannot be reassembled into a live one afterwards.
+#
+# NO \b HERE. The word-boundary escape is a GNU extension; BSD sed (which is what macOS runs, and
+# macOS is the platform this hook fires on) does not support it, so `\bwww\.` matched nothing and
+# BOTH the www. and mailto: classes reached the wire live while the scheme:// class — the one
+# alternative written without \b — worked. Same GNU-vs-BSD trap as `date -d` in lib-time.sh, but
+# silent: it degrades a security filter rather than erroring. Matching unanchored instead is
+# strictly more aggressive (a token like `xwww.evil.tld` also becomes `(link)`), which is the safe
+# direction for a notification excerpt.
 sanitize_text() {
   printf '%s' "${1:-}" \
-    | sed -E 's#[A-Za-z][A-Za-z0-9+.-]*://[^[:space:]]*#(link)#g; s#\bwww\.[^[:space:]]*#(link)#g; s#\bmailto:[^[:space:]]*#(link)#g' \
+    | sed -E 's#[A-Za-z][A-Za-z0-9+.-]*://[^[:space:]]*#(link)#g; s#www\.[^[:space:]]*#(link)#g; s#mailto:[^[:space:]]*#(link)#g' \
     | tr '\n\r\t' '   ' \
     | tr -d '\000-\037' \
     | sed -E 's/  +/ /g; s/^ +//; s/ +$//' \
