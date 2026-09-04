@@ -204,7 +204,14 @@ while IFS= read -r label; do
       last="$(state_get "projects|${slug}|slite|last_checked")"
       if [ -n "$last" ]; then
         u_e="$(epoch_of_iso "$updated")"; l_e="$(epoch_of_iso "$last")"
-        if [ -n "$u_e" ] && [ -n "$l_e" ] && [ "$u_e" -le "$l_e" ]; then continue; fi
+        # Counted as UNCHANGED, not dropped silently. A bare `continue` here put the doc in NO
+        # bucket, so the summary read "Found 1 ... 0 routed, 0 unrouted, 0 skipped, 0 unchanged"
+        # -- a found doc accounted for nowhere, which is indistinguishable from a parse bug and
+        # is the invisible-drop shape this collector exists to avoid. UNCHANGED is the honest
+        # bucket: there is nothing to do because nothing moved since the last poll.
+        if [ -n "$u_e" ] && [ -n "$l_e" ] && [ "$u_e" -le "$l_e" ]; then
+          UNCHANGED=$((UNCHANGED+1)); continue
+        fi
       fi
     fi
 
