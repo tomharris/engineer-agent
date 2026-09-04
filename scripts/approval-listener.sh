@@ -603,6 +603,28 @@ ${NO_MEMORY_RULE} Be concise."
   return 0
 }
 
+# macOS TCC preflight. Same exposure as the poll: macOS keys folder-access grants on the
+# RESOLVED executable, and `claude` auto-updates into a new versions/<ver> file behind the
+# ~/.local/bin/claude symlink, so each update leaves a binary with zero grants. Here the damage
+# is a tapped Approve that strands the item in drafts/ and returns a bare "⚠️ Failed" with no
+# hint that a privacy grant, not the item, was the problem.
+#
+# Called at startup AND before each dispatch: the listener runs for days, so an update can land
+# mid-life, and the mtime self-reexec cannot catch it (the script file is unchanged — it is the
+# binary that moved). claude_bin_changed() records as it reports, so at most one push fires per
+# new binary no matter how many times this is called.
+#
+# The record (state/claude-bin.path) is SHARED with cron-poll.sh deliberately: the two jobs run
+# as the same user against the same grants, so whichever notices first is the one that warns,
+# and the user gets one push per update rather than two.
+tcc_preflight() {
+  local newbin
+  newbin="$(claude_bin_changed "$CLAUDE_BIN")" || return 0
+  log "WARN: claude binary is now ${newbin}; macOS privacy grants do not carry across versions"
+  push_ack low "⚠️ claude updated to ${newbin} — macOS folder-access grants are keyed to the versioned path and did not carry over. Re-grant Full Disk Access or approvals may fail."
+  return 0
+}
+
 command -v jq >/dev/null 2>&1 || { log "FATAL: jq is required but not found on PATH"; exit 1; }
 command -v "$CLAUDE_BIN" >/dev/null 2>&1 || { log "FATAL: claude CLI not found (CLAUDE_BIN='${CLAUDE_BIN}')"; exit 1; }
 
@@ -611,6 +633,9 @@ if [ -z "$NTFY_COMMAND_TOPIC" ]; then
   log "FATAL: agent.notify.ntfy.command_topic is not configured; nothing to listen to"
   exit 1
 fi
+
+# After the FATAL checks: only a listener that will actually run should warn.
+tcc_preflight
 
 # First run starts from "now" so we never replay historical approvals.
 [ -f "$SINCE_FILE" ] || date +%s > "$SINCE_FILE"
@@ -668,6 +693,8 @@ handle_line() {
     *)                    budget="$DEFAULT_BUDGET_USD" ;;
   esac
   log "execute budget for ${item} (type=${item_type:-unknown}): \$${budget}"
+
+  tcc_preflight
 
   # Dispatch by type. An approved `ticket` runs a CONFINED implementation — isolated
   # worktree + a narrow, config-driven build allowlist (see run_ticket_implementation),

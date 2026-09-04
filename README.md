@@ -833,6 +833,7 @@ config/
   state/
     last-poll.yaml             Dedup timestamps and seen IDs (per project + per Jira project key)
     last-poll-receipt.yaml     Liveness receipt from the last cron poll (run_id, status, item count, skipped, errors)
+    claude-bin.path            Resolved claude executable an unattended poll last ran (macOS TCC preflight)
     ntfy-seen.yaml             Processed ntfy command message IDs (remote-approval dedup)
     ntfy-listener.since        Last-seen ntfy command timestamp (listener stream resume point)
     approval-listener.log      Listener activity log

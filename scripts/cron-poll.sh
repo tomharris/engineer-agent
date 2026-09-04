@@ -300,6 +300,22 @@ else
   SKIP_MODEL=0
 fi
 
+# macOS TCC preflight. `claude` auto-updates into a NEW versions/<ver> file and repoints the
+# ~/.local/bin/claude symlink; macOS keys folder-access grants on the resolved target, so every
+# update mints a path with zero grants. A human clicking Allow is why the grants accumulate one
+# set per version -- this run has nobody to click, and a refused access leaves nothing in the
+# receipt to explain the damage. Warn once per new binary (claude_bin_changed records as it
+# reports), not every fire. Best-effort: never let the preflight itself fail the poll.
+if [ "${SKIP_MODEL:-0}" -eq 0 ] && NEW_CLAUDE_BIN="$(claude_bin_changed "$CLAUDE_BIN")"; then
+  echo "WARN: claude binary is now ${NEW_CLAUDE_BIN}; macOS privacy grants do not carry across versions" >> "$LOG_FILE"
+  "${PLUGIN_ROOT}/scripts/notify.sh" \
+    --title "engineer-agent: claude binary changed" \
+    --message "Now ${NEW_CLAUDE_BIN} -- macOS folder-access grants are keyed to the versioned path and did not carry over. Re-grant Full Disk Access to this path or unattended polls may be denied silently." \
+    --priority low \
+    --tags "warning" \
+    --fyi >> "$LOG_FILE" 2>&1 || true
+fi
+
 SLACK_METHOD="$(yaml_agent_slack method)"; SLACK_METHOD="${SLACK_METHOD:-spy}"
 if [ "$SLACK_METHOD" = "mcp-proxy" ]; then
   SLACK_BIN="${PLUGIN_ROOT}/scripts/slack-mcp.sh"

@@ -276,3 +276,70 @@ yaml_project_list() {
     }
   ' "$EA_CONFIG_FILE"
 }
+
+# resolve_real_path <path> — follow symlinks to the real file, portably.
+# `readlink -f` is GNU; older macOS lacks it and macOS is exactly where this matters, so
+# walk the chain by hand. Bounded at 40 hops so a symlink loop cannot hang an unattended run.
+resolve_real_path() {
+  local p="$1" n=0 target dir
+  [ -n "$p" ] || return 1
+  # A bare command name (no slash) must be resolved through PATH first. CLAUDE_BIN is normally
+  # already absolute (`command -v claude`), but install-cron.sh/install-listener.sh bake in
+  # whatever CLAUDE_BIN held at install time — and a bare name would otherwise be returned
+  # verbatim, so the record could never change and the preflight would silently never fire.
+  case "$p" in
+    */*) ;;
+    *) p="$(command -v -- "$p" 2>/dev/null)" || return 1
+       [ -n "$p" ] || return 1 ;;
+  esac
+  while [ -L "$p" ] && [ "$n" -lt 40 ]; do
+    target="$(readlink "$p")" || return 1
+    case "$target" in
+      /*) p="$target" ;;
+      *)  dir="$(dirname "$p")"; p="$(cd "$dir" 2>/dev/null && pwd)/${target}" || return 1 ;;
+    esac
+    n=$((n + 1))
+  done
+  printf '%s\n' "$p"
+}
+
+# claude_bin_changed <claude_bin> — macOS TCC preflight.
+#
+# Returns 0 and echoes the newly-resolved executable path when the Claude Code binary has
+# changed identity since the last time an unattended run looked; returns 1 otherwise.
+#
+# WHY: macOS privacy grants (Desktop / Documents / Downloads / network volumes) are keyed on
+# the RESOLVED executable, and `claude` auto-updates by writing a NEW file at
+# ~/.local/share/claude/versions/<ver> and repointing the ~/.local/bin/claude symlink. Setting
+# CLAUDE_BIN to that stable symlink does not help — TCC resolves the symlink and records the
+# target — so every update mints a path with zero grants. Interactively a human just clicks
+# Allow (which is why the grants accumulate one set per version); a launchd poll has nobody to
+# click, so the access is refused with nothing in the receipt to say why.
+#
+# Deliberately does NOT read TCC.db to inspect the grants directly. That database is itself
+# privacy-protected, so probing it from the unattended run is a plausible way to raise the very
+# dialog this exists to warn about. A changed binary path is sufficient evidence that whatever
+# was granted before no longer applies.
+#
+# The first observation is recorded but never reported: with no previous value there is nothing
+# that could have been granted against, so warning would fire on every fresh install.
+claude_bin_changed() {
+  local bin="$1"
+  local record="${EA_AGENT_DIR}/state/claude-bin.path"
+  local resolved previous=""
+
+  # TCC is macOS-only; on Linux there is no grant to go stale.
+  [ "$(uname -s)" = "Darwin" ] || return 1
+
+  resolved="$(resolve_real_path "$bin")" || return 1
+  [ -n "$resolved" ] || return 1
+
+  [ -f "$record" ] && previous="$(cat "$record" 2>/dev/null)"
+  [ "$resolved" = "$previous" ] && return 1
+
+  mkdir -p "$(dirname "$record")"
+  printf '%s\n' "$resolved" > "$record"
+
+  [ -n "$previous" ] || return 1
+  printf '%s\n' "$resolved"
+}

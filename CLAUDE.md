@@ -71,6 +71,7 @@ of truth for this location — source it rather than hardcoding the path.
 └── state/
     ├── last-poll.yaml         — Dedup timestamps and seen IDs (per project, per Jira project key, per GitHub repo)
     ├── last-poll-receipt.yaml — Liveness receipt from the last cron poll (run_id, status, item count, skipped, errors)
+    ├── claude-bin.path        — Resolved `claude` executable the last unattended poll ran (macOS TCC preflight)
     ├── ntfy-seen.yaml         — Processed ntfy command message IDs (remote-approval dedup)
     ├── turn-notify/           — One marker per session armed for turn-completion pushes (<session_id>)
     └── turn-notify.log        — Turn-completion hook diagnostics (only when EA_TURN_NOTIFY_DEBUG=1)
@@ -501,6 +502,37 @@ from a run that failed silently):
   in-session agent: it only polls while the user is logged into the GUI. This is why we **do NOT
   re-add the reverted `auth.env`/`CLAUDE_CODE_OAUTH_TOKEN` loader** — the launchd path keeps no
   long-lived secret on disk.
+- **macOS privacy (TCC) grants are keyed to the RESOLVED binary, so every `claude` auto-update
+  revokes them — and an unattended run has nobody to click Allow.** `claude` updates by writing a
+  **new** `~/.local/share/claude/versions/<ver>` file and repointing the `~/.local/bin/claude`
+  symlink. Pointing `CLAUDE_BIN` at that stable symlink does **not** help: macOS resolves the
+  symlink and records the *target*, so the new version starts with zero grants. Confirmed by
+  reading the user TCC database on 2026-08-31 — one full set of `Desktop`/`Documents`/`Downloads`/
+  `NetworkVolumes` grants per version (`2.1.245` … `2.1.248`, each set being a human clicking Allow
+  after that update) and **none** for the freshly-installed `2.1.251`. Interactively this is a
+  dialog; under launchd the access is simply refused, and — unlike a denied `--allowedTools` rule —
+  nothing lands in the receipt, so the poll reports `status: ok` on a run that could not read.
+  `claude_bin_changed()` in `lib-paths.sh` is the preflight, shared by **both** unattended entry
+  points: it records the resolved path in `state/claude-bin.path` and pushes one low-priority ntfy
+  warning when it changes. `cron-poll.sh` calls it only when a model run will actually start (a
+  scripted-only poll never launches `claude`, so it cannot raise a dialog); `approval-listener.sh`
+  calls it at startup **and** before each dispatch, because the service runs for days and the mtime
+  self-reexec cannot catch this staleness — the script file is unchanged, it is the binary that
+  moved. The record is deliberately **shared** between the two: they run as the same user against
+  the same grants, so whichever notices first warns, and the user normally gets one push per
+  update (the two jobs are unsynchronized, so a poll and a dispatch landing in the same instant
+  can both warn once — accepted, since the alternative is a lock on the notification path).
+  `resolve_real_path()` resolves a **bare** command name through `PATH` before following
+  symlinks: `CLAUDE_BIN` is usually already absolute, but the installers bake in whatever it held
+  at install time, and a bare name returned verbatim would make the record constant and the
+  preflight a silent no-op. Two deliberate
+  choices: it warns **once** per new binary (the record updates as it reports) because a push on
+  every 15-minute fire trains you to ignore the topic you approve queue items on; and it
+  **never reads `TCC.db`** to check the grants directly — that database is itself privacy-protected,
+  so probing it from the unattended run is a plausible way to raise the very dialog this warns
+  about. A changed path is sufficient evidence the grants are stale. The durable fix is to grant
+  **Full Disk Access** to the versioned path (it supersedes the individual folder services, so one
+  grant replaces four dialogs), or to pin the version and update deliberately.
 - **`forceLoginOrgUUID` blocks *environment* credentials only — it does NOT block a keychain
   credential, so it is not a headless dead end.** When an org deploys a root-owned
   `/Library/Application Support/ClaudeCode/managed-settings.json` with `forceLoginMethod: claudeai`
