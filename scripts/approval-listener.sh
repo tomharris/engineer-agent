@@ -160,7 +160,13 @@ run_generic_execute() {
     </dev/null >> "$LOG_FILE" 2>&1
 }
 
-# run_ticket_implementation — confined headless implementation of an approved `ticket`.
+# run_ticket_implementation — the confined SANDBOX for a headless approved `ticket`.
+#
+# This function builds the sandbox; it does NOT decide what approving a ticket means. That
+# decision lives in skills/execute-item/SKILL.md, the single source of truth every entry point
+# shares, which probes for the ticket branch and delegates to implement-ticket when there is
+# none. Everything security-load-bearing (worktree, build allowlist, budget, turn-notify env)
+# is still resolved HERE, in plain bash, before claude starts.
 # A ticket is the one item type whose execution WRITES CODE in the target repo, so it
 # cannot use the read/post allowlist above. Confinement (the "medium" posture) is three
 # layers, and the two that define the sandbox are decided HERE in bash — before claude
@@ -234,9 +240,21 @@ run_ticket_implementation() {
     "Bash(git *)" "${build_rules[@]}"
     "Bash(gh *)" "Bash(mv *)" "Bash(${PLUGIN_ROOT}/scripts/notify.sh *)"
   )
-  local prompt="Implement the engineer-agent ticket in queue item '${item}' (approved). \
-The current working directory is an isolated git worktree of the target repo, checked out on a detached HEAD at the base branch. \
-Read config from ${EA_CONFIG_FILE}. Follow skills/implement-ticket/SKILL.md: create the ticket branch HERE (stay inside this worktree — do not cd elsewhere), implement iteratively inline, self-review the branch diff and fix findings BEFORE opening any PR, then push the branch and open a DRAFT pull request. \
+  # Dispatch goes through execute-item, exactly like every other item type. This function's job
+  # is the SANDBOX (worktree, build allowlist, budget, turn-notify env, QA follow-on, teardown,
+  # reconcile) — all of it decided above in plain bash, before claude starts. What approving a
+  # ticket *means* is execute-item's job: it probes for the branch and either finishes a pushed
+  # one or delegates the coding session to implement-ticket. Keeping the two separate is what
+  # stopped the interactive path from silently having no implementation step at all.
+  #
+  # The prompt names the SKILL FILE rather than invoking the Skill tool, and rather than going
+  # through commands/execute.md: `Skill` is deliberately absent from every confined allowlist in
+  # this repo (see CLAUDE.md on cron-poll.sh), and commands/execute.md would send a second
+  # notify.sh FYI on top of the listener's own outcome ack.
+  local prompt="Execute the approved engineer-agent queue item '${item}' (decision: approve). \
+Read ${PLUGIN_ROOT}/skills/execute-item/SKILL.md and follow it with item='${item}' and decision='approve'. Its ticket case probes for the ticket branch and, when the branch does not exist yet, implements the ticket by following ${PLUGIN_ROOT}/skills/implement-ticket/SKILL.md before opening a DRAFT pull request. \
+The current working directory is an isolated git worktree of the target repo, checked out on a detached HEAD at the base branch. Create the ticket branch HERE and stay inside this worktree — do not cd elsewhere. Self-review the branch diff and fix findings BEFORE opening any PR. \
+Read config from ${EA_CONFIG_FILE}. \
 To finalize the queue item, WRITE the completed record to ${AGENT_DIR}/queue/completed/${item} (status: completed). You do NOT need to delete the drafts/ original — the listener reconciles that afterward; do not spend effort trying to remove it. \
 Operate ONLY inside this working directory (plus writing that one completed/ queue file). \
 ${NO_MEMORY_RULE} Be concise."
@@ -657,8 +675,13 @@ handle_line() {
   # CONFINED READ-ONLY investigation instead (see run_ticket_investigation): same worktree
   # isolation, but no build commands and no code-writing verbs, because its deliverable is a
   # comment on the ticket rather than a PR. Every other type, and any reject, goes
-  # through the shared execute-item path with the read/post allowlist that cannot run a
-  # coding session (see run_generic_execute). Both judge success by the drafts/ check below.
+  # through the read/post allowlist that cannot run a coding session (see run_generic_execute).
+  # Both judge success by the drafts/ check below.
+  #
+  # NOTE: this branch selects the SANDBOX, not the dispatcher. All three arms end up following
+  # skills/execute-item/SKILL.md — the `ticket` arm just hands it a worktree and build allowlist
+  # first. Do not read `ticket` having its own function as `ticket` bypassing execute-item; that
+  # bypass existed once and left the interactive approval path with no implementation step.
   if [ "$decision" = "approve" ] && [ "$item_type" = "ticket" ]; then
     run_ticket_implementation "$item" "$budget" || true
   elif [ "$decision" = "approve" ] && [ "$item_type" = "ticket-investigation" ]; then
