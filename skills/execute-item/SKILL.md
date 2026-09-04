@@ -19,7 +19,8 @@ both the interactive review queue and the remote ntfy approval path call into it
 
 ## Tools Needed
 
-`Bash`, `Read`, `Write`, `Edit`, `Glob`, `Grep`. Posting happens via the effective Slack CLI
+`Bash`, `Read`, `Write`, `Edit`, `Glob`, `Grep`, and `Skill` (an unimplemented `ticket`
+delegates its coding session to `implement-ticket`). Posting happens via the effective Slack CLI
 (`<slack> send …` over `Bash` — `spy`, or `${CLAUDE_PLUGIN_ROOT}/scripts/slack-mcp.sh` when
 `agent.slack.method: mcp-proxy`), the `gh` CLI (including `gh issue comment`), the Slite MCP tools
 `mcp__slite__append-blocks`, `mcp__slite__create-note`, and the Jira MCP tools
@@ -94,18 +95,61 @@ read `projects.<project>.tracker`, or infer from `source` frontmatter (`github` 
   did not happen: treat it as a failed action (Step 5's failure rule — leave the item in
   `drafts/`, report it, exit non-zero) so it is retried once Claude Code re-auths.
 
-- **ticket** — create a **draft** PR **from an already-implemented, pushed branch**. This case
-  is the *finisher*: it assumes the branch already exists on the remote (a human ran
-  `implement-ticket`, or the branch was pushed some other way). It does **not** write code.
-  > **The remote (ntfy) approval path does not reach this case.** For a `ticket`,
-  > `scripts/approval-listener.sh` runs the full `implement-ticket` flow inside an isolated,
-  > allowlist-confined git worktree (see CLAUDE.md → "Confined headless ticket implementation"),
-  > and *that* flow creates the branch, pushes it, opens the draft PR, and moves the item to
-  > `completed/` itself. So on the phone path a `ticket` never returns here — this branch is for
-  > the interactive terminal and manual `/engineer-agent execute` invocations, where the branch
-  > is expected to exist. If the `--head` branch is missing, `gh` errors and the item stays in
-  > `drafts/` (Step 5's failure rule) — surface it so the human can implement first.
+- **ticket** — **implement the ticket if it is not implemented yet, then create the draft PR.**
+  This case is the single source of truth for *what approving a ticket does*, on every entry
+  point. It chooses between "implement" and "finish" by **probing for the branch**, never by
+  assuming which path called it — that assumption was the bug: the interactive path had nothing
+  that ever ran `implement-ticket`, so approving a freshly-polled ticket landed here with no
+  branch and could only fail.
 
+  **Where to work.** Run `git rev-parse --is-inside-work-tree`. If it returns `true` you are
+  already inside a prepared checkout of the target repo (the listener's confined worktree) — work
+  **here** and do **not** `cd` anywhere. A worktree's top level is not
+  `projects.<project>.path`, so do not compare against that path; comparing would wrongly send
+  you out of the sandbox. Only when you are not already inside a checkout do you `cd` to
+  `projects.<project>.path`. This is the same detection `implement-ticket` Step 2 performs — the
+  two must agree.
+
+  **Resolve the expected branch name** (the rule is shared with `implement-ticket` Step 2, using
+  the literal `agent.branch_prefix` from config):
+  - tracker `github-issues`: `{branch_prefix}/issue-{number}-{slug}` — `{number}` from
+    `ticket_key` with `#` stripped; `{slug}` = title lowercased, non-alphanumeric → hyphens,
+    truncated to 40 chars, trailing hyphens stripped.
+  - tracker `jira`: `{branch_prefix}/{ticket_key}`
+
+  **Then probe for that branch, in this order, and take the first case that matches:**
+
+  1. **On the remote** (`git ls-remote --exit-code --heads origin {branch}` succeeds) — the work
+     is already implemented and pushed. Go straight to **Finish** below. This is the historical
+     behavior of this case, unchanged.
+  2. **Local only** (`git show-ref --verify --quiet refs/heads/{branch}` succeeds) — implemented
+     but never pushed. `git push -u origin {branch}`, then **Finish**. Do not re-implement: a
+     `git checkout -b` on an existing name fails, and the commits on that branch are the human's
+     work.
+  3. **Neither** — not implemented. **Invoke the `implement-ticket` skill** with this item. (If
+     the `Skill` tool is unavailable — every confined headless allowlist in this repo omits it on
+     purpose — `Read` `skills/implement-ticket/SKILL.md` and follow it instead. Same contract
+     either way.) That skill owns the whole coding session: it creates the branch, implements iteratively,
+     self-reviews the diff and fixes findings, pushes, opens the draft PR, and writes the
+     `completed/` record itself. When it returns, confirm
+     `~/.local/share/engineer-agent/queue/completed/{filename}` exists and report the PR URL —
+     do **not** run **Finish** as well, or you will attempt a second PR on the same head.
+     If it bailed instead (its "Ticket too vague" / "Tests won't pass" edge cases), the item is
+     still in `drafts/`: leave it there and report why, per Step 5's failure rule.
+
+  > **Isolation and budget come from the caller, not from here.** This skill runs *inside*
+  > whatever sandbox its caller built, so it can neither create nor widen one. On the remote
+  > (ntfy) path `scripts/approval-listener.sh`'s `run_ticket_implementation` prepares an isolated
+  > git worktree, a config-driven build-command allowlist and `TICKET_BUDGET_USD` **in plain bash
+  > before `claude` starts**, then invokes this skill inside it (see CLAUDE.md → "Confined
+  > headless ticket implementation"). That ordering is the containment boundary: untrusted ticket
+  > text can influence the code produced inside the sandbox but never the shape of the sandbox.
+  > On the interactive path the human is present and the target is their own checkout. Case 3
+  > therefore writes code in whichever of those two contexts it was handed — it does not, and must
+  > not, try to establish its own.
+
+  **Finish (create the draft PR).** Only for cases 1 and 2 above; case 3's PR is opened by
+  `implement-ticket`.
   (See "Auto-execute: draft-pr" below for when this is allowed to run without a human approval.)
   Look up `projects.<project>.github.owner` and repo.
   - tracker `github-issues` (extract issue number from `ticket_key` stripping `#`; slug =
@@ -128,8 +172,9 @@ read `projects.<project>.tracker`, or infer from `source` frontmatter (`github` 
   `{ticket_key}` if `source_url` is absent.
 
 - **ticket-investigation** — post the **already-written** `## Findings` document as a comment on
-  the ticket. This case is the *finisher*, exactly like `ticket` above: it does **not** research
-  anything.
+  the ticket. Unlike `ticket` above, this case is **only** a finisher: it does **not** research
+  anything, and it never delegates to `investigate-ticket` to fill the gap. The asymmetry is
+  deliberate — see the refusal note below for why research cannot happen here.
   > **If the item has no `## Findings` section, refuse.** Leave it in `drafts/`, report
   > `ticket-investigation has no ## Findings; run investigate-ticket first`, and exit non-zero
   > (Step 5's failure rule). Do not investigate here: this skill runs headlessly under
@@ -243,14 +288,21 @@ Then set frontmatter `status: completed` and move the file to
 `~/.local/share/engineer-agent/queue/completed/`. Report a one-line result naming the action
 taken (e.g. `approved pr-review org/repo#142 (commented)` or `created draft PR {url}`).
 
+**Exception — a `ticket` that delegated to `implement-ticket` (case 3).** That skill writes the
+`completed/` record itself as its own final step, so the move is already done: just verify
+`completed/{filename}` exists and report. Do not move it again — the file is no longer in
+`drafts/` and a second move fails on a missing source, which would read as a failed approval on
+work that actually shipped.
+
 If the external action fails (e.g. `gh` non-zero, MCP error): **do not move the file.** Leave
 it in `drafts/`, report the error, and exit non-zero so the caller can surface the failure
 (and the item remains available to retry).
 
 ## Auto-execute: draft-pr
 
-The `ticket` action above creates a **draft** PR. A draft PR merges nothing and requests no
-review, so it is the one action safe to take without a human approval gate. Behavior:
+The `ticket` action above creates a **draft** PR (itself, or via `implement-ticket` when it
+delegates). A draft PR merges nothing and requests no review, so it is the one action safe to
+take without a human approval gate. Behavior:
 
 - When this skill is invoked for an explicit human approval (interactive queue or remote
   approve), execute normally.

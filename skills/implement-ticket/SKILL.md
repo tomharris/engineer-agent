@@ -206,8 +206,16 @@ gate. Decide based on `agent.autonomy.auto_execute` (read in Step 1):
     --message "{project} — {title} ({iterations} iters, tests {pass|fail})" \
     --priority normal --tags rocket --source-url "{pr_url}"
   ```
-- **Otherwise (default):** leave the implementation result in the queue and create the draft
-  PR only when the human approves it via `/engineer-agent review-queue`.
+- **Otherwise (default):** it depends on who invoked you.
+  - **Invoked by `execute-item`'s `ticket` case** (either approval path — the interactive queue,
+    or the listener's confined worktree): the human has *already* approved, and this run IS that
+    approval being executed. Create the draft PR now. Do not defer it back to the gate you were
+    called from — that gate is what called you, and deferring leaves the item in `drafts/` with a
+    pushed branch and no PR, which reads as a silent failure.
+  - **Invoked directly by a human** (`/engineer-agent:implement-ticket` at the terminal): leave
+    the implementation result in the queue and create the draft PR only when they approve it via
+    `/engineer-agent review-queue`. `execute-item` will then find the branch already pushed and
+    take its finisher path.
 
 Look up `projects.<project>.github.owner` and the repo from config.
 
@@ -245,7 +253,17 @@ gh pr create --repo {owner}/{repo} --title "{ticket_key}: {title}" --body "{'**T
 
 ### 7. Update Queue Item
 
-Move the queue item to `~/.local/share/engineer-agent/queue/completed/` with `status: completed`.
+Mirror the Step 6 split — the item is terminal only if its approval has actually been executed:
+
+- **If you created the draft PR** (the `draft-pr` autonomy tier, or invoked by `execute-item`):
+  move the queue item to `~/.local/share/engineer-agent/queue/completed/` with
+  `status: completed`. On the listener's confined path, *write* the `completed/` record and leave
+  the `drafts/` original alone — that path's cwd sandbox cannot delete it and the listener
+  reconciles the move in bash afterward.
+- **If you deferred the PR to the gate** (invoked directly by a human): leave the item in
+  `drafts/` with `status: drafted` and the Implementation Result recorded in it. Moving it to
+  `completed/` here would make it unreachable by `review-queue`, which reads only `drafts/` —
+  the branch would be pushed and the PR would never be created by anyone.
 
 ## Edge Cases
 

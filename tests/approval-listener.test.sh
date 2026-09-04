@@ -228,6 +228,38 @@ test_ticket_confined_run() {
   teardown
 }
 
+# --- Case 4b: the confined ticket run DISPATCHES through execute-item ---
+# The sandbox (worktree + build allowlist) is this listener's job; deciding what approving a
+# ticket means is execute-item's. run_ticket_implementation used to point the prompt straight at
+# implement-ticket, which meant the interactive approval path had no implementation step at all.
+# Pin the dispatch so it cannot silently revert to that.
+test_ticket_dispatches_via_execute_item() {
+  echo "test_ticket_dispatches_via_execute_item:"
+  setup
+  write_ticket_config with-allowlist
+  install_fake_git
+  local item="20260716-000000-ticket-gh-2.md"
+  printf 'type: ticket\nproject: wayfinder-api\n' > "$EA_AGENT_DIR/queue/drafts/$item"
+  export FAKE_SUCCEED=1
+  handle_line "$(msg_event id-ticket-dispatch "approve|$item")"
+
+  grep -qF -- "skills/execute-item/SKILL.md" "$CLAUDE_ARGS_LOG" \
+    && ok "ticket prompt dispatches through execute-item" \
+    || bad "ticket prompt does not name execute-item (args: $(cat "$CLAUDE_ARGS_LOG"))"
+  # execute-item delegates to implement-ticket only when the branch is missing, so the prompt
+  # may still mention it — but never as the entry point that replaces execute-item.
+  grep -qF -- "Follow skills/implement-ticket/SKILL.md" "$CLAUDE_ARGS_LOG" \
+    && bad "ticket prompt still bypasses execute-item for implement-ticket" \
+    || ok "implement-ticket is not the dispatcher"
+  # Dispatch changed; the sandbox must not have.
+  grep -qF -- "Bash(bin/rails *)" "$CLAUDE_ARGS_LOG" \
+    && ok "sandbox build allowlist still applied" || bad "sandbox allowlist lost"
+  grep -qF -- "Skill" "$CLAUDE_ARGS_LOG" \
+    && bad "Skill tool leaked into the confined allowlist" \
+    || ok "confined allowlist still omits the Skill tool"
+  teardown
+}
+
 # --- Case 4a: reconciliation — confined run wrote completed/ but left the drafts/ stub ---
 test_ticket_reconciles_stub() {
   echo "test_ticket_reconciles_stub:"
@@ -607,6 +639,7 @@ test_success
 test_failure
 test_invalid
 test_ticket_confined_run
+test_ticket_dispatches_via_execute_item
 test_ticket_reconciles_stub
 test_ticket_generates_qa
 test_ticket_qa_skipped_without_config

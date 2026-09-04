@@ -333,6 +333,8 @@ For each item you can:
 
 Approve and Reject both run through the shared `execute-item` skill, so the result is identical whether you act here or remotely from your phone.
 
+Approving a **`ticket`** is the one action that is not a quick post: `execute-item` probes for the ticket branch, and if it does not exist yet it runs the full `implement-ticket` coding session (branch → iterative implementation → self-review → push → draft PR) as part of the approval. If the branch is already pushed it just opens the draft PR; if it exists only locally it pushes it first. So expect a ticket approval to take minutes and to write code in `projects.<slug>.path`, and don't run `/engineer-agent:implement-ticket` first unless you *want* the finisher path.
+
 ### `/engineer-agent execute <item-id> <approve|reject> [reason...]`
 
 Headlessly approve or reject a single queue item. This is primarily the entry point the ntfy approval listener calls when you tap a button on your phone — it does the same work as `review-queue` for one item, with the decision already made, and never prompts.
@@ -697,7 +699,7 @@ engineer-agent-listener` on Linux) to move onto the new version.
 
 By default the listener caps each headless approval at **$2.00**, **$8.00** for `ticket` items (which run a full implementation), or **$3.00** for `ticket-investigation` items (a read-only research session). Tune via the `EA_EXECUTE_BUDGET_USD` / `EA_TICKET_BUDGET_USD` / `EA_INVESTIGATE_BUDGET_USD` environment variables — note these are *not* baked into the service definition the way `CLAUDE_BIN` is, so a supervised listener ignores them. The best-effort QA generation that follows a ticket (below) is a separate run with its own **$2.00** cap, tunable via `EA_QA_BUDGET_USD`.
 
-**Approving a `ticket` from your phone** is special: it runs the whole `implement-ticket` coding session (branch → inline iterative implementation → self-review of the diff → draft PR) unattended, so it gets its own confined execution path instead of the read/post one every other type uses:
+**Approving a `ticket` from your phone** is special: the approval runs the whole `implement-ticket` coding session (branch → inline iterative implementation → self-review of the diff → draft PR) unattended, so it gets its own confined **sandbox** instead of the read/post one every other type uses. The dispatch is the same shared `execute-item` skill as everywhere else — only the sandbox around it differs:
 
 - The listener creates a throwaway **git worktree** of the target repo and runs the session inside it, so your real checkout is never touched. The worktree is removed when the run finishes; the branch and draft PR persist.
 - The build/test commands that session may run come from a per-project allowlist, **`projects.<slug>.exec.allowed_commands`** — each becomes a `Bash(<cmd> *)` permission (e.g. `["bin/rails", "bin/rspec", "bin/srb", "bundle"]` for a Rails repo). This is the security boundary for code driven off issue text, so keep it to build/test tools only.

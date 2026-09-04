@@ -100,7 +100,10 @@ Read the selected file completely and display:
   make it visible rather than letting a wrong guess ride through as if a rule had matched. For every
   other method, one word is enough (`single-candidate`, `prefix`, `filters`, `keyword`, `manual`).
 - **What will actually be delivered**, from `type` and `ticket_kind_method`. For `ticket`: a branch
-  and a draft PR. For `ticket-investigation`: **a comment posted on the ticket** plus a local
+  and a draft PR — and, when that branch does not exist yet, **the coding session that produces it
+  runs on approval**, right here in this session against `projects.<project>.path`. Say that out
+  loud: approving a ticket is not a one-call post like the other types, it can be many minutes of
+  work writing code in the user's own checkout. For `ticket-investigation`: **a comment posted on the ticket** plus a local
   archive, and a Jira transition when `investigation.on_complete_status` is configured. Say the
   comment out loud — approving this makes a public post on someone's ticket, and that is the single
   fact the human most needs before tapping approve. When `ticket_kind_method` is `title-keyword`,
@@ -128,6 +131,12 @@ create the draft PR, create the design doc, create issues from a ticket-plan, ac
 gap-audit, etc.), sets `status: completed`, and moves the file to
 `~/.local/share/engineer-agent/queue/completed/`. Display the one-line result it returns. If it
 reports a failure, the item stays in `drafts/` — surface the error and let the user retry.
+
+**A `ticket` may implement, not just post.** `execute-item`'s `ticket` case probes for the
+ticket branch: if it is missing it delegates to `implement-ticket` and the whole coding session
+(branch, iterative implementation, self-review, push, draft PR) happens inside this approval.
+Nothing extra to do here — do **not** run `implement-ticket` yourself first, or the branch will
+already exist and `execute-item` will take its finisher path against a half-done branch.
 
 **Exception — `qa-test-plan`:** this type is interactive and is NOT delegated (execute-item
 refuses it). Run its three-phase flow here:
