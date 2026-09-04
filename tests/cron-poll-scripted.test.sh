@@ -31,12 +31,24 @@ eq()  { if [ "$2" = "$3" ]; then ok "$1"; else bad "$1 — want [$2] got [$3]"; 
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 export EA_AGENT_DIR="$TMP/agent"
 mkdir -p "$EA_AGENT_DIR"/queue/{incoming,drafts,completed,rejected} "$EA_AGENT_DIR/state" "$TMP/bin"
+
+# HOME is redirected into the sandbox, and the `gh` stub goes in $HOME/.local/bin -- NOT in a
+# dir merely prepended to PATH here. cron-poll.sh:13 does
+#   export PATH="${HOME}/.local/bin:${HOME}/bin:/usr/local/bin:/opt/homebrew/bin:${PATH}"
+# so any real binary in those four dirs SHADOWS a stub that only sits at the front of the
+# inherited PATH. With a real gh installed (/opt/homebrew/bin/gh on a homebrew Mac) this test
+# was calling the LIVE GitHub API: the collector logged "GraphQL: Could not resolve to a
+# Repository with the name 'acme/only'", found 0 issues, and every assertion in section 3
+# failed -- while still passing anywhere gh is absent, e.g. CI. Putting the stub in the dir
+# cron-poll.sh prepends FIRST makes it win by construction on any machine.
+export HOME="$TMP/home"
+mkdir -p "$HOME/.local/bin"
 export PATH="$TMP/bin:$PATH"
 export GH_FIXTURE="$TMP/fixture"; : > "$GH_FIXTURE"
 export CLAUDE_CALLS="$TMP/claude.calls"; : > "$CLAUDE_CALLS"
 export PROMPT_CAPTURE="$TMP/last-prompt.txt"
 
-cat > "$TMP/bin/gh" <<'EOF'
+cat > "$HOME/.local/bin/gh" <<'EOF'
 #!/bin/bash
 repo=""; assignee=""
 while [ $# -gt 0 ]; do
@@ -44,7 +56,7 @@ while [ $# -gt 0 ]; do
 done
 awk -F'|' -v r="$repo" -v a="$assignee" 'BEGIN{OFS="\t"} $1==r && $2==a { print $3,$4,$5,$6,$7,$8 }' "$GH_FIXTURE"
 EOF
-chmod +x "$TMP/bin/gh"
+chmod +x "$HOME/.local/bin/gh"
 
 # The claude stub records that it ran and writes a receipt echoing the RUN_ID it was given, so the
 # health check downstream is satisfied on the paths where the model is expected to run.
@@ -79,7 +91,10 @@ projects:
 YAML
 }
 
-run_cron() { : > "$CLAUDE_CALLS"; EA_POLL_SCRIPTED_SOURCES="${1:-}" bash "$CRON" >/dev/null 2>&1; }
+# PROMPT_CAPTURE is truncated too, not just CLAUDE_CALLS: a prompt left over from an earlier
+# section makes the next section's prompt assertions pass on stale content. That masked which
+# assertions were really failing while section 3 was broken.
+run_cron() { : > "$CLAUDE_CALLS"; : > "$PROMPT_CAPTURE"; EA_POLL_SCRIPTED_SOURCES="${1:-}" bash "$CRON" >/dev/null 2>&1; }
 claude_ran() { [ -s "$CLAUDE_CALLS" ]; }
 
 echo "== 1. deny-by-default: no config key => unchanged behaviour =="

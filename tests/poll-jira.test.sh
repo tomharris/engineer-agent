@@ -42,6 +42,19 @@ export EA_AGENT_DIR="$TMP/agent"
 mkdir -p "$EA_AGENT_DIR"/queue/{incoming,drafts,completed,rejected} "$EA_AGENT_DIR/state" "$TMP/bin"
 export PATH="$TMP/bin:$PATH"
 
+# `security` MUST be shimmed, for the same reason poll-slite.test.sh shims it: ea_secret_resolve()
+# falls through env -> file -> macOS login keychain, so the "no credential" case below can find a
+# DEVELOPER'S REAL engineer-agent-jira entry and the collector then correctly proceeds, failing the
+# degradation assertions on a dev box while passing in CI. Today this suite escapes that only
+# because the keychain lookup passes agent.jira.email as the account and the fixture's
+# me@example.com does not match a real one -- luck, not isolation. Exit 1 is what `security`
+# returns when no such item exists.
+cat > "$TMP/bin/security" <<'SH'
+#!/bin/bash
+exit 1
+SH
+chmod +x "$TMP/bin/security"
+
 # Fixtures the stub serves, and the logs it writes for assertions.
 export TZ_JSON="$TMP/tz.json"
 export SEARCH_JSON="$TMP/search.json"

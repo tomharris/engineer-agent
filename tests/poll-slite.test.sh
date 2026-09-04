@@ -33,6 +33,17 @@ export EA_AGENT_DIR="$TMP/agent"
 mkdir -p "$EA_AGENT_DIR"/queue/{incoming,drafts,completed,rejected} "$EA_AGENT_DIR/state" "$TMP/bin" "$TMP/notes"
 export PATH="$TMP/bin:$PATH"
 
+# `security` MUST be shimmed. ea_secret_resolve() falls through env -> file -> macOS login
+# keychain, so without this the "no key available" case below finds the DEVELOPER'S REAL
+# engineer-agent-slite credential and the collector correctly proceeds — making the degradation
+# assertions fail on exactly the machines the plugin is developed on, and pass in CI. Exit 1 is
+# what `security` returns when no such item exists.
+cat > "$TMP/bin/security" <<'SH'
+#!/bin/bash
+exit 1
+SH
+chmod +x "$TMP/bin/security"
+
 export SEARCH_JSON="$TMP/search.json"
 export NOTES_DIR="$TMP/notes"
 export SEARCH_CODE="$TMP/search.code"; echo 200 > "$SEARCH_CODE"
@@ -214,14 +225,33 @@ run >/dev/null
 eq "two labels => two searches" "2" "$(grep -c 'search-notes' "$CURL_ARGV")"
 eq "the doc is still queued once" "1" "$(ls "$EA_AGENT_DIR/queue/incoming/"*n11* 2>/dev/null | wc -l | tr -d ' ')"
 
+# A doc not touched since the last poll must be ACCOUNTED FOR, not silently dropped. The
+# recency guard used to `continue` without incrementing anything, so the summary reported a doc
+# found and placed in no bucket at all -- unreadable as either "nothing to do" or "parse bug".
+echo "== recency guard is accounted for =="
+write_config; reset
+set_hits '[{"id":"n13"}]'; note n13 "Untouched since last poll" 'null' "2026-08-20T10:00:00Z"
+run --run-ts "2026-08-21T00:00:00Z" >/dev/null
+mv "$(item n13)" "$EA_AGENT_DIR/queue/drafts/"   # out of incoming/, so a re-queue would be visible
+run --run-ts "2026-08-22T00:00:00Z" > "$TMP/out2"
+eq "the stale doc is counted as unchanged" "1" \
+  "$(sed -n 's/.*, \([0-9]*\) unchanged.*/\1/p' "$TMP/out2" | head -1)"
+if grep -q 'Found 1 Slite doc' "$TMP/out2"; then ok "still reported as found" ; else bad "not reported as found"; fi
+
 echo "== terminal state is absorbing =="
 write_config; reset
 set_hits '[{"id":"n12"}]'; note n12 "Reviewed already"
-run >/dev/null
+# Both runs PIN --run-ts. last_checked is written from the run timestamp, which defaults to the
+# real clock, while the bumped updatedAt below is a fixture constant — so with the default the
+# recency guard (poll-slite.sh: "updated <= last_checked") drops the doc BEFORE reconciliation
+# and the terminal skip is never reached. That made this a time bomb: it passed until the wall
+# clock overtook 2026-09-01, then failed forever. Pinning both ends keeps the doc genuinely
+# "updated since the last poll", which is the premise this scenario needs.
+run --run-ts "2026-08-21T00:00:00Z" >/dev/null
 mv "$(item n12)" "$EA_AGENT_DIR/queue/completed/"
 # Posting review comments back to the doc bumps updatedAt, so the doc reappears in the window.
 note n12 "Reviewed already" 'null' "2026-09-01T10:00:00Z"
-run > "$TMP/out"
+run --run-ts "2026-09-02T00:00:00Z" > "$TMP/out"
 if [ -z "$(ls -A "$EA_AGENT_DIR/queue/incoming" 2>/dev/null)" ]; then ok "completed doc not re-queued"; else bad "re-queued a completed doc"; fi
 if grep -q 'Skipped (terminal): slite:n12' "$TMP/out"; then ok "skip is reported, not hidden as 0 new"; else bad "skipped ids must be reported"; fi
 
