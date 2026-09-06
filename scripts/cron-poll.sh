@@ -533,20 +533,61 @@ fi
 # findings as a Jira comment re-queued the ticket that had just been completed, which produced
 # another comment. See references/queue-reconciliation.md.
 #
-# Advisory: a duplicate is a correctness bug in the poll, not a reason to fail the cron, and it
-# self-heals once the redundant copy is rejected. Normal priority — it should not wake anyone.
-DUP_OUT="$("${PLUGIN_ROOT}/scripts/queue-dedup-check.sh" 2>&1)" || DUP_RC=$?
+# Advisory: a duplicate is a correctness bug in the poll, not a reason to fail the cron. Normal
+# priority — it should not wake anyone.
+#
+# TWO THINGS KEEP THIS FROM BECOMING NOISE, because it used to re-push the identical warning every
+# 15 minutes until a human was at a laptop — and a topic that cries wolf four times an hour is a
+# topic you stop reading, which is fatal here: it is the SAME topic the Approve/Reject buttons
+# arrive on.
+#   1. --heal resolves the mechanical duplicates itself (poller minted a rival file; one copy holds
+#      no work). Those never reach the phone at all — they are logged and gone.
+#   2. What --heal deliberately declines (a completed/ copy, or two human-owned drafts) is pushed
+#      ONCE per distinct (type, source_id), tracked in state/queue-dedup-notified.tsv. The ledger is
+#      rewritten to exactly what is unresolved now, so a duplicate that is resolved and later recurs
+#      is announced again rather than swallowed by a stale entry.
+# A standing duplicate stays visible without pushes: `/engineer-agent status` reports the count.
+DUP_OUT="$("${PLUGIN_ROOT}/scripts/queue-dedup-check.sh" --heal 2>&1)" || DUP_RC=$?
 DUP_RC="${DUP_RC:-0}"
+NOTIFIED_FILE="${AGENT_DIR}/state/queue-dedup-notified.tsv"
+case "$DUP_OUT" in
+  *"queue-dedup-check: healed"*|*FAILED*) printf '%s\n' "$DUP_OUT" >> "$LOG_FILE" ;;
+esac
+
 if [ "$DUP_RC" -eq 1 ]; then
-  printf '%s\n' "$DUP_OUT" >> "$LOG_FILE"
-  echo "WARN: queue has duplicate items — see references/queue-reconciliation.md" >> "$LOG_FILE"
-  DUP_IDS="$(printf '%s\n' "$DUP_OUT" | awk '/^  [^ ]/ { print $1 }' | paste -sd, - | cut -c1-160)"
-  "${PLUGIN_ROOT}/scripts/notify.sh" \
-    --title 'engineer-agent: duplicate queue items' \
-    --message "Poll produced duplicate queue item(s): ${DUP_IDS:-see log}. Reject the redundant copy; keep the one a human has acted on." \
-    --priority normal --tags warning --fyi >> "$LOG_FILE" 2>&1 || true
-elif [ "$DUP_RC" -ne 0 ]; then
-  # rc 2 = queue dir missing / bad usage. Worth a log line, not a push.
+  echo "WARN: queue has duplicate items --heal could not resolve — see references/queue-reconciliation.md" >> "$LOG_FILE"
+  # --keys is the post-heal, post-baseline list: exactly what a human still has to decide.
+  # `|| true` is load-bearing: --keys exits 1 whenever it has something to report, and this script
+  # runs under `set -e`, so the assignment alone would abort the poll right here — after the heal,
+  # before the push, with nothing recorded.
+  DUP_KEYS="$("${PLUGIN_ROOT}/scripts/queue-dedup-check.sh" --keys 2>/dev/null || true)"
+  NEW_KEYS=""
+  while IFS= read -r dkey; do
+    [ -n "$dkey" ] || continue
+    if [ -f "$NOTIFIED_FILE" ] && grep -Fqx -- "$dkey" "$NOTIFIED_FILE"; then continue; fi
+    NEW_KEYS="${NEW_KEYS}${dkey}
+"
+  done <<EOF
+$DUP_KEYS
+EOF
+  mkdir -p "$(dirname "$NOTIFIED_FILE")"
+  printf '%s\n' "$DUP_KEYS" | sed '/^$/d' > "$NOTIFIED_FILE"
+  if [ -n "$NEW_KEYS" ]; then
+    DUP_IDS="$(printf '%s' "$NEW_KEYS" | awk -F'\t' 'NF>=2 { print $2 }' | paste -sd, - | cut -c1-160)"
+    "${PLUGIN_ROOT}/scripts/notify.sh" \
+      --title 'engineer-agent: duplicate queue items' \
+      --message "Duplicate queue item(s) needing a decision: ${DUP_IDS:-see log}. Auto-healing declined these (a completed copy, or two drafts). Reject the redundant copy; keep the one a human has acted on." \
+      --priority normal --tags warning --fyi >> "$LOG_FILE" 2>&1 || true
+  else
+    echo "INFO: duplicate(s) unchanged since the last push; not re-notifying." >> "$LOG_FILE"
+  fi
+elif [ "$DUP_RC" -eq 0 ]; then
+  # Clean — possibly BECAUSE --heal just fixed it. Drop the ledger so a later recurrence of the
+  # same source_id is treated as new and does push.
+  rm -f "$NOTIFIED_FILE"
+else
+  # rc 2 = queue dir missing / bad usage. Worth a log line, not a push. The ledger is left alone:
+  # the check could not run, so it says nothing about whether anything was resolved.
   echo "WARN: queue-dedup-check could not run (exit ${DUP_RC}): ${DUP_OUT}" >> "$LOG_FILE"
 fi
 

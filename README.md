@@ -348,7 +348,10 @@ It resolves the item against `queue/drafts/` (a no-op if already handled) and ru
 
 ### `/engineer-agent status`
 
-Check system health: config status, queue counts, and per-project last poll times.
+Check system health: config status, queue counts, per-project last poll times, and anything needing
+attention — items stranded in `incoming/` without a draft, and duplicate queue items that
+auto-healing declined to resolve (the poll pushes about each of those only once, so this is where a
+standing duplicate stays visible).
 
 ```
 /engineer-agent status
@@ -533,6 +536,15 @@ Source detected → ~/.local/share/engineer-agent/queue/incoming/ → skill draf
 Both the terminal (`review-queue`) and remote (`execute`) paths funnel through one shared `execute-item` skill, so an action behaves identically no matter how it was approved.
 
 Queue items are markdown files with YAML frontmatter. Each item carries a `project` field linking it to a project in the config. Filenames follow the pattern `{YYYYMMDD-HHmmss}-{type}-{short-id}.md`.
+
+**Duplicates heal themselves.** At most one item may exist per `(type, source_id)`; each poll checks
+this and repairs what it safely can. If a poller minted a second copy of a ticket and one copy holds
+no work yet, the redundant copy is moved to `rejected/` automatically (with a `rejected_reason`
+saying so, so you can see or undo it) and you are never notified. Only the two cases needing your
+judgement survive — a copy alongside an already-`completed/` one (which may be a deliberate
+`add-ticket` re-add), or two drafts either of which you might be mid-review on — and those are
+pushed **once**, not on every poll. `/engineer-agent status` shows the standing count, so a
+duplicate you have not dealt with is never silently forgotten.
 
 ### Skills
 
@@ -776,7 +788,7 @@ scripts/
   poll-github-prs.sh           Deterministic GitHub PR collector
   queue-status.sh              Queue counts / poll times / receipt health
   queue-list.sh                Sorted review-queue table
-  queue-dedup-check.sh         Asserts the one-item-per-(type, source_id) invariant
+  queue-dedup-check.sh         Asserts (and with --heal, resolves) the one-item-per-(type, source_id) invariant
   lib-*.sh                     Shared libraries (yaml, time, queue, routing, ticket-kind, state)
 tests/
   run-all.sh                   Runs every test suite
@@ -834,6 +846,8 @@ config/
     last-poll.yaml             Dedup timestamps and seen IDs (per project + per Jira project key)
     last-poll-receipt.yaml     Liveness receipt from the last cron poll (run_id, status, item count, skipped, errors)
     claude-bin.path            Resolved claude executable an unattended poll last ran (macOS TCC preflight)
+    queue-dedup-notified.tsv   Duplicate (type, source_id) pairs already pushed about (push-once ledger)
+    queue-dedup-baseline.tsv   Known historical duplicates suppressed from the check
     ntfy-seen.yaml             Processed ntfy command message IDs (remote-approval dedup)
     ntfy-listener.since        Last-seen ntfy command timestamp (listener stream resume point)
     approval-listener.log      Listener activity log

@@ -30,7 +30,9 @@ Print its output. **Do not recompute any of it.** The script counts the queue di
 each source's last-poll time as a relative age, and applies the receipt-reading rules — including
 the two that are easy to get wrong: `status: ok` with `items_queued: 0` is **healthy**, and a
 non-empty `skipped:` list is **normal** and is never a problem. It also reports items stranded in
-`incoming/` without a draft, which are invisible to every approval path until drafted.
+`incoming/` without a draft, which are invisible to every approval path until drafted, and any
+duplicate `(type, source_id)` groups that auto-healing declined to resolve — the poll pushes about
+each of those exactly once, so `status` is where a standing duplicate stays visible.
 
 `--json` is available if you need the numbers rather than the table.
 

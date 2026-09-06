@@ -48,6 +48,13 @@ done < <(queue_items incoming)
 # than let it sit silently.
 STRANDED="$(poll_resume_candidates | wc -l | tr -d ' ')"
 
+# Duplicates that queue-dedup-check could not auto-heal. This is reported HERE, on demand, because
+# the poll deliberately pushes about a given duplicate only once (see cron-poll.sh) — a warning
+# re-sent every 15 minutes trains you to ignore the topic your Approve/Reject buttons arrive on.
+# Pushed once, visible always: that trade only works if `status` actually shows it.
+DUPES="$("${SCRIPT_DIR}/queue-dedup-check.sh" --keys 2>/dev/null | grep -c . || true)"
+DUPES="${DUPES:-0}"
+
 r_field() { [ -f "$RECEIPT" ] && sed -n "s/^$1: *//p" "$RECEIPT" | head -1 | sed 's/^"//; s/"$//'; }
 R_STATUS="$(r_field status)"; R_ITEMS="$(r_field items_queued)"; R_WHEN="$(r_field finished_at)"
 
@@ -73,8 +80,8 @@ R_ERRS="$(count_block errors)";   R_ERRS="${R_ERRS:-0}"
 R_SKIPPED="$(count_block skipped)"; R_SKIPPED="${R_SKIPPED:-0}"
 
 if [ "$JSON" -eq 1 ]; then
-  printf '{"incoming":%d,"drafts":%d,"completed":%d,"rejected":%d,"unrouted":%d,"stranded":%d,' \
-    "$INCOMING" "$DRAFTS" "$COMPLETED" "$REJECTED" "$UNROUTED" "$STRANDED"
+  printf '{"incoming":%d,"drafts":%d,"completed":%d,"rejected":%d,"unrouted":%d,"stranded":%d,"duplicates":%d,' \
+    "$INCOMING" "$DRAFTS" "$COMPLETED" "$REJECTED" "$UNROUTED" "$STRANDED" "$DUPES"
   printf '"receipt":{"status":"%s","items_queued":"%s","finished_at":"%s","errors":%d,"skipped":%d}}\n' \
     "${R_STATUS:-unknown}" "${R_ITEMS:-0}" "${R_WHEN:-}" "$R_ERRS" "$R_SKIPPED"
   exit 0
@@ -92,6 +99,11 @@ printf '\n'
 if [ "$STRANDED" -gt 0 ]; then
   printf 'WARNING: %s item(s) sit in incoming/ with no draft. They are invisible to every approval\n' "$STRANDED"
   printf '         path until drafted; the next poll re-emits them automatically.\n'
+fi
+if [ "$DUPES" -gt 0 ]; then
+  printf 'WARNING: %s duplicate (type, source_id) group(s) need a decision. Auto-healing declined\n' "$DUPES"
+  printf '         them (a completed copy, or two human-owned drafts), and the poll pushes about\n'
+  printf '         each one only once. Run scripts/queue-dedup-check.sh for the detail.\n'
 fi
 echo
 
