@@ -16,7 +16,8 @@ apart. This is a plain reference document, not a skill: callers reach it with `R
 `scripts/cron-poll.sh` allowlists `Read` but not `Skill` or `Agent`.
 
 `scripts/queue-dedup-check.sh` is the executable check on the invariant below. `tests/queue-dedup.test.sh`
-covers it.
+covers it. Run with `--heal` (as `cron-poll.sh` does) it also *resolves* the duplicates that need no
+human judgement — see "Auto-healing" at the end of this file.
 
 ## The invariant
 
@@ -133,3 +134,41 @@ If `S > 0`, add one line naming the skipped ids, so a wrongly-absorbed ticket is
 ```
 Skipped (terminal): WIRE-2189, WIRE-2201
 ```
+
+## Auto-healing
+
+A duplicate used to be a pure alarm: the check went red and the poll re-pushed the identical ntfy
+warning **every 15 minutes** until a human hand-rejected a copy — on the same topic the
+Approve/Reject buttons arrive on. A topic that cries wolf four times an hour stops being read, which
+defeats the remote approval gate itself. But most duplicates are mechanical (the poller minted a
+rival file instead of updating in place) and one of the two copies holds no work at all, so the
+resolution is one a script can get right.
+
+`queue-dedup-check.sh --heal` resolves a group when **both** hold:
+
+1. **No copy is in `completed/`.**
+2. **At most one copy is *substantive*** — in `drafts/`, or carrying a `## Draft Response`.
+
+The substantive copy is kept; if there is none, the **oldest** is kept (the filename's
+`{YYYYMMDD-HHmmss}` is the created_at ordering, kept deliberately so a long-queued item does not
+jump to the top of the review queue). Every other copy is **rejected**, not deleted: it moves to
+`rejected/` with `status: rejected` and a `rejected_reason` naming the copy that was kept, so an
+auto-resolution is auditable and reversible. `rejected/` is the disposal path the invariant already
+ignores, so the group is genuinely resolved rather than suppressed.
+
+**What it refuses to touch, and why each refusal is required rather than cautious:**
+
+- **A group containing a `completed/` copy.** That is *either* the self-sustaining re-queue loop
+  (heal-worthy) *or* a human's deliberate `add-ticket` override of terminal state, which "Manual
+  add" above explicitly permits — and the two are indistinguishable on disk **by design**
+  (`commands/add-ticket.md`: the item is written "so downstream skills see no difference between a
+  manually-added and a polled item"). Auto-rejecting would silently discard the human's re-add.
+- **A group with two or more substantive copies.** A draft is human-owned — someone may be
+  mid-review or may have hand-edited it — and nothing on disk says which of two drafts to keep.
+
+What remains after healing is exactly the set that needs a person, and `cron-poll.sh` pushes about
+each `(type, source_id)` **once**: `--keys` prints the post-heal, post-baseline list, and the poll
+diffs it against `state/queue-dedup-notified.tsv`. That ledger is rewritten to whatever is
+unresolved *now*, so a duplicate that is resolved and later recurs is announced again rather than
+swallowed by a stale entry. Pushed once, visible always: `/engineer-agent status` reports the
+standing count so silence never means the duplicate went away.

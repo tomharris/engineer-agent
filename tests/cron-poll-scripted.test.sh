@@ -208,6 +208,59 @@ if claude_ran; then bad "both sources scripted and nothing new => model must be 
 eq "receipt still ok" "ok" "$(sed -n 's/^status: *//p' "$EA_AGENT_DIR/state/last-poll-receipt.yaml")"
 if grep -q 'alpha/github$' "$EA_AGENT_DIR/state/last-poll-receipt.yaml"; then ok "PR review listed as polled"; else bad "PR review missing from receipt"; fi
 
+echo "== 7. duplicate handling: heal first, then push ONCE =="
+# The noise problem this replaced: the dedup warning re-fired on EVERY poll — 96 times a day, on the
+# same ntfy topic the Approve/Reject buttons arrive on — until a human hand-rejected a copy.
+LOG="$EA_AGENT_DIR/state/cron-poll.log"
+LEDGER="$EA_AGENT_DIR/state/queue-dedup-notified.tsv"
+dup_item() { # dup_item <dir> <file> <sid> [draft]
+  cat > "$EA_AGENT_DIR/queue/$1/$2" <<EOF
+---
+type: ticket
+source: jira
+source_id: "$3"
+title: "Fixture $3"
+status: drafted
+project: "alpha"
+---
+
+## Context
+Body.
+EOF
+  [ "${4:-}" = "draft" ] && printf '\n## Draft Response\nPlan.\n' >> "$EA_AGENT_DIR/queue/$1/$2"
+}
+
+rm -f "$EA_AGENT_DIR"/queue/*/*.md "$LEDGER"
+# (a) a mechanical duplicate — one copy holds no work — must be healed and never pushed at all.
+dup_item incoming 20260820-140001-ticket-WIRE-2190.md WIRE-2190
+dup_item drafts   20260820-150001-ticket-WIRE-2190.md WIRE-2190 draft
+: > "$LOG"; run_cron "github-issues github"
+if [ -f "$EA_AGENT_DIR/queue/rejected/20260820-140001-ticket-WIRE-2190.md" ]; then
+  ok "the poll heals a mechanical duplicate itself"
+else
+  bad "cron did not run queue-dedup-check --heal"
+fi
+if [ -f "$LEDGER" ]; then bad "a healed duplicate must not be recorded as pushed"; else ok "nothing recorded for a healed duplicate"; fi
+
+# (b) an unhealable duplicate (two human-owned drafts) is recorded once...
+rm -f "$EA_AGENT_DIR"/queue/*/*.md
+dup_item drafts 20260801-090000-ticket-WIRE-5000.md WIRE-5000 draft
+dup_item drafts 20260802-090000-ticket-WIRE-5000.md WIRE-5000 draft
+: > "$LOG"; run_cron "github-issues github"
+if grep -q 'WIRE-5000' "$LEDGER" 2>/dev/null; then ok "unresolved duplicate recorded in the ledger"; else bad "ledger missing the unresolved key"; fi
+if grep -q 'not re-notifying' "$LOG"; then bad "first sighting must not be suppressed"; else ok "first sighting is pushed"; fi
+
+# (c) ...and NOT re-announced while it stands unchanged. This is the whole point.
+: > "$LOG"; run_cron "github-issues github"
+if grep -q 'not re-notifying' "$LOG"; then ok "a standing duplicate is not pushed again"; else bad "second poll re-notified about the same duplicate"; fi
+
+# (d) resolving it clears the ledger, so a later recurrence is announced again rather than being
+# swallowed by a stale entry.
+mv "$EA_AGENT_DIR/queue/drafts/20260802-090000-ticket-WIRE-5000.md" "$EA_AGENT_DIR/queue/rejected/"
+: > "$LOG"; run_cron "github-issues github"
+if [ -f "$LEDGER" ]; then bad "ledger must be dropped once the queue is clean"; else ok "ledger pruned when the duplicate is resolved"; fi
+rm -f "$EA_AGENT_DIR"/queue/*/*.md
+
 echo
 echo "Passed: $PASS  Failed: $FAIL"
 [ "$FAIL" -eq 0 ]

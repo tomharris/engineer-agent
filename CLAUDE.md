@@ -279,6 +279,27 @@ rule every poller follows to uphold it — skip / update-in-place / create, one 
 minted at write time, so a second copy of a ticket never collides with the first — it just sits
 alongside it and the human reviews (or implements) the same work twice.
 
+> **A duplicate must not become a recurring notification.** The check used to be a pure alarm: it
+> stayed red, and the poll re-pushed the identical ntfy warning **every 15 minutes** until a human
+> hand-rejected a copy — on the very topic the Approve/Reject buttons arrive on, which is the one
+> topic that must never be trained into background noise. Two changes, both in
+> `references/queue-reconciliation.md` → "Auto-healing":
+> - **`--heal` (how `cron-poll.sh` now runs it) resolves what needs no judgement.** A group with no
+>   `completed/` copy and at most one *substantive* copy (in `drafts/`, or carrying a
+>   `## Draft Response`) is resolved by moving the others to `rejected/` with a `rejected_reason` —
+>   keeping the substantive copy, else the oldest, so `created_at` ordering survives. Rejected, not
+>   deleted: every auto-resolution stays auditable and reversible. These never reach the phone.
+> - **What it refuses is pushed once per `(type, source_id)`,** tracked in
+>   `state/queue-dedup-notified.tsv` and diffed against `queue-dedup-check.sh --keys` (the
+>   post-heal, post-baseline list). The ledger is rewritten to whatever is unresolved *now*, so a
+>   recurrence after a fix is announced again instead of being swallowed by a stale entry.
+>   It refuses exactly two shapes, and both refusals are required rather than cautious: a group
+>   containing a `completed/` copy is **indistinguishable by design** from a human's deliberate
+>   `add-ticket` override of terminal state (healing it would delete their re-add), and a group with
+>   two drafts gives no way to know which one a human is mid-review on.
+> Pushed once, visible always — `/engineer-agent status` reports the standing count, so silence
+> never means the duplicate went away.
+
 Terminal state (`completed/`, `rejected/`) is **absorbing** for pollers. This is not fussiness: the
 previous "re-queue anything updated since last_checked" rule was self-sustaining, because
 engineer-agent recording its own findings as a Jira comment bumps `updated`, which re-queued the

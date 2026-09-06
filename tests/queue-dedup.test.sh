@@ -34,6 +34,7 @@ CHECK="${SCRIPT_DIR}/../scripts/queue-dedup-check.sh"
 PASS=0; FAIL=0
 ok()  { echo "  ok: $1"; PASS=$((PASS+1)); }
 bad() { echo "  FAIL: $1"; FAIL=$((FAIL+1)); }
+eq()  { if [ "$2" = "$3" ]; then ok "$1"; else bad "$1 — want [$2] got [$3]"; fi; }
 
 setup() {
   TMP="$(mktemp -d)"
@@ -63,6 +64,14 @@ ticket_key: "$sid"
 ## Context
 Fixture body.
 EOF
+}
+
+# drafted <dir> <filename> ... — an item that already carries a `## Draft Response`. This is the
+# distinction --heal turns on: a copy with a draft holds work (a human may be mid-review or may
+# have hand-edited it), a copy without one holds nothing and can be auto-rejected.
+drafted() {
+  item "$@"
+  printf '\n## Draft Response\nProposed plan.\n' >> "$QUEUE/$1/$2"
 }
 
 echo "queue-dedup-check.sh"
@@ -342,6 +351,142 @@ if bash "$CHECK" >/dev/null 2>&1; then
 else
   bad "check should pass after baselining current state"
 fi
+teardown
+
+# ---------------------------------------------------------------------------
+# --heal: the self-healing pass. Motivation is notification noise, not tidiness — before this, a
+# duplicate re-pushed the identical ntfy warning every 15 minutes until a human hand-rejected a
+# copy, on the same topic the Approve/Reject buttons arrive on.
+echo "--heal resolves the mechanical duplicates"
+setup
+# Mechanism 1 again: an _unrouted incoming/ item plus the routed copy the next poll minted.
+item    incoming 20260820-140001-ticket-WIRE-2190.md WIRE-2190 incoming _unrouted
+drafted drafts   20260820-150001-ticket-WIRE-2190.md WIRE-2190 drafted payroll-gateway
+out="$(bash "$CHECK" --heal 2>&1)"; rc=$?
+if [ "$rc" -eq 0 ]; then ok "healed duplicate leaves the check green"; else bad "expected exit 0 after heal, got $rc: $out"; fi
+if [ -f "$QUEUE/rejected/20260820-140001-ticket-WIRE-2190.md" ]; then
+  ok "the undrafted copy was moved to rejected/"
+else
+  bad "undrafted copy should have been rejected"
+fi
+if [ -f "$QUEUE/drafts/20260820-150001-ticket-WIRE-2190.md" ]; then
+  ok "the drafted copy — the one a human would be reviewing — is untouched"
+else
+  bad "--heal must never discard the drafted copy"
+fi
+if grep -q 'rejected_reason: .*queue-dedup-check --heal' "$QUEUE/rejected/20260820-140001-ticket-WIRE-2190.md" 2>/dev/null; then
+  ok "the auto-rejection records why, so it can be audited or undone"
+else
+  bad "rejected_reason missing from the auto-resolved copy"
+fi
+if grep -q 'status: "rejected"' "$QUEUE/rejected/20260820-140001-ticket-WIRE-2190.md" 2>/dev/null; then
+  ok "status was set to rejected"
+else
+  bad "status not updated on the auto-resolved copy"
+fi
+teardown
+
+echo "--heal keeps the OLDEST when no copy holds any work"
+setup
+# Both bare: nothing to lose either way, so created_at ordering decides. Keeping the newest would
+# make a long-queued item jump to the top of the review queue.
+item incoming 20260820-090000-ticket-WIRE-3000.md WIRE-3000 incoming payroll-gateway
+item incoming 20260821-090000-ticket-WIRE-3000.md WIRE-3000 incoming payroll-gateway
+bash "$CHECK" --heal >/dev/null 2>&1; rc=$?
+if [ "$rc" -eq 0 ]; then ok "two bare copies heal"; else bad "expected exit 0, got $rc"; fi
+if [ -f "$QUEUE/incoming/20260820-090000-ticket-WIRE-3000.md" ] && \
+   [ -f "$QUEUE/rejected/20260821-090000-ticket-WIRE-3000.md" ]; then
+  ok "oldest kept, newest rejected"
+else
+  bad "heal must keep the oldest copy: $(ls "$QUEUE/incoming" "$QUEUE/rejected")"
+fi
+teardown
+
+echo "--heal resolves a {ticket, ticket-investigation} family duplicate"
+setup
+item    incoming 20260805-090000-ticket-WIRE-6000.md WIRE-6000 incoming payroll-gateway ticket
+drafted drafts   20260806-090000-ticket-investigation-WIRE-6000.md WIRE-6000 drafted payroll-gateway ticket-investigation
+bash "$CHECK" --heal >/dev/null 2>&1; rc=$?
+if [ "$rc" -eq 0 ]; then ok "family duplicate heals"; else bad "expected exit 0 for family heal, got $rc"; fi
+if [ -f "$QUEUE/drafts/20260806-090000-ticket-investigation-WIRE-6000.md" ]; then
+  ok "the drafted deliverable survives the family heal"
+else
+  bad "family heal discarded the drafted copy"
+fi
+teardown
+
+echo "--heal refuses the cases that need a human"
+setup
+# A completed/ copy is ambiguous: EITHER the self-sustaining re-queue loop OR a deliberate
+# `add-ticket` override of terminal state, which references/queue-reconciliation.md permits and
+# which is indistinguishable on disk by design. Auto-rejecting would delete the human's re-add.
+item    completed 20260801-090000-ticket-WIRE-4000.md WIRE-4000 completed payroll-gateway
+drafted drafts    20260901-090000-ticket-WIRE-4000.md WIRE-4000 drafted payroll-gateway
+# Two drafts: no way to know which one a human is holding.
+drafted drafts 20260801-090000-ticket-WIRE-5000.md WIRE-5000 drafted payroll-gateway
+drafted drafts 20260802-090000-ticket-WIRE-5000.md WIRE-5000 drafted payroll-gateway
+out="$(bash "$CHECK" --heal 2>&1)"; rc=$?
+if [ "$rc" -eq 1 ]; then ok "unhealable duplicates still fail the check"; else bad "expected exit 1, got $rc: $out"; fi
+if [ -f "$QUEUE/drafts/20260901-090000-ticket-WIRE-4000.md" ] && \
+   [ -f "$QUEUE/completed/20260801-090000-ticket-WIRE-4000.md" ]; then
+  ok "a group containing a completed/ copy is left completely alone"
+else
+  bad "heal must not touch a group with a completed copy"
+fi
+if [ -f "$QUEUE/drafts/20260801-090000-ticket-WIRE-5000.md" ] && \
+   [ -f "$QUEUE/drafts/20260802-090000-ticket-WIRE-5000.md" ]; then
+  ok "two human-owned drafts are left completely alone"
+else
+  bad "heal must not choose between two drafts"
+fi
+if [ -z "$(ls -A "$QUEUE/rejected" 2>/dev/null)" ]; then
+  ok "nothing was rejected on the refused paths"
+else
+  bad "heal rejected something it should not have: $(ls "$QUEUE/rejected")"
+fi
+teardown
+
+echo "the check never writes without --heal"
+setup
+item    incoming 20260820-140001-ticket-WIRE-2190.md WIRE-2190 incoming _unrouted
+drafted drafts   20260820-150001-ticket-WIRE-2190.md WIRE-2190 drafted payroll-gateway
+bash "$CHECK" >/dev/null 2>&1
+if [ -f "$QUEUE/incoming/20260820-140001-ticket-WIRE-2190.md" ] && \
+   [ -z "$(ls -A "$QUEUE/rejected" 2>/dev/null)" ]; then
+  ok "a plain check is read-only — healing is opt-in"
+else
+  bad "the check modified the queue without --heal"
+fi
+teardown
+
+# ---------------------------------------------------------------------------
+# --keys is what cron-poll.sh diffs against its last push, so its SHAPE is load-bearing: prose on
+# stdout, or a key that changes spelling between runs, would re-notify on every poll.
+echo "--keys"
+setup
+drafted drafts 20260801-090000-ticket-WIRE-5000.md WIRE-5000 drafted payroll-gateway
+drafted drafts 20260802-090000-ticket-WIRE-5000.md WIRE-5000 drafted payroll-gateway
+out="$(bash "$CHECK" --keys 2>/dev/null)"; rc=$?
+eq "--keys exits 1 while a duplicate stands" 1 "$rc"
+eq "--keys prints type<TAB>source_id only" "$(printf 'ticket\tWIRE-5000')" "$(printf '%s' "$out" | sed -n 1p)"
+eq "--keys prints one line per group" 1 "$(printf '%s' "$out" | grep -c .)"
+teardown
+
+setup
+item drafts 20260801-090000-ticket-WIRE-7000.md WIRE-7000 drafted payroll-gateway
+out="$(bash "$CHECK" --keys 2>/dev/null)"; rc=$?
+eq "--keys exits 0 on a clean queue" 0 "$rc"
+eq "--keys prints nothing on a clean queue" "" "$out"
+teardown
+
+setup
+# A healed duplicate must vanish from --keys in the SAME run: cron pushes about what --keys reports,
+# so anything --heal fixed must never reach the phone.
+item    incoming 20260820-140001-ticket-WIRE-2190.md WIRE-2190 incoming _unrouted
+drafted drafts   20260820-150001-ticket-WIRE-2190.md WIRE-2190 drafted payroll-gateway
+out="$(bash "$CHECK" --heal --keys 2>/dev/null)"; rc=$?
+eq "--heal --keys reports nothing left to decide" "" "$out"
+eq "--heal --keys exits 0" 0 "$rc"
 teardown
 
 # ---------------------------------------------------------------------------
