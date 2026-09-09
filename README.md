@@ -692,6 +692,8 @@ This registers a supervised service (`engineer-agent-listener`) that restarts on
 
 **After updating the plugin, re-run `install-listener.sh`** (or `systemctl --user restart engineer-agent-listener`) so the running service loads the new code — a supervised daemon keeps executing whatever it parsed at launch. As a backstop the listener also re-execs itself when its own file changes, at the next stream reconnect.
 
+**Taps stopped working but pushes still arrive?** The listener treats a silent stream as dead and reconnects, because a connection that drops without closing cleanly (laptop sleep, a dropped NAT mapping) would otherwise leave it waiting forever — buttons on your phone would still look live while nothing acted on them. The stream is abandoned after `EA_NTFY_STALL_TIMEOUT` seconds of total silence (default 300; ntfy sends a keepalive about every 45s) and torn down and reopened every `EA_NTFY_STREAM_MAX_TIME` seconds regardless (default 3600). Reconnects are harmless — replayed messages are deduped via `state/ntfy-seen.yaml`. To check the listener is genuinely alive, look for a recent `stream closed; reconnecting` line in `state/approval-listener.log`: the process being up is not evidence that it is reading.
+
 **Supervising the installed copy instead of a checkout.** By default the service runs the
 `approval-listener.sh` belonging to the checkout you ran the installer from. If you use the
 marketplace install (`/plugin install engineer-agent`), pass `EA_LISTENER_FROM_CACHE=1` so the

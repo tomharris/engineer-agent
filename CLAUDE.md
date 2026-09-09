@@ -622,6 +622,27 @@ polls thrash the same state/receipt files and each burns its full budget racing 
 > reconnect loop when its own mtime changes — the one point guaranteed to be *between* executes,
 > so no in-flight approval is interrupted.
 
+> **The subscribe stream needs a stall timeout, or a dead connection wedges remote approval
+> forever — silently.** The reconnect loop above only runs when `curl` *returns*, and a TCP
+> connection that dies without a FIN (dropped NAT mapping, laptop sleep, a silent middlebox)
+> never gives it one: `curl` blocks in `read()` indefinitely, the loop never reaches its
+> `stream closed` log line, and every Approve/Reject tap from that moment on is dropped on the
+> floor. It is the worst shape of failure this plugin has: the *outbound* leg is unaffected, so
+> pushes keep arriving on the phone with working-looking buttons, the log says nothing at all
+> (it only writes when the stream closes), and `launchctl print` reports the job `running`.
+> Observed in the wild: one `curl` alive **4h56m** having read zero bytes while five ticket
+> pushes went out, `state/ntfy-listener.since` frozen nine days earlier, and no command executed
+> in over a week. So the stream carries `--speed-limit 1 --speed-time ${EA_NTFY_STALL_TIMEOUT}`
+> (default 300s — ntfy emits a keepalive frame about every 45s, so a healthy stream is never
+> quiet that long) plus `--max-time ${EA_NTFY_STREAM_MAX_TIME}` (default 3600s) as a backstop for
+> a stream that stays open but stops delivering. Tearing down a *healthy* stream is free: the
+> reconnect replays from `since` and every replayed message id is deduped through
+> `state/ntfy-seen.yaml`. `tests/listener-stream-stall.test.sh` pins it by serving HTTP headers
+> and then going permanently silent — it hangs the unfixed listener and passes the fixed one.
+> **Corollary: never add a network read to an unattended path without a stall timeout**, and
+> judge liveness by a *timestamp that advances* (`ntfy-listener.since`, the poll's run-id
+> receipt), never by "the process is up".
+
 **Which copy of the plugin the service supervises (`EA_LISTENER_FROM_CACHE`).**
 `install-listener.sh` defaults to supervising **its own checkout**, which is right on a
 `--plugin-dir` dev box but means the listener and the interactive skills can resolve *different*

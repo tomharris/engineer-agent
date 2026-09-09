@@ -59,6 +59,20 @@ LOG_FILE="${STATE_DIR}/approval-listener.log"
 SEEN_FILE="${STATE_DIR}/ntfy-seen.yaml"
 SINCE_FILE="${STATE_DIR}/ntfy-listener.since"
 
+# How long the subscribe stream may be completely silent before we abandon it and
+# reconnect. ntfy emits a keepalive frame roughly every 45s, so a healthy stream is
+# never quiet for minutes; but a connection that dies WITHOUT a FIN (dropped NAT
+# mapping, laptop sleep, a silent middlebox) leaves curl blocked in read() forever.
+# The reconnect loop then never runs, so every Approve/Reject tap from that moment on
+# is lost — permanently, and with nothing in the log to say so, because the loop only
+# logs when the stream *closes*. Observed in the wild: one curl alive 5h having read
+# zero bytes while outbound pushes kept arriving on the phone.
+# MAX is a hard backstop for a stream that stays technically alive but stops
+# delivering; replays on reconnect are deduped via SEEN_FILE, so tearing down a
+# healthy stream costs nothing.
+NTFY_STALL_TIMEOUT="${EA_NTFY_STALL_TIMEOUT:-300}"
+NTFY_STREAM_MAX_TIME="${EA_NTFY_STREAM_MAX_TIME:-3600}"
+
 mkdir -p "$STATE_DIR"
 log() { echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] $*" | tee -a "$LOG_FILE" >&2; }
 
@@ -749,7 +763,11 @@ if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
     while IFS= read -r line; do
       [ -n "$line" ] && handle_line "$line"
       BACKOFF=2   # reset backoff once we are receiving data
-    done < <(curl -sN "${AUTH_ARGS[@]}" "$STREAM_URL" 2>>"$LOG_FILE")
+    done < <(curl -sN \
+      --connect-timeout 10 \
+      --speed-limit 1 --speed-time "$NTFY_STALL_TIMEOUT" \
+      --max-time "$NTFY_STREAM_MAX_TIME" \
+      "${AUTH_ARGS[@]}" "$STREAM_URL" 2>>"$LOG_FILE")
 
     log "stream closed; reconnecting in ${BACKOFF}s"
     sleep "$BACKOFF"
