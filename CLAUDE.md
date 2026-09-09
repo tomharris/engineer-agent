@@ -1040,6 +1040,31 @@ Phase A whose drafting phase died would sit there **forever, invisibly**. Two gu
 subsequent manifest (self-healing on the next tick), and `queue-status.sh` reports the count as a
 warning. `tests/lib-queue.test.sh` and `tests/poll-github-issues.test.sh` both pin it.
 
+> **There are TWO stranding shapes, and for eight weeks only one was detected.**
+> `poll_resume_candidates()` tests for a **missing** draft, because it was written for the
+> Phase-A/Phase-B crash above. But the invariant it cites is about *location*, not about whether a
+> draft exists — an item in `incoming/` **with a finished draft** is invisible to both approval
+> paths too, and it is strictly worse: the work is already done and already reviewable, and nobody
+> can reach it. That shape had no detector, so `/engineer-agent status` printed `stranded: 0` while
+> five verified `code-audit-finding` items — including a cross-client authorization hole — sat
+> unapprovable in `incoming/` from 2026-07-14. They came from a pre-`e218f1c` `audit-code` that had
+> not yet learned to write straight to `drafts/`; that producer bug was fixed the next day, but
+> nothing healed what it had already left behind, because the reconciliation table correctly says a
+> resolved `incoming/` item is "leave alone".
+> `poll_stranded_drafted()` is the second predicate and `scripts/queue-heal-stranded.sh --heal`
+> (run by `cron-poll.sh`, before the dedup check) is the remedy. It is a **separate** predicate on
+> purpose: the two remedies differ — an undrafted item needs the *model*, a drafted one just needs
+> *moving* — and merging them into one looser condition would re-draft finished work on every tick.
+> Three deliberate refusals: `_unrouted` items are left parked (`review-queue` surfaces those from
+> `incoming/`, so they are reachable, and healing one would skip the routing decision it waits
+> for); a name collision with `drafts/` is left to `queue-dedup-check.sh`, whose job it is; and the
+> heal **sends no ntfy push**, because an auto-resolution needing no judgement must not reach the
+> topic your Approve/Reject buttons arrive on. Ordering matters — the heal runs *first*, since
+> dedup's rules key on whether a copy is in `drafts/`, which is exactly what the heal changes.
+> **The general lesson: a guard's condition must be the invariant, not the one failure that
+> prompted it.** This one was written as the complement of the hazard it quoted, and so was blind
+> to precisely the case the hazard describes.
+
 **2. `gh --jq`, not `jq`.** The collectors use gh's *embedded* jq engine, so they add no dependency
 and stay inside the "the cron path is jq-free" policy `cron-poll.sh` sets. A Slack collector would
 need real `jq` and must gate on it softly (fall back to the model), never hard-fail.

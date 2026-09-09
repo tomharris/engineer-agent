@@ -48,6 +48,13 @@ done < <(queue_items incoming)
 # than let it sit silently.
 STRANDED="$(poll_resume_candidates | wc -l | tr -d ' ')"
 
+# The other stranding shape: a FINISHED draft parked in incoming/. Counted separately because the
+# remedy differs (a move, not a re-draft) and because reporting them as one number hid a real
+# outage — this count was the missing half, so `status` read `stranded: 0` for eight weeks while
+# five verified audit findings sat unapprovable. cron-poll heals these, so a non-zero here means
+# the heal declined (a name collision with drafts/) or the poll has not run since they appeared.
+STRANDED_DRAFTED="$(poll_stranded_drafted | wc -l | tr -d ' ')"
+
 # Duplicates that queue-dedup-check could not auto-heal. This is reported HERE, on demand, because
 # the poll deliberately pushes about a given duplicate only once (see cron-poll.sh) — a warning
 # re-sent every 15 minutes trains you to ignore the topic your Approve/Reject buttons arrive on.
@@ -80,8 +87,8 @@ R_ERRS="$(count_block errors)";   R_ERRS="${R_ERRS:-0}"
 R_SKIPPED="$(count_block skipped)"; R_SKIPPED="${R_SKIPPED:-0}"
 
 if [ "$JSON" -eq 1 ]; then
-  printf '{"incoming":%d,"drafts":%d,"completed":%d,"rejected":%d,"unrouted":%d,"stranded":%d,"duplicates":%d,' \
-    "$INCOMING" "$DRAFTS" "$COMPLETED" "$REJECTED" "$UNROUTED" "$STRANDED" "$DUPES"
+  printf '{"incoming":%d,"drafts":%d,"completed":%d,"rejected":%d,"unrouted":%d,"stranded":%d,"stranded_drafted":%d,"duplicates":%d,' \
+    "$INCOMING" "$DRAFTS" "$COMPLETED" "$REJECTED" "$UNROUTED" "$STRANDED" "$STRANDED_DRAFTED" "$DUPES"
   printf '"receipt":{"status":"%s","items_queued":"%s","finished_at":"%s","errors":%d,"skipped":%d}}\n' \
     "${R_STATUS:-unknown}" "${R_ITEMS:-0}" "${R_WHEN:-}" "$R_ERRS" "$R_SKIPPED"
   exit 0
@@ -99,6 +106,11 @@ printf '\n'
 if [ "$STRANDED" -gt 0 ]; then
   printf 'WARNING: %s item(s) sit in incoming/ with no draft. They are invisible to every approval\n' "$STRANDED"
   printf '         path until drafted; the next poll re-emits them automatically.\n'
+fi
+if [ "$STRANDED_DRAFTED" -gt 0 ]; then
+  printf 'WARNING: %s item(s) sit in incoming/ with a FINISHED draft. That work is done and\n' "$STRANDED_DRAFTED"
+  printf '         invisible — no approval path can see it. Run scripts/queue-heal-stranded.sh --heal\n'
+  printf '         to move them to drafts/ (the poll also does this automatically).\n'
 fi
 if [ "$DUPES" -gt 0 ]; then
   printf 'WARNING: %s duplicate (type, source_id) group(s) need a decision. Auto-healing declined\n' "$DUPES"
