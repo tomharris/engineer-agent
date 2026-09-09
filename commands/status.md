@@ -29,8 +29,10 @@ ${CLAUDE_PLUGIN_ROOT}/scripts/queue-status.sh
 Print its output. **Do not recompute any of it.** The script counts the queue directories, renders
 each source's last-poll time as a relative age, and applies the receipt-reading rules — including
 the two that are easy to get wrong: `status: ok` with `items_queued: 0` is **healthy**, and a
-non-empty `skipped:` list is **normal** and is never a problem. It also reports items stranded in
-`incoming/` without a draft, which are invisible to every approval path until drafted, and any
+non-empty `skipped:` list is **normal** and is never a problem. It also reports both stranding
+shapes — items in `incoming/` **without** a draft (invisible until drafted; the next poll re-emits
+them) and items in `incoming/` **with a finished draft** (done, but unreachable by every approval
+path; the poll moves these to `drafts/`, so a non-zero count means the move was declined) — and any
 duplicate `(type, source_id)` groups that auto-healing declined to resolve — the poll pushes about
 each of those exactly once, so `status` is where a standing duplicate stays visible.
 

@@ -547,6 +547,24 @@ fi
 #      rewritten to exactly what is unresolved now, so a duplicate that is resolved and later recurs
 #      is announced again rather than swallowed by a stale entry.
 # A standing duplicate stays visible without pushes: `/engineer-agent status` reports the count.
+
+# Before the dedup check: move any FINISHED draft that is parked in incoming/ into drafts/, the
+# only directory the approval gate reads. Ordered first deliberately — it changes which directory
+# an item lives in, and queue-dedup-check's healing rules turn on exactly that (a copy in drafts/
+# counts as substantive), so running it after would have dedup judge a layout this is about to fix.
+#
+# Deliberately silent: no ntfy push. The move needs no human judgement (the draft is already
+# written and already reviewable — the file was simply in the wrong directory), and the rule this
+# repo learned from the dedup alarm is that auto-resolutions which need no judgement must not reach
+# the phone. It is logged here and counted by `/engineer-agent status`.
+HEAL_OUT="$(bash "${PLUGIN_ROOT}/scripts/queue-heal-stranded.sh" --heal 2>&1)" || HEAL_RC=$?
+HEAL_RC="${HEAL_RC:-0}"
+case "$HEAL_OUT" in
+  *"nothing stranded"*) ;;
+  *) printf '%s\n' "$HEAL_OUT" >> "$LOG_FILE" ;;
+esac
+[ "$HEAL_RC" -eq 0 ] || echo "WARN: queue-heal-stranded left items unresolved (exit ${HEAL_RC}); see above" >> "$LOG_FILE"
+
 DUP_OUT="$("${PLUGIN_ROOT}/scripts/queue-dedup-check.sh" --heal 2>&1)" || DUP_RC=$?
 DUP_RC="${DUP_RC:-0}"
 NOTIFIED_FILE="${AGENT_DIR}/state/queue-dedup-notified.tsv"

@@ -172,3 +172,32 @@ poll_resume_candidates() {
     has_section "$f" "## Draft Response" || printf '%s\n' "$f"
   done < <(queue_items incoming)
 }
+
+# poll_stranded_drafted — items sitting in incoming/ that ALREADY have a "## Draft Response"
+# and a resolved project. The complement of poll_resume_candidates(), and the worse half.
+#
+# WHY THIS EXISTS SEPARATELY: the sweep above tests for a MISSING draft, because it was written
+# for the scripted-poller crash (Phase A wrote the item, Phase B died before drafting). But the
+# invariant in CLAUDE.md is about *location*, not about whether a draft exists — "an item parked
+# in incoming/ with a finished draft is invisible to both approval paths, and fails silently in
+# each". So the shape the invariant actually names was the one shape nothing detected: `status`
+# reported stranded:0 while five verified audit findings sat unreachable in incoming/ for eight
+# weeks (written by a pre-e218f1c audit-code that skipped drafts/, and never picked up again
+# because the reconciliation table correctly says "leave alone").
+#
+# The remedy differs, which is why this is its own predicate rather than a looser condition on
+# the sweep above: an undrafted item needs the MODEL (re-emit into the manifest and draft it), a
+# drafted one just needs MOVING to drafts/ — deterministic, no model, no re-draft. Merging them
+# would re-draft finished work on every tick.
+#
+# _unrouted items are deliberately excluded: review-queue surfaces drafts/ PLUS _unrouted items
+# in incoming/, because a human is the last tier of the routing ladder. Those are reachable, and
+# healing one into drafts/ would skip the routing decision it is parked for.
+poll_stranded_drafted() {
+  local f proj
+  while IFS= read -r f; do
+    has_section "$f" "## Draft Response" || continue
+    proj="$(fm "$f" project)"
+    [ -n "$proj" ] && [ "$proj" != "_unrouted" ] && printf '%s\n' "$f"
+  done < <(queue_items incoming)
+}

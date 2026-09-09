@@ -112,10 +112,37 @@ printf '## Draft Response\ndone\n' >> "$G"
 RES2="$(poll_resume_candidates | sed "s|$EA_AGENT_DIR/queue/incoming/||" | sort | tr '\n' ' ' | sed 's/ $//')"
 eq "drafted item leaves the sweep" "20260101-000002-ticket-gh-3.md" "$RES2"
 
+echo "== stranded-drafted sweep =="
+# The OTHER stranding shape, and the worse one. poll_resume_candidates() only reports incoming/
+# items MISSING a draft, because it was written for the scripted-poller crash (Phase A wrote the
+# item, Phase B died before drafting). But CLAUDE.md's invariant is about *location*, not about
+# whether a draft exists: "An item parked in incoming/ with a finished draft is invisible to both
+# approval paths." An item with a FINISHED draft in incoming/ is finished work nobody can approve
+# — and it was the one shape no detector looked for, so `status` reported stranded:0 while five
+# real audit findings sat unreachable for eight weeks.
+#
+# Remedy differs too, which is why this is a separate predicate: an undrafted item needs the model
+# (re-emit into the manifest), a drafted one just needs moving to drafts/ — pure bash, no model.
+mkitem incoming 20260101-000010-code-audit-finding-a.md code-audit-finding "src/a.php:1-2" alpha --drafted
+mkitem incoming 20260101-000011-code-audit-finding-b.md code-audit-finding "src/b.php:1-2" alpha --drafted
+# An _unrouted item is NOT stranded even when drafted: review-queue surfaces drafts/ PLUS
+# _unrouted items in incoming/, because a human is the last tier of the routing ladder. Healing
+# it into drafts/ would skip the routing decision it is parked for.
+mkitem incoming 20260101-000012-ticket-gh-9.md ticket "acme/repo#9" _unrouted --drafted
+STRANDED="$(poll_stranded_drafted | sed "s|$EA_AGENT_DIR/queue/incoming/||" | sort | tr '\n' ' ' | sed 's/ $//')"
+# gh-2 belongs here too: the resume-sweep test above appended a draft to it in place, which is
+# exactly this bug's shape — a draft written while the item stayed in incoming/.
+eq "sweep finds drafted-but-parked items" \
+   "20260101-000001-ticket-gh-2.md 20260101-000010-code-audit-finding-a.md 20260101-000011-code-audit-finding-b.md" \
+   "$STRANDED"
+# The two sweeps must stay disjoint, or an item gets both re-drafted and moved.
+OVERLAP="$(comm -12 <(poll_resume_candidates | sort) <(poll_stranded_drafted | sort) | grep -c . || true)"
+eq "the two stranding sweeps are disjoint" "0" "$OVERLAP"
+
 echo "== enumeration hygiene =="
 echo "# repo instructions, not a queue item" > "$EA_AGENT_DIR/queue/drafts/CLAUDE.md"
 eq "CLAUDE.md is not an item" "0" "$(queue_items drafts | grep -c 'CLAUDE.md')"
-eq "queue_items counts all"   "6" "$(queue_items | wc -l | tr -d ' ')"
+eq "queue_items counts all"   "9" "$(queue_items | wc -l | tr -d ' ')"
 
 echo "== predicates =="
 if is_terminal_dir completed; then ok "completed terminal"; else bad "completed should be terminal"; fi

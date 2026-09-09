@@ -349,9 +349,11 @@ It resolves the item against `queue/drafts/` (a no-op if already handled) and ru
 ### `/engineer-agent status`
 
 Check system health: config status, queue counts, per-project last poll times, and anything needing
-attention — items stranded in `incoming/` without a draft, and duplicate queue items that
-auto-healing declined to resolve (the poll pushes about each of those only once, so this is where a
-standing duplicate stays visible).
+attention — items stranded in `incoming/` (either with no draft yet, or with a **finished** draft
+that no approval path can see), and duplicate queue items that auto-healing declined to resolve
+(the poll pushes about each of those only once, so this is where a standing duplicate stays
+visible). Both stranding shapes are healed automatically by the poll; a non-zero count means the
+heal was declined and needs a look.
 
 ```
 /engineer-agent status
@@ -789,6 +791,7 @@ scripts/
   queue-status.sh              Queue counts / poll times / receipt health
   queue-list.sh                Sorted review-queue table
   queue-dedup-check.sh         Asserts (and with --heal, resolves) the one-item-per-(type, source_id) invariant
+  queue-heal-stranded.sh       Moves finished drafts out of incoming/, where no approval path can see them
   lib-*.sh                     Shared libraries (yaml, time, queue, routing, ticket-kind, state)
 tests/
   run-all.sh                   Runs every test suite
