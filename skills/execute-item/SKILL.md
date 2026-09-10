@@ -110,6 +110,21 @@ read `projects.<project>.tracker`, or infer from `source` frontmatter (`github` 
   `projects.<project>.path`. This is the same detection `implement-ticket` Step 2 performs — the
   two must agree.
 
+  **Pushing from a worktree.** In a linked worktree, add `--no-verify` to every `git push`:
+  ```bash
+  if [ "$(git rev-parse --git-dir)" != "$(git rev-parse --git-common-dir)" ]; then
+    git push --no-verify -u origin {branch}
+  else
+    git push -u origin {branch}
+  fi
+  ```
+  A pre-push hook that runs tests, linting, or typechecking cannot succeed there: the listener's
+  worktree is outside the project's docker container, so the checks fail on their own setup rather
+  than on the diff, and the push is refused outright — leaving a committed branch with no PR,
+  which reads as a silent failure. CI re-runs the same checks after the push anyway. The condition
+  is deliberate: on the interactive path the target is the human's own checkout, where their hooks
+  should still run. `implement-ticket` Step 6 applies the identical rule for the same reason.
+
   **Resolve the expected branch name** (the rule is shared with `implement-ticket` Step 2, using
   the literal `agent.branch_prefix` from config):
   - tracker `github-issues`: `{branch_prefix}/issue-{number}-{slug}` — `{number}` from
@@ -123,9 +138,9 @@ read `projects.<project>.tracker`, or infer from `source` frontmatter (`github` 
      is already implemented and pushed. Go straight to **Finish** below. This is the historical
      behavior of this case, unchanged.
   2. **Local only** (`git show-ref --verify --quiet refs/heads/{branch}` succeeds) — implemented
-     but never pushed. `git push -u origin {branch}`, then **Finish**. Do not re-implement: a
-     `git checkout -b` on an existing name fails, and the commits on that branch are the human's
-     work.
+     but never pushed. Push it (see **Pushing from a worktree** below), then **Finish**. Do not
+     re-implement: a `git checkout -b` on an existing name fails, and the commits on that branch
+     are the human's work.
   3. **Neither** — not implemented. **Invoke the `implement-ticket` skill** with this item. (If
      the `Skill` tool is unavailable — every confined headless allowlist in this repo omits it on
      purpose — `Read` `skills/implement-ticket/SKILL.md` and follow it instead. Same contract

@@ -754,6 +754,17 @@ user's own project, and the output is draft-only. `implement-ticket` is worktree
 creates the branch in place when already inside the repo checkout, and pushes before `gh pr
 create` so the headless run never hits an interactive push prompt).
 
+> **A push from a linked worktree uses `--no-verify`; a push from the human's own checkout does
+> not.** A pre-push hook that runs tests/lint/typecheck cannot pass in the listener's worktree —
+> it is outside the project's docker container, so the hook fails on its own setup rather than on
+> the diff and git refuses the push outright, stranding a committed branch with no PR, which the
+> listener's `drafts/`-existence check then reports as `⚠️ Failed`. CI runs the same checks after
+> the push anyway, so nothing is skipped, only relocated. Both push sites apply it under the same
+> guard — `git rev-parse --git-dir` differing from `--git-common-dir`, which is true only in a
+> linked worktree — so the interactive path still runs the human's hooks on their own checkout:
+> `implement-ticket` Step 6 (the pre-`gh pr create` push) and `execute-item`'s `ticket` case
+> (its local-only-branch finisher push).
+
 ### Confined headless ticket investigation
 
 A `ticket-investigation` is the one item type whose deliverable is **prose posted on the ticket**.
