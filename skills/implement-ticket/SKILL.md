@@ -221,10 +221,20 @@ Look up `projects.<project>.github.owner` and the repo from config.
 
 **Push the branch first.** `gh pr create` on a branch with no remote tracking branch will try
 to push interactively — a prompt, which is a silent denial on the headless remote-approval path.
-Push explicitly before creating the PR:
+Push explicitly before creating the PR, and **in a linked worktree push with `--no-verify`**:
 ```bash
-git push -u origin {branch_name}
+if [ "$(git rev-parse --git-dir)" != "$(git rev-parse --git-common-dir)" ]; then
+  git push --no-verify -u origin {branch_name}
+else
+  git push -u origin {branch_name}
+fi
 ```
+A pre-push hook that runs tests, linting, or typechecking cannot succeed in the listener's
+worktree — it sits outside the project's docker container, so the checks fail on their own setup
+rather than on the diff and the push is refused outright, leaving a committed branch with no PR
+(a silent failure). CI re-runs those same checks after the push anyway. The condition is
+deliberate: on the interactive path the target is the human's own checkout, where their hooks
+should still run. `execute-item`'s `ticket` case applies the identical rule to its own push.
 
 **PR body composition.** The body **must always open with an attribution line linking the
 source ticket** — this is required, never optional, on every PR this skill creates:
