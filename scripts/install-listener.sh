@@ -90,21 +90,28 @@ echo "      login keychain. If approvals fail with 'Not logged in' or an organiz
 echo "      error, see the headless-auth section of CLAUDE.md; on a forceLoginOrgUUID-managed" >&2
 echo "      machine there is no environment-credential fix -- work with your org's IT." >&2
 
-# cron/systemd/launchd do not inherit the interactive shell environment. If CLAUDE_BIN
-# is set at install time, bake it into the service definition so the listener resolves the
-# same binary override when it runs supervised. Each block carries its own trailing newline
-# so that when CLAUDE_BIN is unset the generated unit/plist is byte-for-byte unchanged.
-SYSTEMD_ENV=""
-LAUNCHD_ENV=""
+# cron/systemd/launchd do not inherit the interactive shell environment. launchd in
+# particular hands the job a bare PATH=/usr/bin:/bin:/usr/sbin:/sbin, which hides every
+# Homebrew-installed tool the execute run needs (gh, php, composer) -- an approval then
+# implements the ticket but dies at `gh pr create`. Bake the same PATH the poll installer
+# uses into the service definition. If CLAUDE_BIN is set at install time, bake that in too
+# so the listener resolves the same binary override when it runs supervised.
+# ~/.rd/bin carries the Rancher Desktop docker shim, which the containerised test suites need.
+SERVICE_PATH="${HOME}/.local/bin:${HOME}/.rd/bin:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin"
+SYSTEMD_ENV="Environment=PATH=${SERVICE_PATH}"$'\n'
+LAUNCHD_CLAUDE_BIN=""
 if [ -n "${CLAUDE_BIN:-}" ]; then
-  SYSTEMD_ENV="Environment=CLAUDE_BIN=${CLAUDE_BIN}"$'\n'
-  LAUNCHD_ENV="    <key>EnvironmentVariables</key>
-    <dict>
-        <key>CLAUDE_BIN</key>
+  SYSTEMD_ENV="${SYSTEMD_ENV}Environment=CLAUDE_BIN=${CLAUDE_BIN}"$'\n'
+  LAUNCHD_CLAUDE_BIN="        <key>CLAUDE_BIN</key>
         <string>${CLAUDE_BIN}</string>
-    </dict>
 "
 fi
+LAUNCHD_ENV="    <key>EnvironmentVariables</key>
+    <dict>
+${LAUNCHD_CLAUDE_BIN}        <key>PATH</key>
+        <string>${SERVICE_PATH}</string>
+    </dict>
+"
 
 if command -v systemctl >/dev/null 2>&1 && systemctl --user show-environment >/dev/null 2>&1; then
   UNIT_DIR="${HOME}/.config/systemd/user"
