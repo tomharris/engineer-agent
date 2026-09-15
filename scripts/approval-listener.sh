@@ -181,6 +181,51 @@ run_generic_execute() {
 # shares, which probes for the ticket branch and delegates to implement-ticket when there is
 # none. Everything security-load-bearing (worktree, build allowlist, budget, turn-notify env)
 # is still resolved HERE, in plain bash, before claude starts.
+# Throwaway worktree at the base branch, shared by the implementation and investigation paths.
+# Kept as ONE function for the reason reconcile_queue_move is: two copies of this setup already
+# drifted once, and only one of them would have learned about a stale base.
+#
+# Sets WT_PATH / WT_BASE / WT_BASE_SHA / WT_STALE; returns 1 if no worktree could be created.
+#
+# A failed `git fetch` is deliberately NOT fatal: github being briefly unreachable must not
+# strand the item in drafts/ and fire a ⚠️ Failed push (which invites a retry) for a transient
+# blip. But it must not be silent either. Before this, the failure was swallowed by `|| true`
+# and the run proceeded from whatever the LOCAL origin/<base> ref happened to say — observed
+# detaching at a days-old release commit while the log still reported a reassuring "base main".
+# So the outcome is recorded and every site that reports the base names the sha and the
+# staleness (see wt_base_desc).
+create_run_worktree() {
+  local project_path="$1" item="$2"
+  WT_STALE=0
+  WT_BASE="$(git -C "$project_path" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null | sed 's@^origin/@@')"
+  WT_BASE="${WT_BASE:-main}"
+  WT_PATH="${AGENT_DIR}/worktrees/${item%.md}-$(date +%s)"
+  mkdir -p "$(dirname "$WT_PATH")"
+  if ! git -C "$project_path" fetch --quiet origin "$WT_BASE" >>"$LOG_FILE" 2>&1; then
+    WT_STALE=1
+    log "WARN: git fetch origin ${WT_BASE} failed for ${item} — proceeding from the LOCAL origin/${WT_BASE} ref, which may be behind"
+  fi
+  if ! git -C "$project_path" worktree add --detach "$WT_PATH" "origin/${WT_BASE}" >>"$LOG_FILE" 2>&1; then
+    if ! git -C "$project_path" worktree add --detach "$WT_PATH" "$WT_BASE" >>"$LOG_FILE" 2>&1; then
+      return 1
+    fi
+  fi
+  WT_BASE_SHA="$(git -C "$WT_PATH" rev-parse --short HEAD 2>/dev/null)"
+  WT_BASE_SHA="${WT_BASE_SHA:-unknown}"
+  return 0
+}
+
+# How the base is named in every log line: the branch, the commit actually checked out, and
+# whether that commit is trustworthy. "base main" alone is what made the stale-base failure
+# invisible for two runs.
+wt_base_desc() {
+  if [ "${WT_STALE:-0}" = "1" ]; then
+    printf '%s @ %s (STALE: fetch failed, local ref may be behind)' "$WT_BASE" "$WT_BASE_SHA"
+  else
+    printf '%s @ %s' "$WT_BASE" "$WT_BASE_SHA"
+  fi
+}
+
 # A ticket is the one item type whose execution WRITES CODE in the target repo, so it
 # cannot use the read/post allowlist above. Confinement (the "medium" posture) is three
 # layers, and the two that define the sandbox are decided HERE in bash — before claude
@@ -233,18 +278,12 @@ run_ticket_implementation() {
   fi
 
   # Path isolation: throwaway worktree at the base branch (detached HEAD).
-  base="$(git -C "$project_path" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null | sed 's@^origin/@@')"
-  base="${base:-main}"
-  wt="${AGENT_DIR}/worktrees/${item%.md}-$(date +%s)"
-  mkdir -p "$(dirname "$wt")"
-  git -C "$project_path" fetch --quiet origin "$base" >>"$LOG_FILE" 2>&1 || true
-  if ! git -C "$project_path" worktree add --detach "$wt" "origin/${base}" >>"$LOG_FILE" 2>&1; then
-    if ! git -C "$project_path" worktree add --detach "$wt" "$base" >>"$LOG_FILE" 2>&1; then
-      log "WARN: could not create worktree for ${item} at ${wt}; cannot implement"
-      return 1
-    fi
+  if ! create_run_worktree "$project_path" "$item"; then
+    log "WARN: could not create worktree for ${item} at ${WT_PATH}; cannot implement"
+    return 1
   fi
-  log "implementing ticket ${item} in isolated worktree ${wt} (project ${project}, base ${base}); build tools: ${build_rules[*]}"
+  base="$WT_BASE"; wt="$WT_PATH"
+  log "implementing ticket ${item} in isolated worktree ${wt} (project ${project}, base $(wt_base_desc)); build tools: ${build_rules[*]}"
 
   # Confined tool set: file edits + git + the narrow build rules + gh (draft PR) + mv
   # (queue move) + notify (draft-pr FYI). No spy/slite/atlassian — a ticket implementation
@@ -462,18 +501,12 @@ run_ticket_investigation() {
   # Path isolation: throwaway worktree at the base branch (detached HEAD). Read-only work still
   # wants deterministic state — the user's real checkout may sit on an unrelated dirty branch, and
   # findings cited against that are wrong in a way nobody can reproduce.
-  base="$(git -C "$project_path" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null | sed 's@^origin/@@')"
-  base="${base:-main}"
-  wt="${AGENT_DIR}/worktrees/${item%.md}-$(date +%s)"
-  mkdir -p "$(dirname "$wt")"
-  git -C "$project_path" fetch --quiet origin "$base" >>"$LOG_FILE" 2>&1 || true
-  if ! git -C "$project_path" worktree add --detach "$wt" "origin/${base}" >>"$LOG_FILE" 2>&1; then
-    if ! git -C "$project_path" worktree add --detach "$wt" "$base" >>"$LOG_FILE" 2>&1; then
-      log "WARN: could not create worktree for investigation ${item} at ${wt}; cannot investigate"
-      return 1
-    fi
+  if ! create_run_worktree "$project_path" "$item"; then
+    log "WARN: could not create worktree for investigation ${item} at ${WT_PATH}; cannot investigate"
+    return 1
   fi
-  log "investigating ${item} (${ticket_key}) read-only in worktree ${wt} (project ${project}, base ${base})"
+  base="$WT_BASE"; wt="$WT_PATH"
+  log "investigating ${item} (${ticket_key}) read-only in worktree ${wt} (project ${project}, base $(wt_base_desc))"
 
   # Optional Jira transition. Capability follows config, decided HERE: when on_complete_status is
   # unset the two transition verbs are absent from the allowlist entirely, so an injected "move
@@ -689,8 +722,6 @@ handle_line() {
   log "executing: ${decision} ${item} (msg ${id})"
   echo "- \"${id}\"" >> "$SEEN_FILE"           # record before acting: at-most-once
   [ -n "$mtime" ] && echo "$mtime" > "$SINCE_FILE"
-  push_ack low "📨 Received: ${decision} ${item} — working…"
-
   # Choose the execute spend cap by item type, read straight from the draft
   # frontmatter (the listener is plain bash, not subject to the claude allowlist).
   # Defensive: a missing file or unknown type falls back to the default. Only the two
@@ -707,6 +738,19 @@ handle_line() {
     *)                    budget="$DEFAULT_BUDGET_USD" ;;
   esac
   log "execute budget for ${item} (type=${item_type:-unknown}): \$${budget}"
+
+  # The receipt goes out before the dispatch, because the dispatch below is SYNCHRONOUS: it runs
+  # inside the stream read loop, so for its whole duration no further command is read. On the two
+  # long types that is minutes, during which a second tap produces no response of any kind and the
+  # listener reads as dead. Say so, and say what actually happens to a tap sent meanwhile — it
+  # sits in the stream and is replayed from `since` on the next reconnect, so nothing is lost.
+  local ack_note=""
+  case "${decision}:${item_type}" in
+    approve:ticket|approve:ticket-investigation)
+      ack_note=" (full session, typically 5-20 min; the listener reads no new commands until it"
+      ack_note+=" finishes — taps sent meanwhile are replayed afterwards, not lost)" ;;
+  esac
+  push_ack low "📨 Received: ${decision} ${item} — working…${ack_note}"
 
   tcc_preflight
 

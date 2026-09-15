@@ -376,6 +376,18 @@ ntfy turns the approval gate into a remote, async one without a custom server. B
 - **Outbound** (`topic`): after a poll, `cron-poll.sh` calls `scripts/notify.sh` to push each new draft with **Approve / Reject / Open** action buttons.
 - **Inbound** (`command_topic`): the Approve/Reject buttons are ntfy `http` actions that POST `approve|<item-id>` / `reject|<item-id>` back to the command topic. `scripts/approval-listener.sh` (a long-running service installed by `scripts/install-listener.sh`) streams that topic and runs `/engineer-agent execute <item-id> <decision>` headlessly (an approved `ticket` takes the separate confined-implementation path instead — see "Confined headless ticket implementation"). After validating a command the listener also pushes two best-effort acknowledgements back to the outbound `topic` via `notify.sh --fyi`: a **receipt** ack (low priority, "📨 Received…") the moment the tap lands, and an **outcome** ack after the run — "✅ Done…" (normal) when the item leaves `queue/drafts/`, or "⚠️ Failed…" (urgent) when it did not. Invalid or already-seen commands are not acknowledged (avoids noise and confirming a live listener to a prober). The ack adds no posting capability — it is an outbound notification only, so the "polling reads; only execute-item writes" invariant is untouched.
 
+> **`handle_line` dispatches SYNCHRONOUSLY, so a long run makes the listener look dead — the
+> receipt has to say so.** The dispatch happens inside the stream read loop, so for the whole
+> duration of an approved `ticket` / `ticket-investigation` session (minutes) nothing is read off
+> the command topic: a second tap gets no response of any kind, not even a 📨. Every outward sign
+> matches a wedged stream (the job prints `running`, outbound pushes keep arriving with working
+> buttons, the log is quiet), which is the one failure shape this plugin has most trained itself to
+> fear — so it gets misdiagnosed as the stall bug. The receipt for those two types therefore names
+> the expected duration *and* what happens to a tap sent meanwhile: it sits in the stream and is
+> replayed from `since` on the next reconnect, deduped through `state/ntfy-seen.yaml`, so it is
+> delayed rather than lost. This is a *legibility* fix, not a concurrency one — the queueing
+> behavior is unchanged.
+
 ### Turn-completion pushes (opt-in)
 
 `implement-ticket` is the longest thing this plugin runs, and until you approve it nothing tells
@@ -690,7 +702,14 @@ text can influence code *inside* the sandbox but never the *shape* of it:
 
 1. **Path isolation.** The listener creates a throwaway `git worktree` of the target repo
    (detached at the base branch) under `~/.local/share/engineer-agent/worktrees/` and runs the
-   headless session with that as cwd, so the user's real checkout is never the target. The
+   headless session with that as cwd, so the user's real checkout is never the target. `create_run_worktree()`
+   is shared with the investigation path (like `reconcile_queue_move()`) and **names the commit it
+   actually checked out, plus whether the fetch that resolved it succeeded**. The `git fetch` stays
+   best-effort — a brief github outage must not strand the item in `drafts/` and fire a `⚠️ Failed`
+   push inviting a retry — but it is no longer swallowed by a bare `|| true`: on failure the run
+   proceeds from the **local** `origin/<base>` ref and the log says `base main @ <sha> (STALE: fetch
+   failed…)`. Before this, two runs were implemented against a days-old release commit while the log
+   reported a reassuring `base main`, giving the diff a base nobody could reproduce. The
    worktree is torn down (`git worktree remove --force`) when the run ends, pass or fail; the
    branch and any pushed commits / draft PR persist. Because that cwd cannot reach outside
    itself, the confined run *writes* `queue/completed/<item>` but cannot delete the
