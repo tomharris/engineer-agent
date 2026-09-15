@@ -185,7 +185,9 @@ args=("$@")
 for ((i=0;i<${#args[@]};i++)); do
   case "${args[i]}" in
     symbolic-ref) echo "origin/main"; exit 0;;
-    fetch) exit 0;;
+    # FAKE_GIT_FETCH_FAIL simulates github being unreachable (observed: SSH banner timeout).
+    fetch) [ "${FAKE_GIT_FETCH_FAIL:-0}" = "1" ] && exit 1; exit 0;;
+    rev-parse) echo "deadbee"; exit 0;;
     worktree)
       if [ "${args[i+1]}" = "add" ]; then
         for ((j=i+2;j<${#args[@]};j++)); do
@@ -706,6 +708,86 @@ test_tcc_preflight_warns_once() {
   teardown
 }
 
+# --- Case 7: a failed `git fetch` must be named, not swallowed ---
+# The fetch is best-effort (`|| true` once), so a transient github outage silently dropped the
+# run onto whatever the LOCAL origin/<base> ref said — observed as a worktree detached at a
+# days-old release commit while the log still reported a reassuring "base main".
+test_worktree_stale_base_reported() {
+  echo "test_worktree_stale_base_reported:"
+  setup
+  write_ticket_config with-allowlist
+  install_fake_git
+  local item="20260716-000000-ticket-gh-stale.md"
+  printf 'type: ticket\nproject: wayfinder-api\n' > "$EA_AGENT_DIR/queue/drafts/$item"
+  export FAKE_SUCCEED=1 FAKE_GIT_FETCH_FAIL=1
+  handle_line "$(msg_event id-stale "approve|$item")"
+
+  grep -q "WARN: git fetch origin main failed" "$LOG_FILE" \
+    && ok "fetch failure logged as a WARN" || bad "fetch failure swallowed (log: $(cat "$LOG_FILE"))"
+  grep -q "implementing ticket .* base main @ deadbee (STALE" "$LOG_FILE" \
+    && ok "base line names the sha and marks it stale" \
+    || bad "base line does not report staleness (log: $(cat "$LOG_FILE"))"
+  [ -s "$CLAUDE_ARGS_LOG" ] \
+    && ok "run still proceeds (a network blip must not strand the item)" \
+    || bad "run was refused on a transient fetch failure"
+  unset FAKE_GIT_FETCH_FAIL
+  teardown
+}
+
+# --- Case 7a: the happy path still reports the resolved sha, and never says STALE ---
+test_worktree_fresh_base_reported() {
+  echo "test_worktree_fresh_base_reported:"
+  setup
+  write_ticket_config with-allowlist
+  install_fake_git
+  local item="20260716-000000-ticket-gh-fresh.md"
+  printf 'type: ticket\nproject: wayfinder-api\n' > "$EA_AGENT_DIR/queue/drafts/$item"
+  export FAKE_SUCCEED=1
+  handle_line "$(msg_event id-fresh "approve|$item")"
+
+  grep -q "implementing ticket .* base main @ deadbee)" "$LOG_FILE" \
+    && ok "base line names the resolved sha" || bad "base sha missing (log: $(cat "$LOG_FILE"))"
+  grep -q "STALE" "$LOG_FILE" && bad "clean fetch wrongly marked stale" || ok "clean fetch not marked stale"
+  teardown
+}
+
+# --- Case 7b: the receipt ack explains the quiet window a long run causes ---
+# handle_line dispatches synchronously, so a ticket approval stops the stream being read for the
+# whole session. Without saying so, the phone sees nothing at all and the listener reads as dead.
+test_receipt_explains_quiet_window() {
+  echo "test_receipt_explains_quiet_window:"
+  setup
+  write_ticket_config with-allowlist
+  install_fake_git
+  local item="20260716-000000-ticket-gh-quiet.md"
+  printf 'type: ticket\nproject: wayfinder-api\n' > "$EA_AGENT_DIR/queue/drafts/$item"
+  export FAKE_SUCCEED=1
+  handle_line "$(msg_event id-quiet "approve|$item")"
+
+  grep -q "Received.*no new commands" "$NOTIFY_LOG" \
+    && ok "ticket receipt warns the listener goes quiet" \
+    || bad "receipt does not explain the quiet window (notify: $(cat "$NOTIFY_LOG"))"
+  grep -q "Received.*replayed" "$NOTIFY_LOG" \
+    && ok "receipt says taps meanwhile are replayed, not lost" \
+    || bad "receipt does not say taps are replayed"
+  teardown
+}
+
+# --- Case 7c: a short item keeps the terse receipt ---
+test_receipt_terse_for_short_item() {
+  echo "test_receipt_terse_for_short_item:"
+  setup
+  local item="20260716-000000-pr-review-quiet.md"
+  touch "$EA_AGENT_DIR/queue/drafts/$item"
+  export FAKE_SUCCEED=1
+  handle_line "$(msg_event id-terse "approve|$item")"
+
+  grep -q "Received" "$NOTIFY_LOG" && ! grep -q "no new commands" "$NOTIFY_LOG" \
+    && ok "short item receipt stays terse" \
+    || bad "long-run note leaked onto a short item (notify: $(cat "$NOTIFY_LOG"))"
+  teardown
+}
+
 test_success
 test_failure
 test_invalid
@@ -729,6 +811,10 @@ test_investigation_refused_on_bad_ticket_key
 test_investigation_transition_verbs_gated
 test_investigation_github_archive_key
 test_near_miss_type_budget
+test_worktree_stale_base_reported
+test_worktree_fresh_base_reported
+test_receipt_explains_quiet_window
+test_receipt_terse_for_short_item
 
 echo "-----"
 echo "PASS=$PASS FAIL=$FAIL"

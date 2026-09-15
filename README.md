@@ -684,6 +684,8 @@ cron-poll → drafts item → notify.sh ──ntfy push (Approve / Reject / Open
 2. Tapping Approve/Reject POSTs a command (`approve|<item>` / `reject|<item>`) to your `command_topic`.
 3. `scripts/approval-listener.sh` — a long-running service on your machine — reads the command topic and runs `/engineer-agent execute` headlessly to perform the action. It confirms each tap on your phone: a **receipt** notification ("📨 Received…") the instant the tap lands, then an **outcome** notification once the run finishes — "✅ Done…" on success or "⚠️ Failed…" if the item still needs a re-run. (Malformed or duplicate taps are ignored silently.)
 
+   Approving a **ticket** or **ticket-investigation** starts a full session that takes minutes, and the listener handles one command at a time — so it reads no new taps until that run finishes. The receipt for those two types says so. A tap you send during the window is not lost: it waits in the notification stream and is picked up once the listener is free again.
+
 **Install the listener** (after configuring `agent.notify.ntfy` and installing `jq`):
 
 ```bash
