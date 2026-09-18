@@ -310,7 +310,7 @@ if [ "${SKIP_MODEL:-0}" -eq 0 ] && NEW_CLAUDE_BIN="$(claude_bin_changed "$CLAUDE
   echo "WARN: claude binary is now ${NEW_CLAUDE_BIN}; macOS privacy grants do not carry across versions" >> "$LOG_FILE"
   "${PLUGIN_ROOT}/scripts/notify.sh" \
     --title "engineer-agent: claude binary changed" \
-    --message "Now ${NEW_CLAUDE_BIN} -- macOS folder-access grants are keyed to the versioned path and did not carry over. Re-grant Full Disk Access to this path or unattended polls may be denied silently." \
+    --message "Now ${NEW_CLAUDE_BIN} -- macOS grants are keyed to the versioned path. If you have not already granted Full Disk Access to it, do so or polls may be denied silently." \
     --priority low \
     --tags "warning" \
     --fyi >> "$LOG_FILE" 2>&1 || true

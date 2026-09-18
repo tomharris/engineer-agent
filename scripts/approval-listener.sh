@@ -668,7 +668,7 @@ tcc_preflight() {
   local newbin
   newbin="$(claude_bin_changed "$CLAUDE_BIN")" || return 0
   log "WARN: claude binary is now ${newbin}; macOS privacy grants do not carry across versions"
-  push_ack low "⚠️ claude updated to ${newbin} — macOS folder-access grants are keyed to the versioned path and did not carry over. Re-grant Full Disk Access or approvals may fail."
+  push_ack low "⚠️ claude updated to ${newbin} — macOS grants are keyed to the versioned path. If you have not already granted Full Disk Access to it, do so or approvals may fail."
   return 0
 }
 
