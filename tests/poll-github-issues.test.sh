@@ -220,6 +220,111 @@ AFTER_TS="$(grep -A1 'acme/shared:' "$S" | grep last_checked | head -1)"
 eq "cutoff unchanged after failure" "$BEFORE_TS" "$AFTER_TS"
 if [ -z "$(item gh-501)" ]; then ok "no item created from a failed query"; else bad "failed query created an item"; fi
 
+echo "== ticket-kind Tier 3 Form B: deferred by default, judged when configured =="
+# The default first: with no agent.typesafe.ticket_kind block, a Form B candidate is written as a
+# plain `ticket` and flagged needs_kind_check=1 for Phase B. That is the behaviour every install
+# has had, and it must survive the judge existing at all.
+fixture "acme/alpha-only|me|701|${NOW}|$(b64 'Investigate why checkout 500s on retry')|$(b64 'x')||https://gh/701"
+M12="$TMP/m12"; : > "$M12"; run "$M12" >/dev/null
+eq "unconfigured: written as a plain ticket" "ticket" "$(fmv "$(item gh-701)" type)"
+eq "unconfigured: flagged for Phase B"       "1"      "$(awk -F"$TAB" '$5=="acme/alpha-only#701"{print $7}' "$M12")"
+
+# Now the judgment. `curl` and `security` are stubbed exactly as in tests/ticket-kind-judge.test.sh
+# — `security` because ea_secret_resolve would otherwise reach the developer's real Keychain entry
+# and quietly make the "no key" case pass for the wrong reason.
+printf '#!/bin/bash\nexit 1\n' > "$STUB/security"; chmod +x "$STUB/security"
+export ANSWERS="$TMP/answers.json"
+export TS_CODE="$TMP/ts.code"; echo 200 > "$TS_CODE"
+export CURL_ARGV="$TMP/curl.argv"; : > "$CURL_ARGV"
+export CURL_BODY="$TMP/curl.body"; : > "$CURL_BODY"
+cat > "$STUB/curl" <<'STUBEOF'
+#!/bin/bash
+out=""; prev=""; body=""
+for a in "$@"; do
+  case "$prev" in -o) out="$a" ;; esac
+  case "$a" in @*) body="${a#@}" ;; esac
+  prev="$a"
+done
+printf '%s\n' "$*" >> "$CURL_ARGV"
+cat > /dev/null
+[ -n "$body" ] && cat "$body" > "$CURL_BODY"
+cat "$ANSWERS" > "$out"
+printf '%s' "$(cat "$TS_CODE")"
+STUBEOF
+chmod +x "$STUB/curl"
+export EA_TYPESAFE_RETRIES=0
+export EA_TEST_TK_KEY="sk-test-e2e"
+tk_noul() { jq -nc --argjson p "$1" \
+  '{model:"jev-latest",answers:{leading_imperative:{type:"noul",noul:$p}}}' > "$ANSWERS"; }
+
+if command -v jq >/dev/null 2>&1; then
+  # Insert the opt-in under `agent:`, leaving the rest of the config (and so every routing
+  # assertion above) untouched.
+  sed -i.bak '/^agent:$/a\
+  typesafe:\
+    api_key_env: "EA_TEST_TK_KEY"\
+    ticket_kind:\
+      enabled: true\
+      min_imperative: 0.60' "$EA_AGENT_DIR/engineer.yaml"
+  rm -f "$EA_AGENT_DIR/engineer.yaml.bak"
+
+  # Fires: the kind is settled HERE, so `type:` and the filename are right the first time and
+  # Phase B is not asked to revisit it.
+  : > "$CURL_ARGV"; tk_noul 0.93
+  fixture "acme/alpha-only|me|702|${NOW}|$(b64 'Investigate why checkout 500s on retry')|$(b64 'x')||https://gh/702"
+  M13="$TMP/m13"; : > "$M13"; run "$M13" >/dev/null
+  F13="$(item gh-702)"
+  eq "judged imperative: type"    "ticket-investigation" "$(fmv "$F13" type)"
+  eq "judged imperative: method"  "title-keyword"        "$(fmv "$F13" ticket_kind_method)"
+  eq "judged imperative: manifest type" "ticket-investigation" "$(awk -F"$TAB" '$5=="acme/alpha-only#702"{print $3}' "$M13")"
+  eq "judged: flag cleared"       "0" "$(awk -F"$TAB" '$5=="acme/alpha-only#702"{print $7}' "$M13")"
+  # The filename carries {type}; a kind settled after reconciliation would leave it misnamed.
+  case "$(basename "$F13")" in *-ticket-investigation-*) ok "filename carries the settled type" ;;
+    *) bad "filename should carry ticket-investigation: $(basename "$F13")" ;; esac
+  # The rationale is the audit trail at the approval gate: it must name the form AND the evidence,
+  # for the same reason routing_rationale does on an inferred route.
+  R13="$(fmv "$F13" ticket_kind_rationale)"
+  case "$R13" in *"Form B"*) ok "rationale names the form" ;; *) bad "rationale should name Form B: $R13" ;; esac
+  case "$R13" in *0.93*) ok "rationale carries the probability" ;; *) bad "rationale should carry the score: $R13" ;; esac
+  eq "exactly one judgment request" "1" "$(wc -l < "$CURL_ARGV" | tr -d '[:space:]')"
+  if grep -q 'sk-test-e2e' "$CURL_ARGV"; then bad "API KEY LEAKED INTO argv"; else ok "key never in argv"; fi
+
+  # Does not fire: judged, and judged NO. Still a ticket — but the flag is cleared, because the
+  # question was answered rather than skipped.
+  : > "$CURL_ARGV"; tk_noul 0.08
+  fixture "acme/alpha-only|me|703|${NOW}|$(b64 'Research service returns 500 on the payroll route')|$(b64 'x')||https://gh/703"
+  M14="$TMP/m14"; : > "$M14"; run "$M14" >/dev/null
+  eq "judged noun: stays a ticket" "ticket" "$(fmv "$(item gh-703)" type)"
+  eq "judged noun: flag cleared"   "0"      "$(awk -F"$TAB" '$5=="acme/alpha-only#703"{print $7}' "$M14")"
+
+  # A transport failure must NOT become a silent "no": the flag stays up and Phase B answers it,
+  # exactly as on an install with no key. Otherwise an outage quietly reclassifies every spike.
+  : > "$CURL_ARGV"; tk_noul 0.99; echo 500 > "$TS_CODE"
+  fixture "acme/alpha-only|me|704|${NOW}|$(b64 'Investigate the N+1 in the roster endpoint')|$(b64 'x')||https://gh/704"
+  M15="$TMP/m15"; : > "$M15"; run "$M15" >/dev/null
+  eq "failed judgment: still written" "ticket" "$(fmv "$(item gh-704)" type)"
+  eq "failed judgment: deferred to Phase B" "1" "$(awk -F"$TAB" '$5=="acme/alpha-only#704"{print $7}' "$M15")"
+  echo 200 > "$TS_CODE"
+
+  # Form A is never sent anywhere — it is settled in bash, and that is the cost and containment
+  # argument for keeping it there.
+  : > "$CURL_ARGV"; tk_noul 0.99
+  fixture "acme/alpha-only|me|705|${NOW}|$(b64 'Spike: queue backend')|$(b64 'x')||https://gh/705"
+  run "$TMP/m16" >/dev/null
+  eq "Form A settled offline"            "ticket-investigation" "$(fmv "$(item gh-705)" type)"
+  eq "Form A makes no judgment request"  "0" "$(wc -l < "$CURL_ARGV" | tr -d '[:space:]')"
+
+  # And a title with no configured leading keyword never reaches the wire either.
+  : > "$CURL_ARGV"
+  fixture "acme/alpha-only|me|706|${NOW}|$(b64 'Fix the flaky roster test')|$(b64 'x')||https://gh/706"
+  run "$TMP/m17" >/dev/null
+  eq "non-candidate makes no request" "0" "$(wc -l < "$CURL_ARGV" | tr -d '[:space:]')"
+
+  rm -f "$STUB/curl"
+else
+  echo "  SKIP: jq not installed (the judge degrades to the model without it)"
+fi
+
 echo "== --dry-run writes nothing =="
 fixture "acme/shared|me|601|${NOW}|$(b64 'payroll dry run')|$(b64 'x')|backend|https://gh/601"
 BEFORE_N="$(ls "$EA_AGENT_DIR/queue/incoming" | wc -l | tr -d ' ')"

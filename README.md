@@ -666,7 +666,8 @@ agent:
   the collector exit cleanly and Slack stays model-driven — you cannot enable this by accident.
 - **This is the one poll-path integration that sends your content to a third party.** Slack message
   and thread text goes to `api.typesafe.ai`. `gh`, Jira and Slite all talk to systems that already
-  hold the data being sent; this does not. That asymmetry is the whole reason for the second opt-in.
+  hold the data being sent; this does not. That asymmetry is the whole reason for the second opt-in
+  — and the same reason the key alone enables nothing else either (see the next section).
 - **It selects, it does not write.** The model returns four numbers. It generates no prose, and a
   message it selects becomes an ordinary queue item you still approve. The four probabilities are
   recorded in the item's frontmatter (`relevance_scores`) and shown in `review-queue`, so you can
@@ -677,9 +678,43 @@ agent:
 - A failed request is **not** a silent "no" — the run reports an error, leaves the cutoff where it
   was, and hands Slack back to the model, so a transient outage cannot quietly swallow messages.
 
-Anything the scripts cannot decide is *flagged*, never guessed — an ambiguous project routing or an
-ambiguous "is this title an imperative?" is handed to the model with the rest of the ladder already
-applied.
+#### Ticket-kind Form B (`agent.typesafe.ticket_kind`) — its own opt-in
+
+The same machinery answers one other question, and only if you ask it to. When engineer-agent
+classifies a GitHub issue as *code work* or *investigation*, every tier is a string comparison
+except the last one: is the leading word of the title an imperative verb, or a noun naming what the
+issue is about? `Investigate why checkout 500s on retry` is the first. `Research service returns
+500` is a bug in a service called Research. That is grammar, and bash cannot do it — so by default
+the item is written as a plain `ticket` and the drafting model is asked to reconsider it afterwards.
+
+Turning this on settles it in the collector instead, which means the item's type and filename are
+right the first time:
+
+```yaml
+agent:
+  typesafe:
+    api_key_env: ""
+    ticket_kind:
+      enabled: true             # deny-by-default; only the exact string `true`
+      min_imperative: 0.60      # at/above this, the leading word is treated as a command
+```
+
+- **Having a TypeSafe key for Slack does not enable this.** Each feature opts in separately,
+  because each sends a different slice of your content. Leave it off and nothing changes.
+- **Only the title and the issue's labels are sent — never the body.** And only for a title whose
+  leading word already matches one of your `investigation.title_keywords`, so on a normal repo this
+  is a handful of requests, not one per issue.
+- **The decision is auditable at the approval gate.** `ticket_kind_rationale` records the form and
+  the score, e.g. `leading imperative 'Investigate' (Form B, imperative=0.93)`.
+- **Every failure falls back to the default.** No key, no `jq`, a rate limit, a malformed answer —
+  the question goes to the drafting model exactly as it does on an install that never enabled this.
+  It never becomes a silent "this is code work".
+- `setup-credentials.sh check` reports whether it is actually on, separately from whether the key
+  resolves.
+
+Anything the scripts cannot decide is *flagged*, never guessed — an ambiguous project routing, or an
+ambiguous "is this title an imperative?" on an install that has not enabled the judgment above, is
+handed to the model with the rest of the ladder already applied.
 
 To customize the interval or reinstall manually:
 

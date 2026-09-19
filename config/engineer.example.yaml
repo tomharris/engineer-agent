@@ -186,6 +186,26 @@ agent:
       min_directed: 0.55              # it is aimed at you, not at the channel at large
       max_answered: 0.40              # the thread does NOT already contain the answer
       min_engineer: 0.50              # answering needs codebase / implementation knowledge
+    #
+    # Ticket kind, Tier 3 Form B — "is the leading word of this GitHub issue title an imperative
+    # verb commanding investigation, or a noun naming what the issue is about?" `Investigate why
+    # checkout 500s` is the first; `Research service returns 500` is a bug in a service called
+    # Research. references/ticket-kind.md says the tie-break out loud ("when you cannot tell, it
+    # does not fire"), and bash cannot tell — so without this the question is deferred to the
+    # drafting model, and the item is written as a plain `ticket` in the meantime.
+    #
+    # Turning this on makes the kind FINAL when the item is written. Turning it off changes
+    # nothing else: the deferral is the behaviour every install has had.
+    #
+    # ⚠ SEPARATE OPT-IN, ON PURPOSE. Having a key for `slack` above does NOT enable this — issue
+    # titles and labels would otherwise start going to api.typesafe.ai as a side effect of a
+    # setting made for a different feature. Only the title, its leading word and the issue's
+    # labels are sent; the issue BODY never is. Only a title whose leading word already matches a
+    # configured `investigation.title_keywords` entry is ever sent at all, so on a normal repo
+    # this is a handful of requests, not one per issue.
+    ticket_kind:
+      enabled: false                  # deny-by-default; only the exact string `true` enables it
+      min_imperative: 0.60            # at/above this, the leading word is treated as a command
 
   # Autonomy tiers — action types the agent may execute WITHOUT a human approval gate.
   # Only "draft-pr" is supported today: a draft PR merges nothing and requests no review,

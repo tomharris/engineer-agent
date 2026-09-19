@@ -237,6 +237,22 @@ the leading word takes a possessive. When those are present, Form B does not fir
 **And when you cannot tell, it does not fire.** Ambiguity falls through, exactly as in the routing
 ladder.
 
+> **Who answers Form B.** `scripts/lib-ticket-kind.sh` decides every other tier but deliberately
+> stops here, because this one is grammar rather than string comparison. It detects the cheap
+> precondition — the leading word (after a single `please `) is a configured keyword or its gerund,
+> and is not one of the nouns above — and reports `needs_form_b=1` along with that word. The
+> question is then answered by whichever of these is available, in order:
+>
+> 1. **`scripts/lib-ticket-kind-judge.sh`**, when `agent.typesafe.ticket_kind.enabled` is true and
+>    a TypeSafe credential resolves. One probability against `min_imperative` (default 0.60); the
+>    item's kind is final when it is written, and `ticket_kind_rationale` records the score.
+> 2. **The drafting model in Phase B**, otherwise — the item is written as `ticket` and carries
+>    `needs_kind_check=1` in the poll manifest. This is the default and needs no configuration.
+>
+> The precondition gates both: only a title whose leading word already matches a configured keyword
+> is ever adjudicated, so the trigger vocabulary stays closed under config either way. A judgment
+> that cannot be made falls back to (2) rather than to "no".
+
 - **Form A or Form B matches → investigation. `ticket_kind_method: title-keyword`.** Set
   `ticket_kind_rationale` to one line naming the form and the token, e.g.
   `"title prefix 'Spike:' (Form A)"` or `"leading imperative 'Compare' (Form B)"`. **STOP.**
