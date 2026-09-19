@@ -71,6 +71,11 @@ agent:
     bin: "spy"            # path to the spy binary — only used when method: spy (default "spy")
     workspace: "myco"     # default Slack workspace (team domain or team_id) — required when
                           # multiple workspaces are signed in (spy). Per-project override below.
+    user_name: ""         # your Slack display name — ONLY used by the scripted Slack collector
+    user_id: ""           # your Slack user id (U…) — ONLY used by the scripted Slack collector.
+                          # Both feed the "is this question aimed at me?" judgment, and user_id
+                          # also drops your own messages before any judgment is paid for. Optional;
+                          # without them the judgment leans on `keywords` alone and is weaker.
     mcp:                  # only used when method: mcp-proxy
       server: "https://mcp-proxy.anthropic.com/v1/mcp"   # Anthropic MCP proxy base
       server_id: "REPLACE_ME"   # your authorized Slack connector's id (an mcpsrv_… or a UUID).
@@ -86,13 +91,22 @@ agent:
   # responses — and when a poll finds nothing new AND every configured source is scripted, it is
   # not invoked at all. That is the common case: most polls find nothing.
   #
-  # Supported: "github-issues", "github" (PR review), "jira" and "slite".
+  # Supported: "github-issues", "github" (PR review), "jira", "slite" and "slack".
   #
   # The two GitHub sources shell out to the already-authenticated `gh` CLI and need no extra setup.
   # Jira and Slite have no CLI, so their collectors call the REST APIs directly and require BOTH
   # `agent.jira.*` / `agent.slite.*` below AND an API credential (see those blocks). Missing any of
   # that — or a missing `jq` / `curl` — is a CLEAN SKIP: the collector exits and the model polls
   # that source exactly as it always has. You cannot break polling by listing a source here.
+  #
+  # ⚠ "slack" IS DOUBLE OPT-IN, and it is the only one. Every other source is filtered by a field
+  # comparison (a status, an assignee, a tag); Slack's filter is a judgment — "is this actually a
+  # question directed at me?" — which is why it was the last source still forcing a model session on
+  # every quiet poll. Listing it here is NOT enough: it also needs an `agent.typesafe` API key
+  # (below), because the judgment is made by a System One model that returns probabilities rather
+  # than prose. Without that key the collector exits cleanly and Slack stays model-driven.
+  # Read the note on the `typesafe` block before enabling it: this is the one poll-path integration
+  # that sends your content to a third party.
   #
   # The skip is ALL-OR-NOTHING per run: if any configured source is not scripted, the model still
   # runs. So on a typical config you need every source you actually use listed here before a quiet
@@ -134,6 +148,44 @@ agent:
     api_key_env: ""                   # optional: name of an env var holding the key
     api_key_file: ""                  # optional: path to a 0600 file containing it
     # api_base: "https://api.slite.com/v1"
+
+  # TypeSafe — ONLY used by the scripted Slack collector (scripted_sources: ["slack"]).
+  # Omit the whole block and Slack polling stays model-driven, exactly as before.
+  #
+  # WHAT IT DOES. Slack is the one source whose "is this work?" test cannot be a field comparison.
+  # A keyword match alone is mostly false positives — "deploy" appears in every deploy announcement
+  # — so skills/poll-slack/SKILL.md asks the model to "use judgment", and that one sentence is why
+  # Slack kept every poll paying for a model session. TypeSafe's System One model answers four
+  # narrow yes/no questions about each candidate message and returns a PROBABILITY for each:
+  #
+  #     is_question · directed_at_user · already_answered · needs_engineer
+  #
+  # scripts/poll-slack.sh combines them in plain bash against the thresholds below. It generates no
+  # prose and makes no decision about what to post — a message it selects still becomes an ordinary
+  # queue item that you approve. The four raw probabilities are recorded in the item's frontmatter
+  # so you can see WHY it was selected, not just that it was.
+  #
+  # ⚠ THIS IS THE ONE POLL-PATH INTEGRATION THAT SENDS YOUR CONTENT SOMEWHERE NEW. Slack message
+  # and thread text goes to api.typesafe.ai. `gh`, Jira and Slite all talk to systems that already
+  # hold the data being sent; this does not. That is the entire reason it is a separate opt-in and
+  # not implied by listing "slack" above — decide it deliberately.
+  #
+  # Same credential rules as Jira/Slite: the keys below name WHERE the secret is, never what it is.
+  #     scripts/setup-credentials.sh typesafe     # prompts, stores in the login keychain
+  typesafe:
+    api_key_env: ""                   # optional: name of an env var holding the key
+    api_key_file: ""                  # optional: path to a 0600 file containing it
+    # api_base: "https://api.typesafe.ai/v1/systemone"
+    # model: "jev-latest"
+    #
+    # Relevance thresholds. Shipped defaults shown; tune them against YOUR channels rather than
+    # trusting these — a busy #general wants min_directed higher, a quiet team channel lower.
+    # Raise a min_* or lower max_answered to queue less; do the reverse to queue more.
+    slack:
+      min_question: 0.60              # it is genuinely a question awaiting an answer
+      min_directed: 0.55              # it is aimed at you, not at the channel at large
+      max_answered: 0.40              # the thread does NOT already contain the answer
+      min_engineer: 0.50              # answering needs codebase / implementation knowledge
 
   # Autonomy tiers — action types the agent may execute WITHOUT a human approval gate.
   # Only "draft-pr" is supported today: a draft PR merges nothing and requests no review,

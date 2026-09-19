@@ -363,3 +363,97 @@ write_doc_item() {
     if [ -n "$f_body" ] && [ -s "$f_body" ]; then cat "$f_body"; else echo "_Document body could not be fetched._"; fi
   } > "$path"
 }
+
+# write_slack_item — write a slack-question queue item.
+#
+# Shape comes from skills/poll-slack/SKILL.md step 3c, plus three fields that only exist because
+# the relevance decision is now made by a model with a number attached rather than inline in a
+# drafting session: relevance_method, relevance_scores and relevance_rationale. They are recorded
+# for the SAME reason routing_rationale is — this is a judgment tier reading untrusted prose, so
+# the approval gate must be able to see the evidence and not only the verdict.
+#
+# Named arguments:
+#   --path --source-url --source-id --title --priority --created-at --project
+#   --channel-id --channel-name --message-ts --author --author-id
+#   --matched <slugs>        space-separated; emitted only for _unrouted items
+#   --routing-method --routing-rationale
+#   --relevance-method <m>   "typesafe" | "" (omitted when the tier did not run)
+#   --relevance-scores <s>   e.g. "question=0.93 directed=0.88 answered=0.04 engineer=0.81"
+#   --body-file <file>       the message text
+#   --thread-file <file>     pre-rendered thread context (optional)
+write_slack_item() {
+  local path="" url="" sid="" title="" prio="normal" created="" project=""
+  local ch="" chname="" mts="" author="" author_id="" matched="" rmethod="" rrat=""
+  local relm="" rels="" f_body="" f_thread=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --path) path="$2"; shift 2 ;;              --source-url) url="$2"; shift 2 ;;
+      --source-id) sid="$2"; shift 2 ;;          --title) title="$2"; shift 2 ;;
+      --priority) prio="$2"; shift 2 ;;          --created-at) created="$2"; shift 2 ;;
+      --project) project="$2"; shift 2 ;;        --channel-id) ch="$2"; shift 2 ;;
+      --channel-name) chname="$2"; shift 2 ;;    --message-ts) mts="$2"; shift 2 ;;
+      --author) author="$2"; shift 2 ;;          --author-id) author_id="$2"; shift 2 ;;
+      --matched) matched="$2"; shift 2 ;;        --routing-method) rmethod="$2"; shift 2 ;;
+      --routing-rationale) rrat="$2"; shift 2 ;; --relevance-method) relm="$2"; shift 2 ;;
+      --relevance-scores) rels="$2"; shift 2 ;;  --body-file) f_body="$2"; shift 2 ;;
+      --thread-file) f_thread="$2"; shift 2 ;;
+      *) shift ;;
+    esac
+  done
+  [ -n "$path" ] || return 1
+
+  {
+    echo "---"
+    echo "type: slack-question"
+    echo "source: slack"
+    echo "source_url: \"$(yaml_escape "$url")\""
+    echo "source_id: \"$(yaml_escape "$sid")\""
+    echo "title: \"$(yaml_escape "$title")\""
+    echo "priority: $prio"
+    echo "created_at: \"$(yaml_escape "$created")\""
+    echo "status: incoming"
+    echo "project: \"$(yaml_escape "$project")\""
+    echo "channel_id: \"$(yaml_escape "$ch")\""
+    echo "channel_name: \"$(yaml_escape "$chname")\""
+    echo "message_ts: \"$(yaml_escape "$mts")\""
+    echo "author: \"$(yaml_escape "$author")\""
+    [ -n "$author_id" ] && echo "author_id: \"$(yaml_escape "$author_id")\""
+    [ -n "$rmethod" ] && echo "routing_method: \"$(yaml_escape "$rmethod")\""
+    [ -n "$rrat" ]    && echo "routing_rationale: \"$(yaml_escape "$rrat")\""
+    [ -n "$relm" ]    && echo "relevance_method: \"$(yaml_escape "$relm")\""
+    [ -n "$rels" ]    && echo "relevance_scores: \"$(yaml_escape "$rels")\""
+    # Without this an _unrouted message reaches review-queue with no candidate list, so the human
+    # is asked to assign a project with nothing to choose from.
+    if [ "$project" = "_unrouted" ]; then
+      local sm=() m
+      for m in $matched; do sm+=("$m"); done
+      echo "matched_projects: $(yaml_list "${sm[@]+"${sm[@]}"}")"
+    fi
+    echo "---"
+    echo
+    echo "## Context"
+    echo
+    echo "**Channel:** #${chname:-$ch}"
+    echo "**From:** @${author:-unknown}"
+    if [ "$project" = "_unrouted" ]; then
+      echo "**Project:** _unrouted (candidates: ${matched:-none})"
+    else
+      echo "**Project:** ${project}"
+    fi
+    echo "**Time:** ${mts}"
+    [ -n "$rmethod" ] && echo "**Routing:** ${rmethod}${rrat:+ — ${rrat}}"
+    # Surfaced in the body too, not only in frontmatter: review-queue renders the Context block,
+    # and a reader deciding whether to trust an auto-selected message should not have to open the
+    # file to find out how confident the selection was.
+    [ -n "$rels" ] && echo "**Relevance:** ${relm:-unknown} — ${rels}"
+    echo "**URL:** ${url}"
+    echo
+    echo "### Message"
+    if [ -n "$f_body" ] && [ -s "$f_body" ]; then cat "$f_body"; else echo "_Message text unavailable._"; fi
+    if [ -n "$f_thread" ] && [ -s "$f_thread" ]; then
+      echo
+      echo "### Thread Context"
+      cat "$f_thread"
+    fi
+  } > "$path"
+}

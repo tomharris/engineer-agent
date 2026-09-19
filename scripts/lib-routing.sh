@@ -178,6 +178,28 @@ route_candidates_slite() {
   done < <(_rt_cfg_list project)
 }
 
+# route_candidates_slack <channel_id> — Tier 0 for Slack. Every project whose slack.channels
+# contains this channel.
+#
+# CHANNELS ARE THE CANDIDATE SET, KEYWORDS ARE TIER 2 — and that split is the whole reason this
+# helper exists. skills/poll-slack/SKILL.md iterates per project and queues a matching message for
+# each, which is the shared-repo trap in its third costume: two projects watching #eng-general with
+# different keyword lists both match a message mentioning both, and the global source_id dedup then
+# awards it to whichever project the loop reached first. Collecting each channel ONCE and routing
+# gives the ambiguous case a visible `_unrouted` item instead of an invisible coin flip.
+route_candidates_slack() {
+  local ch="$1" slug
+  while IFS= read -r slug; do
+    [ -n "$slug" ] || continue
+    _rt_cfg_list "projects.${slug}.slack.channels" | _rt_list_has "$ch" && printf '%s\n' "$slug"
+  done < <(_rt_cfg_list project)
+}
+
+# route_slack_keywords <slug> — the union of keywords that make a message a CANDIDATE for a project.
+# Exposed so the collector can build one discovery filter per channel without re-deriving the
+# config layout, and so the filter and Tier 2 below can never disagree about which list is authoritative.
+route_slack_keywords() { _rt_cfg_list "projects.${1}.slack.keywords"; }
+
 # _rt_title_prefix <title> — the leading [<token>], trimmed. Empty when absent.
 _rt_title_prefix() {
   local t; t="$(_rt_trim "$1")"
@@ -240,7 +262,26 @@ route_ticket() {
   # watchers. Jira: the per-source components/labels filters, scoped to the sources watching this
   # key. Either way an absent/empty filter is a catch-all, and ambiguity falls through.
   hits=(); local why2="label filter"
-  if [ "$tracker" = "slite" ]; then
+  if [ "$tracker" = "slack" ]; then
+    # Channel membership is Tier 0 for Slack, so the discriminator here is the per-project
+    # slack.keywords list matched against the message text. Whole-word, via _rt_has_word: a
+    # substring test makes a keyword like "ci" fire on "specific" and misroutes between two
+    # projects that legitimately share a channel — a wrong answer that looks like a decision.
+    # An absent/empty keyword list is a CATCH-ALL, matching how github.issues.labels behaves.
+    why2="slack keyword filter"
+    local stext; stext="${title} ${body}"
+    for slug in "${list[@]}"; do
+      local swant; swant="$(_rt_cfg_list "projects.${slug}.slack.keywords")"
+      if [ -z "$swant" ]; then hits+=("$slug"); continue; fi
+      local skw
+      while IFS= read -r skw; do
+        [ -n "$skw" ] || continue
+        if _rt_has_word "$stext" "$skw"; then hits+=("$slug"); break; fi
+      done <<SLACKKW
+$swant
+SLACKKW
+    done
+  elif [ "$tracker" = "slite" ]; then
     # The doc_labels intersection IS Tier 0 for Slite, so re-applying it here would just re-derive
     # the candidate set. Every candidate passes and the decision falls to the hint tiers below.
     hits=("${list[@]}")

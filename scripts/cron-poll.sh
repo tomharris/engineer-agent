@@ -227,6 +227,19 @@ if is_scripted jira; then
     echo "WARN: phase A poll-jira.sh exited non-zero; leaving this source to the model" >> "$LOG_FILE"
   fi
 fi
+# Slack is the one source whose "is this work?" test is a judgment rather than a field comparison,
+# so its collector needs BOTH the scripted_sources opt-in and a resolvable agent.typesafe
+# credential; without the second it exits 3 here like any other unavailable dependency. See the
+# header of scripts/poll-slack.sh — it is also the only Phase A collector that sends content to a
+# third party, which is why that second opt-in exists rather than being implied by the first.
+if is_scripted slack; then
+  echo "phase A: collecting Slack deterministically" >> "$LOG_FILE"
+  if bash "${PLUGIN_ROOT}/scripts/poll-slack.sh" --run-ts "$RUN_TS" --manifest "$MANIFEST" >> "$LOG_FILE" 2>&1; then
+    SCRIPTED_RAN="${SCRIPTED_RAN} slack"
+  else
+    echo "WARN: phase A poll-slack.sh exited non-zero; leaving this source to the model" >> "$LOG_FILE"
+  fi
+fi
 if is_scripted slite; then
   echo "phase A: collecting Slite deterministically" >> "$LOG_FILE"
   if bash "${PLUGIN_ROOT}/scripts/poll-slite.sh" --run-ts "$RUN_TS" --manifest "$MANIFEST" >> "$LOG_FILE" 2>&1; then
