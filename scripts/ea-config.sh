@@ -168,9 +168,16 @@ cmd_dump() {
   # Thresholds are emitted RAW, including empty. lib-typesafe.sh's ts_threshold() applies the
   # shipped default and validates that the value is a number — doing it there rather than here
   # keeps the "what is a valid threshold" rule next to the awk comparison that consumes it.
-  for v in slack.min_question slack.min_directed slack.max_answered slack.min_engineer; do
+  for v in slack.min_question slack.min_directed slack.max_answered slack.min_engineer \
+           ticket_kind.min_imperative; do
     printf 'agent.typesafe.%s=%s\n' "$v" "$(_get "agent.typesafe.${v}")"
   done
+  # Per-FEATURE opt-in, deny-by-default. Having a TypeSafe key for Slack must not silently start
+  # sending GitHub issue titles too — each feature that egresses content decides separately. Only
+  # the exact string "true" enables it; anything else (absent, empty, "yes", "1") is off.
+  v="$(_get agent.typesafe.ticket_kind.enabled)"
+  [ "$v" = "true" ] || v=""
+  printf 'agent.typesafe.ticket_kind.enabled=%s\n' "$v"
   # Which sources are collected by a deterministic script instead of by the model. Absent or empty
   # => today's prompt-driven path, unchanged. Deny-by-default, matching the posture of
   # agent.autonomy.auto_execute and projects.<slug>.exec.allowed_commands.

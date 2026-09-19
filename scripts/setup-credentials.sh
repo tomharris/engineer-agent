@@ -14,7 +14,7 @@
 # Usage:
 #   setup-credentials.sh jira            store a Jira API token
 #   setup-credentials.sh slite           store a Slite API key
-#   setup-credentials.sh typesafe        store a TypeSafe API key (scripted Slack polling)
+#   setup-credentials.sh typesafe        store a TypeSafe API key (Slack relevance, ticket-kind)
 #   setup-credentials.sh check           report what resolves, WITHOUT printing any secret
 set -uo pipefail
 
@@ -69,16 +69,21 @@ EOF
     echo "Find your key at https://app.slite.com -> Settings -> API"
     store slite "" "Slite API key (input hidden): " ;;
   typesafe)
-    # Storing the key is the SECOND of the two opt-ins for scripted Slack polling; the first is
-    # listing "slack" in agent.poll.scripted_sources. Both are required, and the warning below is
-    # the honest part: this is the only poll-path credential that authorises sending your content
-    # somewhere new, rather than back to a system that already holds it.
+    # This key is necessary for every TypeSafe-backed feature and SUFFICIENT for none of them —
+    # each one carries its own opt-in, because each sends a different slice of your content. The
+    # warning below is the honest part: this is the only poll-path credential that authorises
+    # sending your content somewhere new, rather than back to a system that already holds it.
     echo "Find your key at https://typesafe.ai -> API keys"
     echo
-    echo "NOTE: this enables scripts/poll-slack.sh, which sends Slack message and thread text to"
-    echo "api.typesafe.ai to judge whether a message is a question aimed at you. Nothing else in"
-    echo "the poll sends your content to a third party. Leave 'slack' out of"
-    echo "agent.poll.scripted_sources and Slack polling stays model-driven regardless."
+    echo "NOTE: this key authorises sending some of your content to api.typesafe.ai. Nothing else"
+    echo "in the poll sends your content to a third party. The key alone enables nothing — each"
+    echo "feature is opted into separately, and stays model-driven until you do:"
+    echo
+    echo "  Slack relevance     'slack' in agent.poll.scripted_sources"
+    echo "                      sends: message text + thread context"
+    echo "  Ticket-kind Form B  agent.typesafe.ticket_kind.enabled: true"
+    echo "                      sends: GitHub issue title + labels (never the body), and only"
+    echo "                             for a title whose leading word is a configured keyword"
     echo
     store typesafe "" "TypeSafe API key (input hidden): " ;;
   check)
@@ -92,7 +97,10 @@ EOF
     printf 'jira.email       : %s\n' "$jmail"
     printf 'jira token       : %s\n'  "$([ -n "$jt" ] && echo 'resolved' || echo 'NOT FOUND (Jira stays model-driven)')"
     printf 'slite key        : %s\n'  "$([ -n "$st" ] && echo 'resolved' || echo 'NOT FOUND (Slite stays model-driven)')"
-    printf 'typesafe key     : %s\n'  "$([ -n "$tst" ] && echo 'resolved' || echo 'NOT FOUND (Slack stays model-driven)')"
+    printf 'typesafe key     : %s\n'  "$([ -n "$tst" ] && echo 'resolved' || echo 'NOT FOUND (Slack relevance + ticket-kind Form B stay model-driven)')"
+    # Reported separately from the key: the per-feature opt-in is the gate people actually forget,
+    # and "the key resolves" is not an answer to "is this feature on".
+    printf 'ticket-kind judge: %s\n' "$([ "$(cfg agent.typesafe.ticket_kind.enabled)" = "true" ] && { [ -n "$tst" ] && echo 'judged in the collector' || echo 'enabled, but NO KEY (deferred to the model)'; } || echo 'off (deferred to the model)')"
     for dep in curl jq; do
       printf '%-17s: %s\n' "$dep" "$(command -v "$dep" >/dev/null 2>&1 && echo present || echo "MISSING (source stays model-driven)")"
     done

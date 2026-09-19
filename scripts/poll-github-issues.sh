@@ -2,14 +2,21 @@
 # poll-github-issues.sh — deterministic collector for GitHub Issues.
 #
 # Replaces the mechanical half of skills/poll-github-issues/SKILL.md: fetch, recency filter,
-# reconciliation, routing (tiers 0-3a), kind classification (tiers 0-2 and 3-Form-A), queue-file
-# writing, and state. It does NOT draft — it writes items to queue/incoming/ and emits a manifest
-# naming what still needs a model, which is the only thing a model is then asked to do.
+# reconciliation, routing (tiers 0-3a), kind classification (tiers 0-2, 3-Form-A, and 3-Form-B when
+# the judgment is opted into), queue-file writing, and state. It does NOT draft — it writes items to
+# queue/incoming/ and emits a manifest naming what still needs a model, which is the only thing a
+# model is then asked to do.
 #
-# NO EXTERNAL jq. Field extraction uses `gh --jq`, gh's own embedded jq engine, so this adds no
-# dependency beyond `gh` itself and stays inside the "the cron path is jq-free" policy that
-# cron-poll.sh sets. Titles and bodies are carried as base64 through the TSV because both routinely
-# contain tabs, newlines and quotes.
+# NO EXTERNAL jq ON THE COLLECTION PATH. Field extraction uses `gh --jq`, gh's own embedded jq
+# engine, so this adds no dependency beyond `gh` itself and stays inside the "the cron path is
+# jq-free" policy that cron-poll.sh sets. Titles and bodies are carried as base64 through the TSV
+# because both routinely contain tabs, newlines and quotes.
+#
+# The one exception proves the policy rather than breaking it: the OPTIONAL ticket-kind Form B
+# judgment (lib-ticket-kind-judge.sh) needs real jq, because a JSON request body containing an
+# arbitrary issue title must be built by something that knows JSON. jq's absence is not an error
+# there — tk_judge_enabled simply returns false and the question goes to the drafting model, which
+# is what every install without the opt-in does anyway.
 #
 # TWO TRAPS FROM THE SKILL, PRESERVED — each broke a real behavior:
 #   1. `gh issue list --label a --label b` is AND, not OR, so several watchers' label filters
@@ -31,6 +38,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "${SCRIPT_DIR}/lib-routing.sh"
 . "${SCRIPT_DIR}/lib-ticket-kind.sh"
 . "${SCRIPT_DIR}/lib-state.sh"
+# Tier 3 Form B as a typed judgment, when one is configured. Both are inert unless
+# agent.typesafe.ticket_kind.enabled is true AND a credential (plus curl and jq) resolves —
+# see tk_judge_enabled. Sourcing them costs nothing and opens nothing.
+. "${SCRIPT_DIR}/lib-secret.sh"
+. "${SCRIPT_DIR}/lib-typesafe.sh"
+. "${SCRIPT_DIR}/lib-ticket-kind-judge.sh"
 
 TAB="$(printf '\t')"
 
@@ -64,6 +77,17 @@ cfg()  { printf '%s\n' "$EA_CFG" | awk -F= -v k="$1" '$1==k {sub(/^[^=]*=/,""); 
 cfgl() { printf '%s\n' "$EA_CFG" | awk -v p="$1[]=" 'index($0,p)==1 {print substr($0,length(p)+1)}'; }
 
 MAX_AGE="$(cfg agent.max_issue_age_days)"; MAX_AGE="${MAX_AGE:-0}"
+
+# Is ticket-kind Tier 3 Form B adjudicated here, or left to Phase B? Resolved ONCE per run:
+# tk_judge_enabled reads config and resolves a credential (which on macOS can mean a Keychain
+# call), and re-answering that per issue would pay for it on every row of every repo. Off unless
+# explicitly enabled, in which case the item's `type:` is final when it is written instead of
+# being a placeholder the drafting model is trusted to correct.
+JUDGE_FORM_B=0; JUDGE_MIN=""
+if tk_judge_enabled; then
+  JUDGE_FORM_B=1; JUDGE_MIN="$(tk_judge_min)"
+  log "poll-github-issues: ticket-kind Form B judged inline (min_imperative=${JUDGE_MIN})"
+fi
 
 # --- Phase 1: build the per-REPO query map ----------------------------------------------------
 # "owner/repo" -> the distinct assignees to query, and the projects watching it. Keyed by repo
@@ -164,7 +188,7 @@ EOF
     # --- kind (tiers 0-2, 3-Form-A) -------------------------------------------------------
     # Only meaningful once a slug exists: the kind lists are per-project overridable, so an
     # _unrouted item is deliberately classified LATE (references/ticket-kind.md).
-    typ="ticket"; kmethod=""; krat=""; needs_kind=0
+    typ="ticket"; kmethod=""; krat=""; needs_kind=0; kword=""
     if [ "$slug" != "_unrouted" ]; then
       cfgl "projects.${slug}.investigation.github_labels"  > "$TMPD/k_gl"
       cfgl "projects.${slug}.investigation.title_keywords" > "$TMPD/k_kw"
@@ -175,6 +199,33 @@ EOF
       kmethod="$(printf '%s' "$kind_out" | cut -f2)"
       krat="$(printf '%s' "$kind_out" | cut -f3)"
       needs_kind="$(printf '%s' "$kind_out" | cut -f4)"
+      kword="$(printf '%s' "$kind_out" | cut -f5)"
+
+      # --- kind tier 3 Form B: the one judgment the ladder cannot make ---------------------
+      # Reached ONLY for a title whose leading word already matches a configured keyword — that
+      # precondition is what keeps the trigger vocabulary closed under config, so this narrows
+      # the candidate set and can never widen it (lib-ticket-kind-judge.sh).
+      #
+      # BEFORE reconciliation and the filename, deliberately: `typ` is part of the dedup family
+      # lookup and of `{YYYYMMDD-HHmmss}-{type}-{id}.md`, so a kind settled after either would
+      # leave the item named for a type it no longer is.
+      if [ "$needs_kind" = "1" ] && [ "$JUDGE_FORM_B" -eq 1 ] && [ -n "$kword" ]; then
+        if p_imp="$(tk_form_b_judge "$title" "$kword" "$TMPD/labels")"; then
+          # The question has now been ANSWERED, whichever way it went — so the flag drops and
+          # Phase B is not asked to re-examine a title that was already adjudicated.
+          needs_kind=0
+          if ts_ge "$p_imp" "$JUDGE_MIN"; then
+            typ="ticket-investigation"; kmethod="title-keyword"
+            krat="$(printf "leading imperative '%s' (Form B, imperative=%s)" "$kword" "$p_imp")"
+          else
+            log "poll-github-issues: ${sid} Form B judged NOT an imperative (${p_imp} < ${JUDGE_MIN}); code work"
+          fi
+        else
+          # No judgment was made. This must NOT become a silent "no": leave the flag up and let
+          # Phase B answer it exactly as it does on an install with no key at all.
+          log "poll-github-issues: ${sid} Form B judgment unavailable; leaving it to the drafting model"
+        fi
+      fi
     fi
 
     # --- reconciliation ------------------------------------------------------------------

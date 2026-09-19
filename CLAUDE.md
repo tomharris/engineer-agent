@@ -103,12 +103,18 @@ Two `agent` subsections drive autonomy (both optional):
   rather than by the model (`github-issues`, `github`, `jira`, `slite`, `slack`). Absent/empty ⇒ the
   prompt-driven path, unchanged. Env override `EA_POLL_SCRIPTED_SOURCES`. See "Deterministic
   polling" below. `slack` additionally requires `agent.typesafe` — see "Scripted Slack polling".
-- `agent.typesafe` — API access for the **scripted Slack collector only** (`api_key_env`,
-  `api_key_file`, `api_base`, `model`, and the `slack.min_question` / `slack.min_directed` /
-  `slack.max_answered` / `slack.min_engineer` thresholds). Same credential rule as Jira/Slite: the
-  keys name *where* the secret is and `scripts/lib-secret.sh` resolves it. Absent ⇒ Slack polling
-  stays model-driven regardless of `scripted_sources`. **This is the only poll-path integration
-  that sends content to a third party** — see "Scripted Slack polling" below.
+- `agent.typesafe` — API access for the System One judgments (`api_key_env`, `api_key_file`,
+  `api_base`, `model`, plus each feature's thresholds: `slack.min_question` / `slack.min_directed`
+  / `slack.max_answered` / `slack.min_engineer`, and `ticket_kind.min_imperative`). Same credential
+  rule as Jira/Slite: the keys name *where* the secret is and `scripts/lib-secret.sh` resolves it.
+  **This is the only poll-path integration that sends content to a third party**, so the key is
+  necessary for every feature below and sufficient for none — **each one opts in separately**, and
+  without its own opt-in that judgment stays model-driven exactly as before:
+  - **Slack relevance** — `slack` in `agent.poll.scripted_sources`. Sends message + thread text.
+    See "Scripted Slack polling".
+  - **Ticket-kind Tier 3 Form B** — `agent.typesafe.ticket_kind.enabled: true` (deny-by-default;
+    only the exact string `true`). Sends a GitHub issue title + labels, never the body, and only
+    for a title whose leading word already matches a configured keyword. See "Ticket Kind".
 - `agent.slack.user_name` / `agent.slack.user_id` — your Slack identity, read **only** by
   `poll-slack.sh`: `user_id` drops your own messages before any judgment is paid for, and both feed
   the "is this aimed at me?" judgment as state. Optional; absent, that judgment leans on
@@ -249,6 +255,36 @@ engines without tripping a presence test.
 Unlike the routing ladder, the last tier is **not** a human: "nothing matched" has a correct,
 non-surprising answer (code work — the behavior before this ladder existed), and both outcomes are
 gated anyway. The human override is `add-ticket --investigate` / `--implement`.
+
+> **Tier 3 Form B is the one thing bash cannot decide, and it is now answerable two ways.** Whether
+> `Investigate why checkout 500s` is an imperative while `Research service returns 500` is a bug in
+> a service called Research is grammar, not string comparison. `lib-ticket-kind.sh` therefore stops
+> at the *precondition* — the leading word (after one optional `please `) is a configured keyword or
+> its gerund, and is not one of the Form-A-only nouns — and emits `needs_form_b=1` plus that word.
+> Who answers it:
+> - **`scripts/lib-ticket-kind-judge.sh`**, when `agent.typesafe.ticket_kind.enabled: true` and a
+>   credential resolves. One noul thresholded against `ticket_kind.min_imperative` (default `0.60`,
+>   encoding the spec's "when you cannot tell, it does not fire"). The kind is then **final when the
+>   item is written** — `type:` and the `{ts}-{type}-{id}.md` filename are right the first time,
+>   which is why the judgment runs *before* reconciliation, and `ticket_kind_rationale` carries the
+>   score (`leading imperative 'Investigate' (Form B, imperative=0.93)`) so the gate audits the
+>   evidence and not just the verdict — the same reason `routing_rationale` exists for Tier 3b.
+> - **The drafting model in Phase B** otherwise, via `needs_kind_check=1` in the manifest. This is
+>   the default, the pre-existing behavior, and the fallback for *every* failure: no key, disabled,
+>   no jq, a 429/5xx, a malformed answer. A failed judgment **abstains**; it never becomes a silent
+>   "no", because that would convert any outage into "everything is code work".
+>
+> **Form A stays in bash, deliberately** — it is deterministic, free, and `tests/ticket-kind.test.sh`
+> pins every worked example in the spec verbatim in both directions. Replacing a correct free
+> comparison with a network call would trade a tested guarantee for a probability, send *every*
+> issue title to a third party instead of the rare candidate, and turn an offline suite into a
+> stubbed one. The judgment goes where the code is stuck and nowhere else.
+>
+> **Containment is unchanged and still structural.** The precondition gates what may be asked
+> about, so ticket text remains the left side of a comparison and never contributes a keyword; the
+> judgment can only ever *narrow* a config-derived candidate set, its output alphabet is one float,
+> and both outcomes it selects between are gated. A flip toward investigation also moves the item
+> to the **narrower** execution path (read-only, no branch, no PR).
 
 > **`Task` ships as a trigger and is the one aggressive default.** In many Jira projects `Task` is
 > the catch-all for ordinary code work, so on such an instance a routine ticket is drafted as an
@@ -979,17 +1015,21 @@ A full 5-repo poll of a real config takes ~6s and writes a receipt byte-identica
 | Routing ladder **tiers 0–3a**, for GitHub, Jira, Slite *and* Slack | bash (`lib-routing.sh`) |
 | Jira JQL construction, quoting, and the account-timezone conversion | bash (`poll-jira.sh`) |
 | Credential resolution (env → file → Keychain), read-only | bash (`lib-secret.sh`) |
-| Ticket-kind **tiers 0–2 and 3 Form A** | bash (`lib-ticket-kind.sh`) |
+| Ticket-kind **tiers 0–2, 3 Form A, and the Form B precondition** | bash (`lib-ticket-kind.sh`) |
 | Filename, frontmatter, `## Context`, branch slug | bash (`lib-queue-write.sh`) |
 | State + receipt | bash (`lib-state.sh`, `cron-poll.sh`) |
 | Slack **relevance** — is this a question aimed at me? | **System One** (`lib-typesafe.sh`), composed in bash |
-| Routing **tier 3b** (semantic), kind **Form B** (imperative-vs-noun) | **model** |
+| Kind **Form B** (imperative-vs-noun), when opted in | **System One** (`lib-ticket-kind-judge.sh`), thresholded in bash |
+| Routing **tier 3b** (semantic); kind **Form B** when not opted in | **model** |
 | **All draft prose** | **model** |
 
-The two remaining judgment tiers are **flagged in the manifest**, never guessed. `needs_routing=1` writes
+The remaining judgment tiers are **flagged in the manifest**, never guessed. `needs_routing=1` writes
 the item as `project: _unrouted` with `matched_projects`, which the model finishes through the
 already-documented `incoming/` + `_unrouted` → update-in-place branch of
-`references/queue-reconciliation.md` — no new state, no new code path.
+`references/queue-reconciliation.md` — no new state, no new code path. `needs_kind_check=1` is the
+same socket for Form B, and it is the **fallback the judgment degrades to**, not a path it replaces:
+every install that does not set `agent.typesafe.ticket_kind.enabled` — and every run where the
+judgment cannot be made — takes it, exactly as before.
 
 ### The scripts
 
@@ -1000,6 +1040,7 @@ already-documented `incoming/` + `_unrouted` → update-in-place branch of
 | `lib-queue.sh` | frontmatter access + `queue_disposition` (the reconciliation table) + `poll_resume_candidates` |
 | `lib-queue-write.sh` | queue-item construction, with real YAML escaping |
 | `lib-routing.sh` / `lib-ticket-kind.sh` | the deterministic ladder tiers |
+| `lib-ticket-kind-judge.sh` | kind Tier 3 Form B as one typed judgment; inert unless opted in, and degrades to the model on any failure |
 | `lib-state.sh` | round-trips `state/last-poll.yaml`, preserving model-written sections |
 | `lib-time.sh` | GNU/BSD-portable timestamp helpers |
 | `poll-github-issues.sh` / `poll-github-prs.sh` / `poll-jira.sh` / `poll-slite.sh` / `poll-slack.sh` | the collectors |
@@ -1163,6 +1204,12 @@ stage executes. Phase A still only reads.
 > data being sent; `api.typesafe.ai` does not. Anyone enabling it should be making that decision
 > deliberately rather than inheriting it from a config array, so it costs a second explicit step
 > (`setup-credentials.sh typesafe`, which says so at the prompt).
+>
+> **This generalizes: the credential is necessary for every TypeSafe-backed feature and sufficient
+> for none.** Each one that egresses content carries its own opt-in and sends a different slice, so
+> enabling one never silently enables the next — a key stored for Slack relevance does not start
+> sending GitHub issue titles (`agent.typesafe.ticket_kind.enabled`, see "Ticket Kind"). Keep that
+> shape when adding a third: a per-feature gate, deny-by-default, named at the credential prompt.
 
 **Four decisions in `poll-slack.sh` a reader will otherwise "fix" back:**
 - **One read per CHANNEL, not per project** — the shared-repo trap in its third costume. Two

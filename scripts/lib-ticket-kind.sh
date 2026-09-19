@@ -5,18 +5,27 @@
 # Implements Tier 0 (manual flag), Tier 1 (Jira issue type — TERMINAL for Jira), Tier 2 (GitHub
 # label), Tier 3 Form A (delimited kind prefix) and Tier 4 (default: code work).
 #
-# Tier 3 Form B — "leading imperative verb" — is NOT implemented here, because deciding that
+# Tier 3 Form B — "leading imperative verb" — is NOT decided here, because deciding that
 # `Investigate why checkout 500s` is an imperative while `Research service returns 500` is a bug in
 # a service called Research is a grammatical judgment, and the spec says so ("when you cannot tell,
 # it does not fire"). Instead this library detects the cheap PRECONDITION for Form B and reports
-# needs_form_b=1 so the caller can put exactly those titles in front of a model. Everything else is
-# settled here, for free.
+# needs_form_b=1, naming the candidate word, so the caller can put exactly those titles in front of
+# a judgment. Everything else is settled here, for free.
 #
-# OUTPUT — one tab-separated line: <type>\t<method>\t<rationale>\t<needs_form_b>
+# THIS FILE STAYS OFFLINE AND PURE. scripts/lib-ticket-kind-judge.sh answers the Form B question
+# with a typed judgment when one is configured; nothing here opens a socket, reads a credential or
+# depends on jq, so tests/ticket-kind.test.sh can keep pinning the spec's worked examples verbatim
+# with no stubbing at all. Keep it that way: the deterministic ladder is the thing every install
+# gets, and the judgment is the thing some installs add.
+#
+# OUTPUT — one tab-separated line: <type>\t<method>\t<rationale>\t<needs_form_b>\t<form_b_word>
 #   type          ticket | ticket-investigation
 #   method        manual | jira-issuetype | github-label | title-keyword | default
 #   rationale     one line naming the evidence; REQUIRED when method is title-keyword
-#   needs_form_b  1 when a model must adjudicate Form B before this answer is final
+#   needs_form_b  1 when Form B must be adjudicated before this answer is final
+#   form_b_word   the candidate leading word, as it appears in the title; set ONLY with
+#                 needs_form_b=1. Emitted here rather than recomputed by the judge so the
+#                 morphology (project-prefix strip, `please ` strip, gerund) lives in one place.
 #
 # INJECTION CONTAINMENT (preserved structurally, not by instruction): ticket text is only ever the
 # LEFT side of a comparison — it never contributes a keyword — so the trigger vocabulary is closed
@@ -142,24 +151,33 @@ _tk_form_a() {
 _TK_NOUN_ONLY="spike decision adr rfc"
 
 # _tk_form_b_candidate <normalized-title> <keywords-file> — rc 0 when the first word could be a
-# leading imperative. This is the PRECONDITION only; the verb-vs-noun disqualifier
-# (`Research service returns 500` is a bug in a service called Research) is left to a model.
+# leading imperative, PRINTING that word as it appears in the title. This is the PRECONDITION only;
+# the verb-vs-noun disqualifier (`Research service returns 500` is a bug in a service called
+# Research) is left to lib-ticket-kind-judge.sh, or to a model in Phase B.
+#
+# The precondition is what keeps the trigger vocabulary CLOSED UNDER CONFIG even once a judgment is
+# wired in: a title can only ever be asked about when its leading word already matches a configured
+# keyword, so ticket text remains the left side of a comparison and never contributes a keyword.
+# The judgment narrows this set; it can never widen it.
 _tk_form_b_candidate() {
-  local title="$1" kwfile="$2" first base n
-  title="$(_tk_trim "$(_tk_lower "$title")")"
-  title="${title#please }"                    # "optionally after a single 'please '"
-  first="${title%%[ 	]*}"
-  first="$(printf '%s' "$first" | sed -E 's/[^[:alnum:]]+$//')"
+  local title="$1" kwfile="$2" raw first base n
+  title="$(_tk_trim "$title")"
+  # "optionally after a single 'please '" — matched case-insensitively, then dropped from the
+  # ORIGINAL-case string so the word this prints is the one a human would read in the title.
+  case "$(_tk_lower "$title")" in "please "*) title="$(_tk_trim "${title:7}")" ;; esac
+  raw="${title%%[ 	]*}"
+  raw="$(printf '%s' "$raw" | sed -E 's/[^[:alnum:]]+$//')"
+  first="$(_tk_lower "$raw")"
   [ -n "$first" ] || return 1
   for n in $_TK_NOUN_ONLY; do [ "$first" = "$n" ] && return 1; done
-  _tk_in_list "$first" < "$kwfile" && return 0
+  _tk_in_list "$first" < "$kwfile" && { printf '%s' "$raw"; return 0; }
   # Gerunds only — "no stemming beyond the gerund", so `comparison` is not `compare`.
   case "$first" in
     *ing)
       base="${first%ing}"
       for n in $_TK_NOUN_ONLY; do [ "$base" = "$n" ] && return 1; done
-      _tk_in_list "$base" < "$kwfile" && return 0
-      _tk_in_list "${base}e" < "$kwfile" && return 0   # comparing -> compare
+      _tk_in_list "$base"  < "$kwfile" && { printf '%s' "$raw"; return 0; }
+      _tk_in_list "${base}e" < "$kwfile" && { printf '%s' "$raw"; return 0; }   # comparing -> compare
       ;;
   esac
   return 1
@@ -201,8 +219,8 @@ ticket_kind_classify() {
 
   # --- Tier 0: manual flag. Never reachable when polling; add-ticket sets it. ---------------
   case "$manual" in
-    investigate) printf 'ticket-investigation\tmanual\t--investigate flag\t0\n'; return 0 ;;
-    implement)   printf 'ticket\tmanual\t--implement flag\t0\n'; return 0 ;;
+    investigate) printf 'ticket-investigation\tmanual\t--investigate flag\t0\t\n'; return 0 ;;
+    implement)   printf 'ticket\tmanual\t--implement flag\t0\t\n'; return 0 ;;
   esac
 
   # --- Tier 1: Jira issue type. TERMINAL FOR JIRA. -----------------------------------------
@@ -211,9 +229,9 @@ ticket_kind_classify() {
   # rate limiter" is code work by structure, not by luck.
   if [ "$tracker" = "jira" ]; then
     if [ -n "$jtype" ] && _tk_in_list "$jtype" < "$f_jtypes"; then
-      printf 'ticket-investigation\tjira-issuetype\tJira issue type %s\t0\n' "$jtype"
+      printf 'ticket-investigation\tjira-issuetype\tJira issue type %s\t0\t\n' "$jtype"
     else
-      printf 'ticket\tdefault\t\t0\n'
+      printf 'ticket\tdefault\t\t0\t\n'
     fi
     return 0
   fi
@@ -225,25 +243,26 @@ ticket_kind_classify() {
     norm="$(_tk_normalize_label "$raw")"
     [ -n "$norm" ] || continue
     if _tk_in_list "$norm" < "$f_ghlabels"; then
-      printf 'ticket-investigation\tgithub-label\tlabel %s\t0\n' "$raw"
+      printf 'ticket-investigation\tgithub-label\tlabel %s\t0\t\n' "$raw"
       return 0
     fi
   done < "$f_labels"
 
   # --- Tier 3: title keyword (the only tier that reads untrusted prose) --------------------
-  local norm_title kw
+  local norm_title kw cand
   norm_title="$(_tk_strip_project_prefix "$title" "$f_kw")"
   if kw="$(_tk_form_a "$norm_title" "$f_kw")"; then
-    printf "ticket-investigation\ttitle-keyword\ttitle prefix '%s' (Form A)\t0\n" "$kw"
+    printf "ticket-investigation\ttitle-keyword\ttitle prefix '%s' (Form A)\t0\t\n" "$kw"
     return 0
   fi
-  if _tk_form_b_candidate "$norm_title" "$f_kw"; then
-    # Precondition only. Default to code work — the spec's own tie-break — and flag for a model.
-    printf 'ticket\tdefault\t\t1\n'
+  if cand="$(_tk_form_b_candidate "$norm_title" "$f_kw")"; then
+    # Precondition only. Default to code work — the spec's own tie-break — and flag the candidate
+    # so the caller can adjudicate it (lib-ticket-kind-judge.sh, else a model in Phase B).
+    printf 'ticket\tdefault\t\t1\t%s\n' "$cand"
     return 0
   fi
 
   # --- Tier 4: default. Unlike the routing ladder the last tier is NOT a human: "nothing
   # matched" has a correct, non-surprising answer, and both outcomes are gated anyway.
-  printf 'ticket\tdefault\t\t0\n'
+  printf 'ticket\tdefault\t\t0\t\n'
 }
