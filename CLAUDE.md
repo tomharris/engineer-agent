@@ -100,9 +100,19 @@ Two `agent` subsections drive autonomy (both optional):
   merging it, so a project can *narrow* the triggers (the operation that fixes a false positive); an
   explicitly empty list disables that tier. See "Ticket Kind" below.
 - `agent.poll.scripted_sources` — a list of sources collected by a **deterministic script**
-  rather than by the model (`github-issues`, `github`, `jira`, `slite`). Absent/empty ⇒ the
+  rather than by the model (`github-issues`, `github`, `jira`, `slite`, `slack`). Absent/empty ⇒ the
   prompt-driven path, unchanged. Env override `EA_POLL_SCRIPTED_SOURCES`. See "Deterministic
-  polling" below.
+  polling" below. `slack` additionally requires `agent.typesafe` — see "Scripted Slack polling".
+- `agent.typesafe` — API access for the **scripted Slack collector only** (`api_key_env`,
+  `api_key_file`, `api_base`, `model`, and the `slack.min_question` / `slack.min_directed` /
+  `slack.max_answered` / `slack.min_engineer` thresholds). Same credential rule as Jira/Slite: the
+  keys name *where* the secret is and `scripts/lib-secret.sh` resolves it. Absent ⇒ Slack polling
+  stays model-driven regardless of `scripted_sources`. **This is the only poll-path integration
+  that sends content to a third party** — see "Scripted Slack polling" below.
+- `agent.slack.user_name` / `agent.slack.user_id` — your Slack identity, read **only** by
+  `poll-slack.sh`: `user_id` drops your own messages before any judgment is paid for, and both feed
+  the "is this aimed at me?" judgment as state. Optional; absent, that judgment leans on
+  `slack.keywords` alone and is correspondingly weaker.
 - `agent.jira` / `agent.slite` — REST access for the **scripted** Jira/Slite collectors only
   (`site`, `email`, `api_token_env`, `api_token_file`, `api_base`; Slite takes `api_key_env`,
   `api_key_file`, `api_base`). Every other Jira/Slite surface in the plugin uses `mcp__atlassian__*`
@@ -356,6 +366,15 @@ YAML frontmatter fields:
 - `label_source`: (doc-review only) `tags` | `query` — whether the doc's label match came from a
   real tag comparison or only from the search term that found it. Recorded because the Slite REST
   API does not reliably expose tags, and the gate should see when the match was the weaker kind
+- `channel_id` / `channel_name` / `message_ts` / `author` / `author_id`: (slack-question only) where
+  the message came from and who wrote it
+- `relevance_method`: (slack-question only) how the "is this a question for me?" tier was decided —
+  `typesafe` when `scripts/poll-slack.sh` judged it. Absent on a model-drafted item, which decided
+  it inline and recorded nothing
+- `relevance_scores`: (slack-question only, with `relevance_method`) the four raw probabilities,
+  e.g. `question=0.93 directed=0.88 answered=0.04 engineer=0.81`. Recorded for the same reason
+  `routing_rationale` is: this is a judgment tier reading untrusted prose, so the gate must be able
+  to audit the evidence and not only the verdict
 - `codify_target`: (codify-candidate only) `memory-file` | `skill-note` | `claude-md`
 - `codify_path`: (codify-candidate only) absolute path of the file the learning will be written to on approval
 
@@ -940,7 +959,7 @@ steady state of a healthy queue is `items_queued: 0`, so most of that spend boug
 
 ```
 cron-poll.sh
-  ├─ PHASE A  scripts/poll-{github-issues,github-prs,jira,slite}.sh   (no model)
+  ├─ PHASE A  scripts/poll-{github-issues,github-prs,jira,slite,slack}.sh   (no model)
   │           fetch → filter → reconcile → route → classify → write queue file → state + receipt
   │           emits queue/incoming/*.md + state/poll-manifest.tsv
   └─ PHASE B  claude -p, ONLY if the manifest is non-empty
@@ -957,16 +976,17 @@ A full 5-repo poll of a real config takes ~6s and writes a receipt byte-identica
 | Config parse, tracker inference, per-source configured/skipped decision | bash (`ea-config.sh`) |
 | Fetch (`gh issue list`/`pr list`; Jira + Slite REST via curl), all filters, priority mapping | bash |
 | Reconciliation table (skip / unchanged / update-in-place / create) | bash (`lib-queue.sh`) |
-| Routing ladder **tiers 0–3a**, for GitHub, Jira *and* Slite | bash (`lib-routing.sh`) |
+| Routing ladder **tiers 0–3a**, for GitHub, Jira, Slite *and* Slack | bash (`lib-routing.sh`) |
 | Jira JQL construction, quoting, and the account-timezone conversion | bash (`poll-jira.sh`) |
 | Credential resolution (env → file → Keychain), read-only | bash (`lib-secret.sh`) |
 | Ticket-kind **tiers 0–2 and 3 Form A** | bash (`lib-ticket-kind.sh`) |
 | Filename, frontmatter, `## Context`, branch slug | bash (`lib-queue-write.sh`) |
 | State + receipt | bash (`lib-state.sh`, `cron-poll.sh`) |
-| Routing **tier 3b** (semantic), kind **Form B** (imperative-vs-noun), Slack relevance | **model** |
+| Slack **relevance** — is this a question aimed at me? | **System One** (`lib-typesafe.sh`), composed in bash |
+| Routing **tier 3b** (semantic), kind **Form B** (imperative-vs-noun) | **model** |
 | **All draft prose** | **model** |
 
-The three judgment tiers are **flagged in the manifest**, never guessed. `needs_routing=1` writes
+The two remaining judgment tiers are **flagged in the manifest**, never guessed. `needs_routing=1` writes
 the item as `project: _unrouted` with `matched_projects`, which the model finishes through the
 already-documented `incoming/` + `_unrouted` → update-in-place branch of
 `references/queue-reconciliation.md` — no new state, no new code path.
@@ -982,8 +1002,9 @@ already-documented `incoming/` + `_unrouted` → update-in-place branch of
 | `lib-routing.sh` / `lib-ticket-kind.sh` | the deterministic ladder tiers |
 | `lib-state.sh` | round-trips `state/last-poll.yaml`, preserving model-written sections |
 | `lib-time.sh` | GNU/BSD-portable timestamp helpers |
-| `poll-github-issues.sh` / `poll-github-prs.sh` / `poll-jira.sh` / `poll-slite.sh` | the collectors |
-| `lib-secret.sh` / `setup-credentials.sh` | resolve (read-only) and store the Jira/Slite API credentials |
+| `poll-github-issues.sh` / `poll-github-prs.sh` / `poll-jira.sh` / `poll-slite.sh` / `poll-slack.sh` | the collectors |
+| `lib-typesafe.sh` | a minimal System One client: fixed yes/no questions in, floats out. NOT a general LLM client |
+| `lib-secret.sh` / `setup-credentials.sh` | resolve (read-only) and store the Jira / Slite / TypeSafe API credentials |
 | `queue-status.sh` / `queue-list.sh` | the data behind `status` / `review-queue` |
 
 > **`ea-config.sh dump` emits a CURATED view and deliberately omits `agent.notify.ntfy.*`.** On
@@ -1042,7 +1063,7 @@ instead of an invisible arbitrary assignment.
 
 ### Credentials
 
-`agent.jira.*` / `agent.slite.*` name **where** the token is, never what it is: `engineer.yaml` is a
+`agent.jira.*` / `agent.slite.*` / `agent.typesafe.*` name **where** the token is, never what it is: `engineer.yaml` is a
 file people paste into issues when asking for help, and `ea-config.sh dump` is documented as safe to
 log. `lib-secret.sh` resolves env var → file → macOS Keychain and never writes; `setup-credentials.sh`
 is the single (interactive) writer, and its `check` subcommand reports what resolves without printing
@@ -1096,8 +1117,78 @@ warning. `tests/lib-queue.test.sh` and `tests/poll-github-issues.test.sh` both p
 > to precisely the case the hazard describes.
 
 **2. `gh --jq`, not `jq`.** The collectors use gh's *embedded* jq engine, so they add no dependency
-and stay inside the "the cron path is jq-free" policy `cron-poll.sh` sets. A Slack collector would
-need real `jq` and must gate on it softly (fall back to the model), never hard-fail.
+and stay inside the "the cron path is jq-free" policy `cron-poll.sh` sets. The Slack collector needs
+real `jq` (there is no embedded engine behind `curl`) and so gates on it softly — exit 3, fall back
+to the model — never hard-fail. Same rule Jira and Slite follow.
+
+### Scripted Slack polling: a judgment tier that is not the model
+
+Slack was listed here as permanently model-driven for the same stated reason Jira and Slite once
+were, but a *different* underlying one. Jira/Slite lacked a CLI; Slack lacks a **mechanical
+predicate**. Every other source's "is this work?" test is a field comparison — a status, an
+assignee, a tag. `skills/poll-slack/SKILL.md` §3b is literally "use judgment to determine if it's
+actually a question directed at the user", because a keyword filter alone is mostly false positives
+("deploy" appears in every deploy announcement). That one sentence is why Slack kept every poll
+paying for a model session even on a quiet day.
+
+`scripts/poll-slack.sh` keeps the judgment and drops the session. Each surviving candidate gets
+**one batched request** to a System One model (`scripts/lib-typesafe.sh`) carrying four independent
+yes/no questions — `is_question`, `directed_at_user`, `already_answered`, `needs_engineer` — which
+come back as probabilities. The composition is **in bash**:
+
+```
+relevant = is_question >= min_question && directed_at_user >= min_directed
+        && already_answered <= max_answered && needs_engineer >= min_engineer
+```
+
+Keeping the policy in bash rather than asking one broad "should I answer this?" is the point, and
+it is the same reason `lib-routing.sh` and `lib-ticket-kind.sh` exist: the thresholds are visible in
+config, tunable per install, and testable without the network (`tests/poll-slack.test.sh` pins each
+dimension in both directions against a stubbed API). The four raw probabilities are written to the
+item's `relevance_scores`, so the gate audits the evidence, not just the verdict.
+
+**Why this does not weaken the read-only / injection invariants.** `lib-typesafe.sh` is not a
+general LLM client and must not become one — it sends fixed, repo-authored questions and reads back
+floats. There is no completion, no tool use, no instruction following. Message text is the `state`
+of a yes/no question and nothing else, so the **output alphabet is four numbers**: an injected
+payload can at worst move a probability and get a message queued that should not have been, and
+that item still passes the human approval gate. It cannot name a project (routing is a separate
+ladder computed from config alone), cannot reach a posting verb, and cannot emit a string any later
+stage executes. Phase A still only reads.
+
+> **DOUBLE OPT-IN, and the second gate is not ceremony.** `slack` in `agent.poll.scripted_sources`
+> is not sufficient: an `agent.typesafe` credential must also resolve, or the collector exits 3 and
+> Slack stays model-driven. That is because **this is the only thing in the poll path that sends
+> your content to a third party.** `gh`, Jira and Slite all talk to systems that already hold the
+> data being sent; `api.typesafe.ai` does not. Anyone enabling it should be making that decision
+> deliberately rather than inheriting it from a config array, so it costs a second explicit step
+> (`setup-credentials.sh typesafe`, which says so at the prompt).
+
+**Four decisions in `poll-slack.sh` a reader will otherwise "fix" back:**
+- **One read per CHANNEL, not per project** — the shared-repo trap in its third costume. Two
+  projects watching `#eng-general` would otherwise hand the global `source_id` dedup an arbitrary
+  winner. Channels are Tier 0 of the routing ladder; each project's `slack.keywords` is Tier 2, and
+  their union is the discovery filter. Ambiguity becomes a visible `_unrouted` item.
+- **The relevance request comes LAST**, after the keyword filter, own-message drop, recency cutoff
+  and reconciliation. Every one of those is free; the judgment is not. Thread context is fetched at
+  the same point, both because it is a second Slack call and because it is the evidence
+  `already_answered` needs.
+- **A failed judgment is not a silent "no", and does not advance the cutoff.** The run counts it as
+  an error and exits 3, which hands Slack back to the model — but a cutoff already moved past the
+  messages that *did* get judged would hide them from that fallback too, so a transient outage would
+  quietly eat everything around it. Re-judging a handful next tick is the cheaper mistake;
+  reconciliation stops anything already written from duplicating.
+- **`last_checked_ts` still does not advance on a zero-message poll** (it is a Slack message
+  timestamp, not a clock — `SKILL.md` §3e), nor on an exit-75 token skip. It *does* advance past
+  messages the gate **rejected**: those have been judged, and re-examining them would pay for the
+  same answer forever.
+
+**Honest limits.** `ignore_bots` is best-effort: neither Slack backend exposes a subtype or
+`bot_id`, so only a `B`-prefixed author id is dropped — skipping on an *empty* id would turn a
+formatting change into silent data loss, and `needs_engineer` / `is_question` are the real backstop
+for app noise. The permalink is *built*, not read (no backend returns one), so a `workspace` set to
+a team_id rather than a domain yields a link that degrades rather than breaks. And a typed float is
+a guarantee about the interface, not about truth — validate the thresholds on your own channels.
 
 ### Gotchas learned while building this — each cost a real debugging cycle
 

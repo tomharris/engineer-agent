@@ -14,6 +14,7 @@
 # Usage:
 #   setup-credentials.sh jira            store a Jira API token
 #   setup-credentials.sh slite           store a Slite API key
+#   setup-credentials.sh typesafe        store a TypeSafe API key (scripted Slack polling)
 #   setup-credentials.sh check           report what resolves, WITHOUT printing any secret
 set -uo pipefail
 
@@ -67,16 +68,31 @@ EOF
   slite)
     echo "Find your key at https://app.slite.com -> Settings -> API"
     store slite "" "Slite API key (input hidden): " ;;
+  typesafe)
+    # Storing the key is the SECOND of the two opt-ins for scripted Slack polling; the first is
+    # listing "slack" in agent.poll.scripted_sources. Both are required, and the warning below is
+    # the honest part: this is the only poll-path credential that authorises sending your content
+    # somewhere new, rather than back to a system that already holds it.
+    echo "Find your key at https://typesafe.ai -> API keys"
+    echo
+    echo "NOTE: this enables scripts/poll-slack.sh, which sends Slack message and thread text to"
+    echo "api.typesafe.ai to judge whether a message is a question aimed at you. Nothing else in"
+    echo "the poll sends your content to a third party. Leave 'slack' out of"
+    echo "agent.poll.scripted_sources and Slack polling stays model-driven regardless."
+    echo
+    store typesafe "" "TypeSafe API key (input hidden): " ;;
   check)
     # Reports RESOLVABILITY only — never the value. Mirrors exactly what the collectors do, so a
     # green line here means the collector will find it too.
     jmail="$(cfg agent.jira.email)"
     jt="$(ea_secret_resolve "$(cfg agent.jira.api_token_env)" "$(cfg agent.jira.api_token_file)" "$(ea_secret_service jira)" "$jmail")"
     st="$(ea_secret_resolve "$(cfg agent.slite.api_key_env)" "$(cfg agent.slite.api_key_file)" "$(ea_secret_service slite)" "")"
+    tst="$(ea_secret_resolve "$(cfg agent.typesafe.api_key_env)" "$(cfg agent.typesafe.api_key_file)" "$(ea_secret_service typesafe)" "")"
     printf 'jira.site        : %s\n' "$(cfg agent.jira.site)"
     printf 'jira.email       : %s\n' "$jmail"
     printf 'jira token       : %s\n'  "$([ -n "$jt" ] && echo 'resolved' || echo 'NOT FOUND (Jira stays model-driven)')"
     printf 'slite key        : %s\n'  "$([ -n "$st" ] && echo 'resolved' || echo 'NOT FOUND (Slite stays model-driven)')"
+    printf 'typesafe key     : %s\n'  "$([ -n "$tst" ] && echo 'resolved' || echo 'NOT FOUND (Slack stays model-driven)')"
     for dep in curl jq; do
       printf '%-17s: %s\n' "$dep" "$(command -v "$dep" >/dev/null 2>&1 && echo present || echo "MISSING (source stays model-driven)")"
     done

@@ -597,9 +597,10 @@ agent:
   A full poll of a five-repo config takes a few seconds instead of a model session.
 - The receipt written to `state/last-poll-receipt.yaml` is identical in shape to the model's, so
   `/engineer-agent status` and the cron health check are unaffected.
-- Supported sources are `github-issues`, `github` (PR review), `jira` and `slite`. Any configured
-  source that is not scripted keeps the model in the loop for that run, so on a typical config you
-  need to list every source you actually use before a quiet poll can skip the model entirely.
+- Supported sources are `github-issues`, `github` (PR review), `jira`, `slite` and `slack`. Any
+  configured source that is not scripted keeps the model in the loop for that run, so on a typical
+  config you need to list every source you actually use before a quiet poll can skip the model
+  entirely.
 - **Jira and Slite need one extra step.** The GitHub collectors reuse the already-authenticated `gh`
   CLI; Jira and Slite have no CLI, so their collectors call the REST APIs directly and need an API
   credential plus `agent.jira.site` / `agent.jira.email`. Store the credential with:
@@ -617,6 +618,64 @@ agent:
   left to the model for the run, exactly as before. Listing a source here cannot break polling.
 - **Off by default.** Omit the block and polling behaves exactly as before. `EA_POLL_SCRIPTED_SOURCES`
   overrides it at runtime (space- or comma-separated), which is handy for a side-by-side comparison.
+
+#### Scripted Slack polling (`"slack"`) — double opt-in
+
+Slack is the odd one out, and worth reading about before enabling. Every other source is filtered by
+a field comparison — a Jira status, a GitHub assignee, a Slite tag. Slack's filter is a judgment:
+`skills/poll-slack/SKILL.md` asks the model to decide whether a keyword hit is "actually a question
+directed at the user", because a keyword filter alone is mostly false positives ("deploy" appears in
+every deploy announcement). That one sentence is why Slack kept every poll paying for a model
+session even on a quiet day.
+
+`scripts/poll-slack.sh` keeps the judgment but stops paying a full session for it. Each candidate
+message gets **one** batched request to [TypeSafe](https://typesafe.ai)'s System One model, which
+returns four probabilities instead of prose:
+
+| Question | Meaning |
+|---|---|
+| `is_question` | genuinely asks something and awaits an answer |
+| `directed_at_user` | aimed at you, not at the channel at large |
+| `already_answered` | the thread already contains the answer |
+| `needs_engineer` | answering needs codebase / implementation knowledge |
+
+`poll-slack.sh` combines them **in bash** against thresholds you can tune, so the policy is visible
+and testable rather than living inside a prompt:
+
+```yaml
+agent:
+  poll:
+    scripted_sources: ["github-issues", "github", "jira", "slite", "slack"]
+  slack:
+    user_id: "U0123456789"      # optional: drops your own messages for free, and sharpens
+    user_name: "Your Name"      #           the "is this aimed at me?" judgment
+  typesafe:
+    api_key_env: ""             # pointer only — the key lives in your keychain
+    slack:
+      min_question: 0.60
+      min_directed: 0.55
+      max_answered: 0.40
+      min_engineer: 0.50
+```
+
+```bash
+/path/to/engineer-agent/scripts/setup-credentials.sh typesafe
+```
+
+- **Both opt-ins are required.** Listing `"slack"` without a resolvable `agent.typesafe` key makes
+  the collector exit cleanly and Slack stays model-driven — you cannot enable this by accident.
+- **This is the one poll-path integration that sends your content to a third party.** Slack message
+  and thread text goes to `api.typesafe.ai`. `gh`, Jira and Slite all talk to systems that already
+  hold the data being sent; this does not. That asymmetry is the whole reason for the second opt-in.
+- **It selects, it does not write.** The model returns four numbers. It generates no prose, and a
+  message it selects becomes an ordinary queue item you still approve. The four probabilities are
+  recorded in the item's frontmatter (`relevance_scores`) and shown in `review-queue`, so you can
+  see *why* something was selected rather than only that it was.
+- **Tune the thresholds against your own channels.** The shipped defaults are a starting point: a
+  busy `#general` wants `min_directed` higher, a quiet team channel lower. Raise a `min_*` or lower
+  `max_answered` to queue less.
+- A failed request is **not** a silent "no" — the run reports an error, leaves the cutoff where it
+  was, and hands Slack back to the model, so a transient outage cannot quietly swallow messages.
 
 Anything the scripts cannot decide is *flagged*, never guessed — an ambiguous project routing or an
 ambiguous "is this title an imperative?" is handed to the model with the rest of the ladder already

@@ -134,6 +134,11 @@ cmd_dump() {
   v="$(_get agent.slack.method)";        printf 'agent.slack.method=%s\n'       "${v:-spy}"
   v="$(_get agent.slack.bin)";           printf 'agent.slack.bin=%s\n'          "${v:-spy}"
   printf 'agent.slack.workspace=%s\n'    "$(_get agent.slack.workspace)"
+  # Identity, used ONLY by scripts/poll-slack.sh: as state for the "is this aimed at me?" judgment,
+  # and to drop the user's own messages deterministically before any judgment is paid for. Optional
+  # — absent, the judgment leans on the configured keywords alone and is correspondingly weaker.
+  printf 'agent.slack.user_name=%s\n'    "$(_get agent.slack.user_name)"
+  printf 'agent.slack.user_id=%s\n'      "$(_get agent.slack.user_id)"
   _emit_list agent.autonomy.auto_execute agent.autonomy.auto_execute
 
   # --- Jira / Slite REST access (scripts/poll-jira.sh, scripts/poll-slite.sh) ----------------
@@ -151,6 +156,21 @@ cmd_dump() {
   v="$(_get agent.slite.api_base)"; printf 'agent.slite.api_base=%s\n' "${v:-https://api.slite.com/v1}"
   printf 'agent.slite.api_key_env=%s\n'    "$(_get agent.slite.api_key_env)"
   printf 'agent.slite.api_key_file=%s\n'   "$(_get agent.slite.api_key_file)"
+
+  # --- TypeSafe (scripts/lib-typesafe.sh) ---------------------------------------------------
+  # Pointers only, same rule as Jira/Slite above: the key lives in the Keychain, a 0600 file, or an
+  # env var. Used ONLY by the scripted Slack collector, to turn "is this a question directed at me?"
+  # into four probabilities bash can threshold. Omit the block and Slack polling stays model-driven.
+  printf 'agent.typesafe.api_key_env=%s\n'  "$(_get agent.typesafe.api_key_env)"
+  printf 'agent.typesafe.api_key_file=%s\n' "$(_get agent.typesafe.api_key_file)"
+  printf 'agent.typesafe.api_base=%s\n'     "$(_get agent.typesafe.api_base)"
+  printf 'agent.typesafe.model=%s\n'        "$(_get agent.typesafe.model)"
+  # Thresholds are emitted RAW, including empty. lib-typesafe.sh's ts_threshold() applies the
+  # shipped default and validates that the value is a number — doing it there rather than here
+  # keeps the "what is a valid threshold" rule next to the awk comparison that consumes it.
+  for v in slack.min_question slack.min_directed slack.max_answered slack.min_engineer; do
+    printf 'agent.typesafe.%s=%s\n' "$v" "$(_get "agent.typesafe.${v}")"
+  done
   # Which sources are collected by a deterministic script instead of by the model. Absent or empty
   # => today's prompt-driven path, unchanged. Deny-by-default, matching the posture of
   # agent.autonomy.auto_execute and projects.<slug>.exec.allowed_commands.
