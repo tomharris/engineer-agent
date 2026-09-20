@@ -325,6 +325,111 @@ else
   echo "  SKIP: jq not installed (the judge degrades to the model without it)"
 fi
 
+echo "== routing Tier 3b: deferred by default, judged when configured =="
+# Default first, same shape as the Form B block above: with no agent.typesafe.routing block an
+# ambiguous issue is written `_unrouted` with matched_projects and flagged for Phase B. That is
+# what every install does today and it must survive the judge existing.
+fixture "acme/shared|me|801|${NOW}|$(b64 'Totally ambiguous thing again')|$(b64 'nothing to go on')||https://gh/801"
+M18="$TMP/m18"; : > "$M18"; run "$M18" >/dev/null
+eq "unconfigured: unrouted"          "_unrouted" "$(fmv "$(item gh-801)" project)"
+eq "unconfigured: flagged for Phase B" "1"       "$(awk -F"$TAB" '$5=="acme/shared#801"{print $6}' "$M18")"
+
+if command -v jq >/dev/null 2>&1; then
+  # Re-create the curl stub the Form B block removed, and add the routing opt-in beside it. Both
+  # features are now on at once, which is the realistic case and pins that they stay independent.
+  cat > "$STUB/curl" <<'STUBEOF'
+#!/bin/bash
+out=""; prev=""; body=""
+for a in "$@"; do
+  case "$prev" in -o) out="$a" ;; esac
+  case "$a" in @*) body="${a#@}" ;; esac
+  prev="$a"
+done
+printf '%s\n' "$*" >> "$CURL_ARGV"
+cat > /dev/null
+[ -n "$body" ] && cat "$body" > "$CURL_BODY"
+cat "$ANSWERS" > "$out"
+printf '%s' "$(cat "$TS_CODE")"
+STUBEOF
+  chmod +x "$STUB/curl"
+  sed -i.bak '/^      min_imperative: 0.60$/a\
+    routing:\
+      enabled: true\
+      min_confidence: 0.70' "$EA_AGENT_DIR/engineer.yaml"
+  rm -f "$EA_AGENT_DIR/engineer.yaml.bak"
+
+  rt_choice() { jq -nc --arg c "$1" --argjson p "$2" \
+    '{model:"jev-latest",answers:{project_match:{type:"choice",choice:$c,confidence:($p[$c] // 0),probabilities:$p}}}' > "$ANSWERS"; }
+
+  # A confident winner routes, and — the thing only an end-to-end test can show — the KIND ladder
+  # then runs against the project the judgment just chose. Kind lists are per-project overridable,
+  # so classifying before the slug was settled would have used the wrong lists (or, for an item
+  # still `_unrouted`, skipped the kind entirely and shipped it with none).
+  : > "$CURL_ARGV"; rt_choice alpha '{"alpha":0.88,"beta":0.09,"none_of_these":0.03}'
+  fixture "acme/shared|me|802|${NOW}|$(b64 'Another ambiguous one')|$(b64 'no hints here')||https://gh/802"
+  M19="$TMP/m19"; : > "$M19"; run "$M19" >/dev/null
+  eq "judged: routed"        "alpha"    "$(fmv "$(item gh-802)" project)"
+  eq "judged: method"        "inferred" "$(fmv "$(item gh-802)" routing_method)"
+  eq "judged: flag cleared"  "0"        "$(awk -F"$TAB" '$5=="acme/shared#802"{print $6}' "$M19")"
+  eq "judged: kind ran after routing" "default" "$(fmv "$(item gh-802)" ticket_kind_method)"
+  case "$(fmv "$(item gh-802)" routing_rationale)" in
+    *"p=0.88"*) ok "judged: rationale carries the evidence" ;;
+    *) bad "judged: rationale should carry p=0.88 — got [$(fmv "$(item gh-802)" routing_rationale)]" ;;
+  esac
+  # A routed issue is recorded as seen; the _unrouted ones above deliberately are not.
+  if grep -q 'acme/shared#802' "$S"; then ok "judged: routed issue enters seen_issues"; else bad "judged: routed issue missing from seen"; fi
+
+  # An answered "cannot tell" leaves it for the human and CLEARS the flag: Phase B re-deciding a
+  # question that was already answered would pay twice and could overturn the abstention.
+  : > "$CURL_ARGV"; rt_choice none_of_these '{"alpha":0.30,"beta":0.25,"none_of_these":0.45}'
+  fixture "acme/shared|me|803|${NOW}|$(b64 'Bump a linter somewhere')|$(b64 'no hints here')||https://gh/803"
+  M20="$TMP/m20"; : > "$M20"; run "$M20" >/dev/null
+  eq "abstained: stays unrouted"  "_unrouted" "$(fmv "$(item gh-803)" project)"
+  eq "abstained: flag cleared"    "0"         "$(awk -F"$TAB" '$5=="acme/shared#803"{print $6}' "$M20")"
+  eq "abstained: keeps candidates for the human" '["alpha", "beta"]' "$(fmv "$(item gh-803)" matched_projects)"
+
+  # A transport failure is NOT an abstention: Phase B still gets the tier, exactly as on an install
+  # with no key at all.
+  : > "$CURL_ARGV"; rt_choice alpha '{"alpha":0.99}'; echo 500 > "$TS_CODE"
+  fixture "acme/shared|me|804|${NOW}|$(b64 'Yet another ambiguous one')|$(b64 'no hints here')||https://gh/804"
+  M21="$TMP/m21"; : > "$M21"; run "$M21" >/dev/null
+  eq "failed: stays unrouted"          "_unrouted" "$(fmv "$(item gh-804)" project)"
+  eq "failed: deferred to Phase B"     "1"         "$(awk -F"$TAB" '$5=="acme/shared#804"{print $6}' "$M21")"
+  echo 200 > "$TS_CODE"
+
+  # An issue Tier 0-3a already resolved never reaches the wire — the judgment is only ever paid for
+  # on a genuine ambiguity.
+  : > "$CURL_ARGV"
+  fixture "acme/shared|me|805|${NOW}|$(b64 '[alpha] Resolved by prefix')|$(b64 'x')||https://gh/805"
+  run "$TMP/m22" >/dev/null
+  eq "resolved item makes no request" "0" "$(wc -l < "$CURL_ARGV" | tr -d '[:space:]')"
+
+  # NOR does an item reconciliation is about to discard. Found on the first live run: 3 requests
+  # went out for 2 issues that were then skipped as terminal — paying to decide where to file work
+  # that is already finished, and (for routing) egressing its body to do it. The disposition is a
+  # filesystem lookup and free; the judgment is not, so the free one goes first.
+  : > "$CURL_ARGV"; rt_choice alpha '{"alpha":0.99}'
+  fixture "acme/shared|me|806|${NOW}|$(b64 'Ambiguous but already done')|$(b64 'no hints here')||https://gh/806"
+  run "$TMP/m23" >/dev/null
+  mv "$(item gh-806)" "$EA_AGENT_DIR/queue/completed/"
+  : > "$CURL_ARGV"
+  run "$TMP/m24" >/dev/null
+  eq "terminal item makes no request" "0" "$(wc -l < "$CURL_ARGV" | tr -d '[:space:]')"
+
+  # Same for an item already drafted: its route is not rewritten, so it must not be re-judged.
+  : > "$CURL_ARGV"; rt_choice alpha '{"alpha":0.99}'
+  fixture "acme/shared|me|807|${NOW}|$(b64 'Ambiguous and drafted')|$(b64 'no hints here')||https://gh/807"
+  run "$TMP/m25" >/dev/null
+  mv "$(item gh-807)" "$EA_AGENT_DIR/queue/drafts/"
+  : > "$CURL_ARGV"
+  run "$TMP/m26" >/dev/null
+  eq "already-drafted item makes no request" "0" "$(wc -l < "$CURL_ARGV" | tr -d '[:space:]')"
+
+  rm -f "$STUB/curl"
+else
+  echo "  SKIP: jq not installed (the judge degrades to the model without it)"
+fi
+
 echo "== --dry-run writes nothing =="
 fixture "acme/shared|me|601|${NOW}|$(b64 'payroll dry run')|$(b64 'x')|backend|https://gh/601"
 BEFORE_N="$(ls "$EA_AGENT_DIR/queue/incoming" | wc -l | tr -d ' ')"

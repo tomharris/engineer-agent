@@ -45,6 +45,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "${SCRIPT_DIR}/lib-ticket-kind.sh"
 . "${SCRIPT_DIR}/lib-state.sh"
 . "${SCRIPT_DIR}/lib-secret.sh"
+# Routing Tier 3b as a typed Choice over the config-derived candidate set. Inert unless
+# agent.typesafe.routing.enabled is true AND a credential (plus curl and jq) resolves — see
+# rt_judge_enabled. Sourcing these costs nothing and opens nothing.
+. "${SCRIPT_DIR}/lib-typesafe.sh"
+. "${SCRIPT_DIR}/lib-routing-judge.sh"
 
 ONLY_PROJECT=""; RUN_TS=""; DRY_RUN=0; MANIFEST=""
 while [ $# -gt 0 ]; do
@@ -77,6 +82,17 @@ command -v jq   >/dev/null 2>&1 || { log "poll-jira: jq not found; leaving Jira 
 EA_CFG="$("${SCRIPT_DIR}/ea-config.sh" dump)"; export EA_CFG
 cfg()  { printf '%s\n' "$EA_CFG" | awk -F= -v k="$1" '$1==k {sub(/^[^=]*=/,""); print; exit}'; }
 cfgl() { printf '%s\n' "$EA_CFG" | awk -v p="$1[]=" 'index($0,p)==1 {print substr($0,length(p)+1)}'; }
+
+# Routing Tier 3b as a typed judgment, when one is configured. Resolved ONCE per run:
+# rt_judge_enabled reads config and resolves a credential (which on macOS can mean a Keychain
+# call), and re-answering that per item would pay for it on every row. Off unless
+# agent.typesafe.routing.enabled is true, in which case an ambiguous item is routed (or
+# deliberately left unrouted) here instead of being handed to the drafting model.
+JUDGE_ROUTE=0
+if rt_judge_enabled; then
+  JUDGE_ROUTE=1
+  log "poll-jira: routing Tier 3b judged inline (min_confidence=$(rt_judge_min))"
+fi
 
 JIRA_SITE="$(cfg agent.jira.site)"
 JIRA_EMAIL="$(cfg agent.jira.email)"
@@ -281,6 +297,33 @@ while IFS= read -r jkey; do
     rrat="$(printf '%s' "$route_out" | cut -f3)"
     needs_route="$(printf '%s' "$route_out" | cut -f4)"
     matched="$(printf '%s' "$route_out" | cut -f5)"
+
+    # RECONCILIATION FIRST, for the paid tiers only. queue_disposition is a filesystem lookup and
+    # is free; a judgment is not. An item that is terminal (`skip`) or already handled
+    # (`unchanged:`) has its route thrown away by the branches below, so asking for one buys
+    # nothing and — for routing, which sends the BODY — egresses a ticket that is already finished.
+    # Observed on the first live run: 3 requests for 2 issues, all of them skipped as terminal.
+    #
+    # Safe to compute before the kind is settled because queue_lookup is FAMILY-WIDE: `ticket`
+    # answers for its whole family, so this is the same disposition the branches below compute.
+    # `_unrouted` then simply persists into those branches, where slug is used only to record
+    # seen state — exactly what an install without the judgment does today.
+    pre_disp="$(queue_disposition ticket "$sid")"
+    case "$pre_disp" in skip|unchanged:*) needs_paid_judgment=0 ;; *) needs_paid_judgment=1 ;; esac
+
+    # --- routing tier 3b: the one tier the ladder cannot decide in bash --------------------
+    # Options are `matched`, the Tier 0 candidate set computed from config alone, so this can only
+    # ever narrow it (lib-routing-judge.sh). Run BEFORE the --project filter and before kind
+    # classification, both deliberately: the filter must compare the FINAL slug, and Tier 1 of the
+    # kind ladder reads the routed project's investigation.jira_types, which is not consulted at
+    # all for an _unrouted item.
+    if [ "$needs_route" = "1" ] && [ "$JUDGE_ROUTE" -eq 1 ] && [ "$needs_paid_judgment" -eq 1 ]; then
+      judge_out="$(rt_judge_route "$title" "$TMPD/body" jira "$matched")"
+      slug="$(printf '%s' "$judge_out" | cut -f1)"
+      rmethod="$(printf '%s' "$judge_out" | cut -f2)"
+      rrat="$(printf '%s' "$judge_out" | cut -f3)"
+      needs_route="$(printf '%s' "$judge_out" | cut -f4)"
+    fi
 
     if [ -n "$ONLY_PROJECT" ] && [ "$slug" != "$ONLY_PROJECT" ]; then
       if [ "$slug" != "_unrouted" ]; then continue; fi

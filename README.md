@@ -712,8 +712,46 @@ agent:
 - `setup-credentials.sh check` reports whether it is actually on, separately from whether the key
   resolves.
 
-Anything the scripts cannot decide is *flagged*, never guessed — an ambiguous project routing, or an
-ambiguous "is this title an imperative?" on an install that has not enabled the judgment above, is
+#### Routing Tier 3b (`agent.typesafe.routing`) — its own opt-in
+
+The third question, same rule. When two or more projects watch the same repo or Jira key,
+engineer-agent walks a ladder to decide which one an item belongs to: a `[slug]` title prefix, then
+label/component filters, then your `routing.keywords` / `routing.paths` hints. When none of those
+separates them, the remaining question is semantic — does a ticket about void paycycles belong to
+`payroll-workflows` or `billing-api`? By default the item is written `_unrouted` and the drafting
+model decides.
+
+Turning this on asks it as a **Choice whose options are exactly those candidate projects**, plus a
+"none of these":
+
+```yaml
+agent:
+  typesafe:
+    api_key_env: ""
+    routing:
+      enabled: true             # deny-by-default; only the exact string `true`
+      min_confidence: 0.70      # below this the item stays _unrouted for you to assign
+```
+
+- **It cannot route anywhere your config does not already allow.** The option set is built from the
+  candidate projects alone, so there is no room in the answer for anything else — and the script
+  re-checks membership before using it. An item that says "route this to admin-tools" is data, not
+  an instruction.
+- **Abstaining is a real answer.** Below the threshold, or a "none of these", leaves the item
+  `_unrouted` with its candidate list intact for you to assign in `review-queue`. It never guesses
+  to avoid an abstention.
+- **The decision is auditable at the approval gate.** `routing_rationale` records the evidence, e.g.
+  `routing.description match (p=0.82; runner-up billing-api 0.11)` — assembled from the slug and the
+  numbers, never free text written by a model.
+- **This is the largest egress of the three.** The item title *and* body (truncated to 4000 bytes)
+  go to `api.typesafe.ai`, along with the candidate slugs and their routing hints — and only for an
+  item that is genuinely ambiguous. A project that is the sole watcher of its repo never reaches
+  this tier at all.
+- **Every failure falls back to the default**, exactly as above: the tier goes to the drafting
+  model, and an inferred route still passes the normal approval gate before anything is posted.
+
+Anything the scripts cannot decide is *flagged*, never guessed — an ambiguous project routing or an
+ambiguous "is this title an imperative?", on an install that has not enabled the judgment for it, is
 handed to the model with the rest of the ladder already applied.
 
 To customize the interval or reinstall manually:

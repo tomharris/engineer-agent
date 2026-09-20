@@ -227,6 +227,13 @@ write_ticket_item() {
 # Named arguments: --path --source-url --source-id --title --priority --created-at --project
 #                  --pr-author --repo --pr-number --head --base --changed-files
 #                  --labels-file --body-file
+#                  --routing-method --routing-rationale --matched
+#
+# The three routing fields exist for the same reason write_ticket_item has them: routing Tier 3b is
+# a judgment made over untrusted text, so the gate must be able to see WHICH tier routed a PR and
+# on what evidence. Before they existed a PR item recorded neither — including no matched_projects
+# for an _unrouted one, which left review-queue asking a human to assign a project with nothing to
+# choose from.
 #
 # Deliberately does NOT fetch the diff. skills/poll-github/SKILL.md has the poll run `gh pr view`
 # and `gh pr diff` and generate a full structured review INLINE, which is the single most expensive
@@ -235,6 +242,7 @@ write_ticket_item() {
 write_pr_item() {
   local path="" url="" sid="" title="" prio="normal" created="" project=""
   local author="" repo="" num="" head="" base="" changed="" f_labels="" f_body=""
+  local rmethod="" rrat="" matched=""
   while [ $# -gt 0 ]; do
     case "$1" in
       --path) path="$2"; shift 2 ;;              --source-url) url="$2"; shift 2 ;;
@@ -245,6 +253,8 @@ write_pr_item() {
       --head) head="$2"; shift 2 ;;              --base) base="$2"; shift 2 ;;
       --changed-files) changed="$2"; shift 2 ;;  --labels-file) f_labels="$2"; shift 2 ;;
       --body-file) f_body="$2"; shift 2 ;;
+      --routing-method) rmethod="$2"; shift 2 ;; --routing-rationale) rrat="$2"; shift 2 ;;
+      --matched) matched="$2"; shift 2 ;;
       *) shift ;;
     esac
   done
@@ -268,6 +278,15 @@ write_pr_item() {
     echo "repo: \"$(yaml_escape "$repo")\""
     echo "pr_number: ${num}"
     echo "github_labels: $(yaml_list "${labels[@]+"${labels[@]}"}")"
+    [ -n "$rmethod" ] && echo "routing_method: \"$(yaml_escape "$rmethod")\""
+    # Only ever present for a tier that made a judgment, so its presence is itself the signal that
+    # something read the PR text to decide where this belongs.
+    [ -n "$rrat" ]    && echo "routing_rationale: \"$(yaml_escape "$rrat")\""
+    if [ "$project" = "_unrouted" ]; then
+      local pm=() m
+      for m in $matched; do pm+=("$m"); done
+      echo "matched_projects: $(yaml_list "${pm[@]+"${pm[@]}"}")"
+    fi
     echo "---"
     echo
     echo "## Context"
@@ -276,6 +295,7 @@ write_pr_item() {
     echo "**Files changed:** ${changed}"
     echo "**Branch:** ${head} -> ${base}"
     echo "**Project:** ${project}"
+    [ -n "$rmethod" ] && echo "**Routing:** ${rmethod}${rrat:+ — ${rrat}}"
     echo "**URL:** ${url}"
     echo
     echo "### Description"
@@ -296,10 +316,12 @@ write_pr_item() {
 #   --labels-file <file>   the doc labels that matched, one per line
 #   --label-source <s>     "tags" | "query" — how the label match was established
 #   --matched <slugs>      space-separated; emitted only for _unrouted items
+#   --routing-method <m> / --routing-rationale <r>   which tier routed it, and on what evidence
 #   --body-file <file>     full document text
 write_doc_item() {
   local path="" url="" sid="" title="" prio="normal" created="" project=""
   local doc_id="" updated="" author="" f_labels="" f_body="" label_source="" matched=""
+  local rmethod="" rrat=""
   while [ $# -gt 0 ]; do
     case "$1" in
       --path) path="$2"; shift 2 ;;            --source-url) url="$2"; shift 2 ;;
@@ -310,6 +332,7 @@ write_doc_item() {
       --labels-file) f_labels="$2"; shift 2 ;; --body-file) f_body="$2"; shift 2 ;;
       --label-source) label_source="$2"; shift 2 ;;
       --matched) matched="$2"; shift 2 ;;
+      --routing-method) rmethod="$2"; shift 2 ;; --routing-rationale) rrat="$2"; shift 2 ;;
       *) shift ;;
     esac
   done
@@ -337,6 +360,8 @@ write_doc_item() {
     # because the label was the search term — a weaker claim than a real tag comparison, and one
     # the approval gate should be able to see rather than infer.
     [ -n "$label_source" ] && echo "label_source: \"$(yaml_escape "$label_source")\""
+    [ -n "$rmethod" ] && echo "routing_method: \"$(yaml_escape "$rmethod")\""
+    [ -n "$rrat" ]    && echo "routing_rationale: \"$(yaml_escape "$rrat")\""
     # Without this an _unrouted doc reaches review-queue with no candidate list, so the human is
     # asked to assign a project with nothing to choose from.
     if [ "$project" = "_unrouted" ]; then
@@ -351,6 +376,7 @@ write_doc_item() {
     echo "**Document:** ${title}"
     echo "**URL:** ${url}"
     echo "**Project:** ${project}"
+    [ -n "$rmethod" ] && echo "**Routing:** ${rmethod}${rrat:+ — ${rrat}}"
     echo "**Last updated:** ${updated:-unknown}"
     echo "**Author:** ${author:-unknown}"
     if [ ${#labels[@]} -gt 0 ]; then

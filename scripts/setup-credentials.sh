@@ -14,7 +14,8 @@
 # Usage:
 #   setup-credentials.sh jira            store a Jira API token
 #   setup-credentials.sh slite           store a Slite API key
-#   setup-credentials.sh typesafe        store a TypeSafe API key (Slack relevance, ticket-kind)
+#   setup-credentials.sh typesafe        store a TypeSafe API key (Slack relevance, ticket-kind,
+#                                        routing Tier 3b)
 #   setup-credentials.sh check           report what resolves, WITHOUT printing any secret
 set -uo pipefail
 
@@ -84,6 +85,9 @@ EOF
     echo "  Ticket-kind Form B  agent.typesafe.ticket_kind.enabled: true"
     echo "                      sends: GitHub issue title + labels (never the body), and only"
     echo "                             for a title whose leading word is a configured keyword"
+    echo "  Routing Tier 3b     agent.typesafe.routing.enabled: true"
+    echo "                      sends: item title + body (truncated) and the candidate projects"
+    echo "                             routing hints, only when a shared repo/key is ambiguous"
     echo
     store typesafe "" "TypeSafe API key (input hidden): " ;;
   check)
@@ -97,10 +101,11 @@ EOF
     printf 'jira.email       : %s\n' "$jmail"
     printf 'jira token       : %s\n'  "$([ -n "$jt" ] && echo 'resolved' || echo 'NOT FOUND (Jira stays model-driven)')"
     printf 'slite key        : %s\n'  "$([ -n "$st" ] && echo 'resolved' || echo 'NOT FOUND (Slite stays model-driven)')"
-    printf 'typesafe key     : %s\n'  "$([ -n "$tst" ] && echo 'resolved' || echo 'NOT FOUND (Slack relevance + ticket-kind Form B stay model-driven)')"
+    printf 'typesafe key     : %s\n'  "$([ -n "$tst" ] && echo 'resolved' || echo 'NOT FOUND (every TypeSafe-backed judgment stays model-driven)')"
     # Reported separately from the key: the per-feature opt-in is the gate people actually forget,
     # and "the key resolves" is not an answer to "is this feature on".
     printf 'ticket-kind judge: %s\n' "$([ "$(cfg agent.typesafe.ticket_kind.enabled)" = "true" ] && { [ -n "$tst" ] && echo 'judged in the collector' || echo 'enabled, but NO KEY (deferred to the model)'; } || echo 'off (deferred to the model)')"
+    printf 'routing judge    : %s\n' "$([ "$(cfg agent.typesafe.routing.enabled)" = "true" ] && { [ -n "$tst" ] && echo 'judged in the collector' || echo 'enabled, but NO KEY (deferred to the model)'; } || echo 'off (deferred to the model)')"
     for dep in curl jq; do
       printf '%-17s: %s\n' "$dep" "$(command -v "$dep" >/dev/null 2>&1 && echo present || echo "MISSING (source stays model-driven)")"
     done

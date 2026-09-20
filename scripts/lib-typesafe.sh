@@ -156,6 +156,39 @@ ts_noul() {
      "$1" 2>/dev/null | head -1
 }
 
+# ts_choice <response-file> <question-key> — the chosen option name, or nothing.
+#
+# The value comes off the wire, so it is NOT trusted to be one of the options that were sent: the
+# caller must re-check membership against its own option list before using it (lib-routing-judge.sh
+# does, and refuses anything else). Restricted here to the slug charset — a choice carrying
+# whitespace, control characters or shell metacharacters is not a slug this repo could have sent,
+# and this value reaches log lines and, once validated, queue frontmatter.
+ts_choice() {
+  jq -r --arg k "$2" '(.answers[$k].choice // empty) | select(type == "string")' "$1" 2>/dev/null \
+    | head -1 | grep -E '^[A-Za-z0-9._-]+$' | head -1
+}
+
+# ts_choice_prob <response-file> <question-key> <option> — that option's probability, or nothing.
+#
+# Nothing rather than 0 when absent, for the same reason ts_noul prints nothing: the caller has to
+# be able to tell "the model gave this option almost no weight" from "there is no distribution
+# here", because only the second is a degradation that must abstain.
+ts_choice_prob() {
+  jq -r --arg k "$2" --arg o "$3" \
+     '(.answers[$k].probabilities[$o] // empty) | select(type == "number") | tostring' \
+     "$1" 2>/dev/null | head -1
+}
+
+# ts_confidence <response-file> <question-key> — the Choice confidence, or nothing.
+#
+# Distribution CONCENTRATION, not the winner's probability: it also falls when two also-rans are
+# tied with each other, which says nothing about whether the winner is right. Callers threshold the
+# winner's probability and use this only as a fallback for a response that omits `probabilities`.
+ts_confidence() {
+  jq -r --arg k "$2" '(.answers[$k].confidence // empty) | select(type == "number") | tostring' \
+     "$1" 2>/dev/null | head -1
+}
+
 # ts_ge <a> <b> / ts_le <a> <b> — float comparison. bash has no float arithmetic and `[` would
 # compare these as strings ("0.9" > "0.55" is TRUE as a string but so is "0.1" > "0.05"), so every
 # threshold test goes through awk.
