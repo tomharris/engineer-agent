@@ -206,6 +206,27 @@ agent:
     ticket_kind:
       enabled: false                  # deny-by-default; only the exact string `true` enables it
       min_imperative: 0.60            # at/above this, the leading word is treated as a command
+    #
+    # Routing, Tier 3b — "which of the projects that watch this repo/key does this item belong
+    # to?", asked as a Choice whose options ARE the candidate projects plus a no-match option.
+    # Reached only when a repo or Jira key is watched by two or more projects AND nothing earlier
+    # in references/routing-ladder.md separated them (no `[slug]` title prefix, no label or
+    # component filter, no `routing.keywords` / `routing.paths` hit). On a config where every
+    # project is the sole watcher of its repo, Tier 0 short-circuits and this never runs.
+    #
+    # Turning it on makes the project FINAL when the item is written, with `routing_method:
+    # inferred` and a `routing_rationale` carrying the probability so you can audit the call at the
+    # approval gate. Turning it off changes nothing else: the tier is deferred to the drafting
+    # model, which is the behaviour every install has had. Either way an inferred route still
+    # passes the normal approval gate before anything is posted.
+    #
+    # ⚠ SEPARATE OPT-IN, AND THE BIGGEST EGRESS OF THE THREE. The item TITLE and BODY (truncated
+    # to 4000 bytes; override with EA_ROUTING_BODY_MAX) go to api.typesafe.ai, along with the
+    # candidate slugs and the routing hints you wrote for them. Having a key for `slack` or for
+    # `ticket_kind` above does NOT enable this.
+    routing:
+      enabled: false                  # deny-by-default; only the exact string `true` enables it
+      min_confidence: 0.70            # below this the item stays _unrouted for you to assign
 
   # Autonomy tiers — action types the agent may execute WITHOUT a human approval gate.
   # Only "draft-pr" is supported today: a draft PR merges nothing and requests no review,

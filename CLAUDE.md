@@ -105,7 +105,8 @@ Two `agent` subsections drive autonomy (both optional):
   polling" below. `slack` additionally requires `agent.typesafe` — see "Scripted Slack polling".
 - `agent.typesafe` — API access for the System One judgments (`api_key_env`, `api_key_file`,
   `api_base`, `model`, plus each feature's thresholds: `slack.min_question` / `slack.min_directed`
-  / `slack.max_answered` / `slack.min_engineer`, and `ticket_kind.min_imperative`). Same credential
+  / `slack.max_answered` / `slack.min_engineer`, `ticket_kind.min_imperative` and
+  `routing.min_confidence`). Same credential
   rule as Jira/Slite: the keys name *where* the secret is and `scripts/lib-secret.sh` resolves it.
   **This is the only poll-path integration that sends content to a third party**, so the key is
   necessary for every feature below and sufficient for none — **each one opts in separately**, and
@@ -115,6 +116,10 @@ Two `agent` subsections drive autonomy (both optional):
   - **Ticket-kind Tier 3 Form B** — `agent.typesafe.ticket_kind.enabled: true` (deny-by-default;
     only the exact string `true`). Sends a GitHub issue title + labels, never the body, and only
     for a title whose leading word already matches a configured keyword. See "Ticket Kind".
+  - **Routing Tier 3b** — `agent.typesafe.routing.enabled: true` (same deny-by-default rule).
+    Sends the item title + body (truncated, `EA_ROUTING_BODY_MAX`, default 4000 bytes) plus the
+    candidate slugs and their `routing` hints — **the largest egress of the three** — and only for
+    an item a shared repo/key left genuinely ambiguous. See "Ticket Routing".
 - `agent.slack.user_name` / `agent.slack.user_id` — your Slack identity, read **only** by
   `poll-slack.sh`: `user_id` drops your own messages before any judgment is paid for, and both feed
   the "is this aimed at me?" judgment as state. Optional; absent, that judgment leans on
@@ -218,6 +223,36 @@ writing `_unrouted` (`routing_method: manual`).
 - Collection must be deduplicated **per repo**, not per project. When it ran per project, the global
   `source_id` dedup handed a shared repo's issue to whichever project the loop reached first — an
   arbitrary misroute that looked like a confident decision, with no `_unrouted` escape.
+
+> **Tier 3b is the one tier bash cannot decide, and it is now answerable two ways.** Whether a
+> ticket about void paycycles belongs to `payroll-workflows` or `billing-api` is semantics, not
+> string comparison. `lib-routing.sh` therefore stops at the *candidate set* and emits
+> `needs_inference=1`. Who answers it:
+> - **`scripts/lib-routing-judge.sh`**, when `agent.typesafe.routing.enabled: true` and a
+>   credential resolves. One **Choice whose options ARE the candidate slugs** plus a no-match
+>   sentinel, thresholded against `routing.min_confidence` (default `0.70`, which with
+>   probabilities summing to 1 also guarantees a ≥ 0.40 margin over the runner-up). The project is
+>   then **final when the item is written**, which is why the judgment runs *before* the
+>   `--project` filter and before kind classification — the filter compares the final slug, and the
+>   kind lists are per-project, so classifying first would use the wrong ones or skip the kind
+>   entirely. `routing_rationale` carries the evidence (`routing.description match (p=0.82;
+>   runner-up billing-api 0.11)`), **assembled in bash from a validated slug and two numbers** — no
+>   model-authored prose ever reaches a queue file a human reads at the gate.
+> - **The drafting model in Phase B** otherwise, via `needs_routing=1`. This is the default, the
+>   pre-existing behavior, and the fallback for *every* failure.
+>
+> **An abstention and a failure are different outcomes**, and conflating them is the bug waiting to
+> be written here. A judgment that was made and said "cannot tell" (the sentinel won, or the winner
+> was below threshold) **clears** the flag: the question has been answered, the item stays
+> `_unrouted`, and the human decides. A judgment that could not be made **leaves it up**, so an
+> outage degrades to today's behavior instead of to a silent "unroutable".
+>
+> **Containment gets stronger, not weaker.** The spec's first mandatory injection rule ("only ever
+> output a slug from the Tier 0 candidate set") stops being an instruction the model is trusted to
+> follow and becomes the **response type**: `criteria` is built from config alone, so there is no
+> room in the answer for a slug the config does not permit. Bash re-validates membership anyway and
+> refuses anything else as *malformed* (flag stays up) rather than as an abstention — the type
+> closes the door on an injected payload, the check closes it on a service bug.
 
 **Injection containment (Tier 3b reads untrusted ticket text):** the inference tier may only ever
 output a slug from the Tier 0 candidate set, which is computed from config alone. So an injected
@@ -1020,7 +1055,8 @@ A full 5-repo poll of a real config takes ~6s and writes a receipt byte-identica
 | State + receipt | bash (`lib-state.sh`, `cron-poll.sh`) |
 | Slack **relevance** — is this a question aimed at me? | **System One** (`lib-typesafe.sh`), composed in bash |
 | Kind **Form B** (imperative-vs-noun), when opted in | **System One** (`lib-ticket-kind-judge.sh`), thresholded in bash |
-| Routing **tier 3b** (semantic); kind **Form B** when not opted in | **model** |
+| Routing **tier 3b** (which project), when opted in | **System One** (`lib-routing-judge.sh`), a Choice over the candidate set, thresholded in bash |
+| Routing **tier 3b** and kind **Form B** when not opted in | **model** |
 | **All draft prose** | **model** |
 
 The remaining judgment tiers are **flagged in the manifest**, never guessed. `needs_routing=1` writes
@@ -1029,7 +1065,10 @@ already-documented `incoming/` + `_unrouted` → update-in-place branch of
 `references/queue-reconciliation.md` — no new state, no new code path. `needs_kind_check=1` is the
 same socket for Form B, and it is the **fallback the judgment degrades to**, not a path it replaces:
 every install that does not set `agent.typesafe.ticket_kind.enabled` — and every run where the
-judgment cannot be made — takes it, exactly as before.
+judgment cannot be made — takes it, exactly as before. `needs_routing` works the same way for
+routing Tier 3b (`agent.typesafe.routing.enabled`), with one asymmetry worth knowing: a routing
+judgment that *was made* and abstained clears the flag, because an abstention is a correct answer
+and re-asking Phase B would pay twice to re-litigate it.
 
 ### The scripts
 
@@ -1041,6 +1080,7 @@ judgment cannot be made — takes it, exactly as before.
 | `lib-queue-write.sh` | queue-item construction, with real YAML escaping |
 | `lib-routing.sh` / `lib-ticket-kind.sh` | the deterministic ladder tiers |
 | `lib-ticket-kind-judge.sh` | kind Tier 3 Form B as one typed judgment; inert unless opted in, and degrades to the model on any failure |
+| `lib-routing-judge.sh` | routing Tier 3b as one typed Choice over the config-derived candidate set; same opt-in and same degradation |
 | `lib-state.sh` | round-trips `state/last-poll.yaml`, preserving model-written sections |
 | `lib-time.sh` | GNU/BSD-portable timestamp helpers |
 | `poll-github-issues.sh` / `poll-github-prs.sh` / `poll-jira.sh` / `poll-slite.sh` / `poll-slack.sh` | the collectors |
@@ -1208,8 +1248,10 @@ stage executes. Phase A still only reads.
 > **This generalizes: the credential is necessary for every TypeSafe-backed feature and sufficient
 > for none.** Each one that egresses content carries its own opt-in and sends a different slice, so
 > enabling one never silently enables the next — a key stored for Slack relevance does not start
-> sending GitHub issue titles (`agent.typesafe.ticket_kind.enabled`, see "Ticket Kind"). Keep that
-> shape when adding a third: a per-feature gate, deny-by-default, named at the credential prompt.
+> sending GitHub issue titles (`agent.typesafe.ticket_kind.enabled`, see "Ticket Kind"), and neither
+> of those starts sending ticket *bodies* (`agent.typesafe.routing.enabled`, see "Ticket Routing").
+> Keep that shape for the fourth: a per-feature gate, deny-by-default, named at the credential
+> prompt, and stating which slice of content it sends.
 
 **Four decisions in `poll-slack.sh` a reader will otherwise "fix" back:**
 - **One read per CHANNEL, not per project** — the shared-repo trap in its third costume. Two

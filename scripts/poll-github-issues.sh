@@ -44,6 +44,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "${SCRIPT_DIR}/lib-secret.sh"
 . "${SCRIPT_DIR}/lib-typesafe.sh"
 . "${SCRIPT_DIR}/lib-ticket-kind-judge.sh"
+# Routing Tier 3b, likewise inert unless agent.typesafe.routing.enabled is true.
+. "${SCRIPT_DIR}/lib-routing-judge.sh"
 
 TAB="$(printf '\t')"
 
@@ -87,6 +89,14 @@ JUDGE_FORM_B=0; JUDGE_MIN=""
 if tk_judge_enabled; then
   JUDGE_FORM_B=1; JUDGE_MIN="$(tk_judge_min)"
   log "poll-github-issues: ticket-kind Form B judged inline (min_imperative=${JUDGE_MIN})"
+fi
+
+# Same question for routing Tier 3b, resolved once for the same reason. Separate opt-in: enabling
+# the kind judgment must not start sending issue BODIES.
+JUDGE_ROUTE=0
+if rt_judge_enabled; then
+  JUDGE_ROUTE=1
+  log "poll-github-issues: routing Tier 3b judged inline (min_confidence=$(rt_judge_min))"
 fi
 
 # --- Phase 1: build the per-REPO query map ----------------------------------------------------
@@ -178,6 +188,33 @@ EOF
     needs_route="$(printf '%s' "$route_out" | cut -f4)"
     matched="$(printf '%s' "$route_out" | cut -f5)"
 
+    # RECONCILIATION FIRST, for the paid tiers only. queue_disposition is a filesystem lookup and
+    # is free; a judgment is not. An item that is terminal (`skip`) or already handled
+    # (`unchanged:`) has its route thrown away by the branches below, so asking for one buys
+    # nothing and — for routing, which sends the BODY — egresses a ticket that is already finished.
+    # Observed on the first live run: 3 requests for 2 issues, all of them skipped as terminal.
+    #
+    # Safe to compute before the kind is settled because queue_lookup is FAMILY-WIDE: `ticket`
+    # answers for its whole family, so this is the same disposition the branches below compute.
+    # `_unrouted` then simply persists into those branches, where slug is used only to record
+    # seen state — exactly what an install without the judgment does today.
+    pre_disp="$(queue_disposition ticket "$sid")"
+    case "$pre_disp" in skip|unchanged:*) needs_paid_judgment=0 ;; *) needs_paid_judgment=1 ;; esac
+
+    # --- routing tier 3b: the one tier the ladder cannot decide in bash --------------------
+    # Options are `matched`, the Tier 0 candidate set computed from config alone, so this can only
+    # ever narrow it (lib-routing-judge.sh). Run BEFORE the --project filter and before kind
+    # classification, both deliberately: the filter must compare the FINAL slug, and the kind lists
+    # are per-project overridable, so an item whose project is about to be settled would otherwise
+    # be classified against the wrong lists or skipped entirely.
+    if [ "$needs_route" = "1" ] && [ "$JUDGE_ROUTE" -eq 1 ] && [ "$needs_paid_judgment" -eq 1 ]; then
+      judge_out="$(rt_judge_route "$title" "$TMPD/body" github "$matched")"
+      slug="$(printf '%s' "$judge_out" | cut -f1)"
+      rmethod="$(printf '%s' "$judge_out" | cut -f2)"
+      rrat="$(printf '%s' "$judge_out" | cut -f3)"
+      needs_route="$(printf '%s' "$judge_out" | cut -f4)"
+    fi
+
     # Under --project, keep only issues that actually belong to it. An _unrouted issue is kept
     # when the requested project is one of the candidates: it still needs a human or a model.
     if [ -n "$ONLY_PROJECT" ] && [ "$slug" != "$ONLY_PROJECT" ]; then
@@ -209,7 +246,8 @@ EOF
       # BEFORE reconciliation and the filename, deliberately: `typ` is part of the dedup family
       # lookup and of `{YYYYMMDD-HHmmss}-{type}-{id}.md`, so a kind settled after either would
       # leave the item named for a type it no longer is.
-      if [ "$needs_kind" = "1" ] && [ "$JUDGE_FORM_B" -eq 1 ] && [ -n "$kword" ]; then
+      if [ "$needs_kind" = "1" ] && [ "$JUDGE_FORM_B" -eq 1 ] && [ -n "$kword" ] \
+         && [ "$needs_paid_judgment" -eq 1 ]; then
         if p_imp="$(tk_form_b_judge "$title" "$kword" "$TMPD/labels")"; then
           # The question has now been ANSWERED, whichever way it went — so the flag drops and
           # Phase B is not asked to re-examine a title that was already adjudicated.

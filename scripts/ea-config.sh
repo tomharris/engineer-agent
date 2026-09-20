@@ -169,7 +169,7 @@ cmd_dump() {
   # shipped default and validates that the value is a number — doing it there rather than here
   # keeps the "what is a valid threshold" rule next to the awk comparison that consumes it.
   for v in slack.min_question slack.min_directed slack.max_answered slack.min_engineer \
-           ticket_kind.min_imperative; do
+           ticket_kind.min_imperative routing.min_confidence; do
     printf 'agent.typesafe.%s=%s\n' "$v" "$(_get "agent.typesafe.${v}")"
   done
   # Per-FEATURE opt-in, deny-by-default. Having a TypeSafe key for Slack must not silently start
@@ -178,6 +178,11 @@ cmd_dump() {
   v="$(_get agent.typesafe.ticket_kind.enabled)"
   [ "$v" = "true" ] || v=""
   printf 'agent.typesafe.ticket_kind.enabled=%s\n' "$v"
+  # Routing Tier 3b, same posture and for a bigger reason: this one sends the item BODY, so it is
+  # the largest egress of the three and must never be inherited from a key set for either of them.
+  v="$(_get agent.typesafe.routing.enabled)"
+  [ "$v" = "true" ] || v=""
+  printf 'agent.typesafe.routing.enabled=%s\n' "$v"
   # Which sources are collected by a deterministic script instead of by the model. Absent or empty
   # => today's prompt-driven path, unchanged. Deny-by-default, matching the posture of
   # agent.autonomy.auto_execute and projects.<slug>.exec.allowed_commands.
