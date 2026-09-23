@@ -74,7 +74,10 @@ NTFY_STALL_TIMEOUT="${EA_NTFY_STALL_TIMEOUT:-300}"
 NTFY_STREAM_MAX_TIME="${EA_NTFY_STREAM_MAX_TIME:-3600}"
 
 mkdir -p "$STATE_DIR"
-log() { echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] $*" | tee -a "$LOG_FILE" >&2; }
+# Writes to LOG_FILE only, never stderr: the supervisor points BOTH stdout and stderr at
+# this same file, so a tee to stderr logged every line twice. Matches how every other
+# write site in this script logs.
+log() { echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] $*" >>"$LOG_FILE"; }
 
 # push_ack — best-effort acknowledgement back to the user's outbound ntfy topic.
 # Never fails the caller: an ntfy hiccup must not crash or stall the listen loop.
