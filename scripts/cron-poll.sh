@@ -35,7 +35,34 @@ if [ -f "$LOCK_FILE" ] && kill -0 "$(cat "$LOCK_FILE" 2>/dev/null)" 2>/dev/null;
   exit 0
 fi
 echo $$ > "$LOCK_FILE"
-trap 'rm -f "$LOCK_FILE"' EXIT
+WATCHDOG_PID=""
+trap 'rm -f "$LOCK_FILE"; [ -z "$WATCHDOG_PID" ] || kill "$WATCHDOG_PID" 2>/dev/null || true' EXIT
+
+# Wall-clock cap on the whole run. launchd never starts a second instance of a job that is still
+# running, so the lock check above never fires under it: a run that hangs (a `gh` call once blocked
+# for 24h) silently swallows every later fire, and nothing reaches the receipt check. On expiry,
+# push an alert, then kill the run's process tree.
+POLL_MAX_SECONDS="${EA_POLL_MAX_SECONDS:-3600}"
+kill_tree() {
+  local c
+  for c in $(pgrep -P "$1" 2>/dev/null); do kill_tree "$c"; done
+  kill -TERM "$1" 2>/dev/null || true
+}
+(
+  s=""
+  trap '[ -n "$s" ] && kill "$s" 2>/dev/null; exit 0' TERM
+  sleep "$POLL_MAX_SECONDS" & s=$!; wait "$s"
+  self="$(exec sh -c 'echo $PPID')"
+  echo "--- WARN: poll exceeded ${POLL_MAX_SECONDS}s; killing it ---" >> "$LOG_FILE"
+  "${PLUGIN_ROOT}/scripts/notify.sh" \
+    --title 'engineer-agent: poll hung' \
+    --message "Poll ran longer than ${POLL_MAX_SECONDS}s and was killed. Last log line: $(tail -1 "$LOG_FILE" | cut -c1-200)" \
+    --priority urgent --tags warning --fyi >> "$LOG_FILE" 2>&1 || true
+  # TERM the parent first: it is blocked on a child, so it acts on the signal once that child dies.
+  kill -TERM $$ 2>/dev/null || true
+  for c in $(pgrep -P $$ 2>/dev/null); do [ "$c" = "$self" ] || kill_tree "$c"; done
+) </dev/null >/dev/null 2>&1 &
+WATCHDOG_PID=$!
 
 echo "--- Poll started at $(date -u +%Y-%m-%dT%H:%M:%SZ) ---" >> "$LOG_FILE"
 
@@ -87,6 +114,25 @@ receipt_errors() {
       gsub(/^"|"$/, "", v)
       print v
     }' "$RECEIPT_FILE"
+}
+
+# Fold Phase A collector errors into a fresh receipt: each becomes an errors: entry and an `ok`
+# status drops to `partial`. Both receipt writers (bash and model) only see what reached them, and
+# the GitHub collectors log a failed repo and exit 0, so without this the receipt says `ok`.
+merge_phase_a_errors() {
+  [ -s "${PHASE_A_ERRORS:-}" ] || return 0
+  awk -v errs="$PHASE_A_ERRORS" '
+    function emit(   line) {
+      while ((getline line < errs) > 0) { if (line != "") printf "  - \"%s\"\n", line }
+      close(errs); done = 1
+    }
+    /^status: *"?ok"? *$/ { print "status: partial"; next }
+    /^errors: *\[\] *$/   { print "errors:"; emit(); next }
+    /^errors:/            { print; inb = 1; next }
+    inb && /^[^ ]/        { emit(); inb = 0 }
+    { print }
+    END { if (!done) { if (!inb) { print "errors:" } emit() } }
+  ' "$RECEIPT_FILE" > "${RECEIPT_FILE}.tmp" && mv "${RECEIPT_FILE}.tmp" "$RECEIPT_FILE"
 }
 
 # The log is append-only, so any cause-extraction grep over the whole file can resurrect
@@ -190,6 +236,10 @@ SCRIPTED_SOURCES="${EA_POLL_SCRIPTED_SOURCES:-$("${PLUGIN_ROOT}/scripts/ea-confi
 SCRIPTED_SOURCES="$(printf '%s' "$SCRIPTED_SOURCES" | tr ',' ' ' | tr -s ' ')"
 MANIFEST="${AGENT_DIR}/state/poll-manifest.tsv"
 : > "$MANIFEST" 2>/dev/null || MANIFEST=""
+# Collectors append failures they log-and-continue past (see phase_a_error); merged into the receipt.
+PHASE_A_ERRORS="${AGENT_DIR}/state/poll-phase-a-errors.txt"
+: > "$PHASE_A_ERRORS" 2>/dev/null || true
+export EA_PHASE_A_ERRORS="$PHASE_A_ERRORS"
 
 is_scripted() { case " $SCRIPTED_SOURCES " in *" $1 "*) return 0 ;; *) return 1 ;; esac; }
 
@@ -506,6 +556,7 @@ if [ -n "$FAIL_REASON" ]; then
     --message "Poll did not complete (${FAIL_REASON}). Last error: ${LAST_ERR}. See state/cron-poll.log." \
     --priority urgent --tags warning --fyi >> "$LOG_FILE" 2>&1 || true
 else
+  merge_phase_a_errors
   RECEIPT_STATUS="$(receipt_field status)"
   echo "poll completed: status=${RECEIPT_STATUS:-unknown} items_queued=$(receipt_field items_queued)" >> "$LOG_FILE"
   # A zero-item poll is a SUCCESS: fresh receipt, status ok -> silent. Partial failure (a

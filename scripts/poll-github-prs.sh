@@ -58,6 +58,7 @@ emit() { [ -n "$MANIFEST" ] && printf '%s\n' "$*" >> "$MANIFEST"; return 0; }
 b64d() { base64 -d 2>/dev/null || base64 -D 2>/dev/null; }
 
 command -v gh >/dev/null 2>&1 || { log "poll-github-prs: gh not found; skipping"; exit 3; }
+GH_TIMEOUT="${EA_POLL_CMD_TIMEOUT:-120}"
 
 EA_CFG="$("${SCRIPT_DIR}/ea-config.sh" dump)"; export EA_CFG
 cfg()  { printf '%s\n' "$EA_CFG" | awk -F= -v k="$1" '$1==k {sub(/^[^=]*=/,""); print; exit}'; }
@@ -105,12 +106,13 @@ while IFS= read -r full; do
   owner="${full%%/*}"; repo="${full#*/}"
 
   PRS="$TMPD/prs"; : > "$PRS"
-  if ! gh pr list --repo "$full" --state open --limit 100 \
+  if ! with_timeout "$GH_TIMEOUT" gh pr list --repo "$full" --state open --limit 100 \
        --json number,title,author,url,labels,headRefName,baseRefName,changedFiles,reviewRequests,body \
        --jq '.[] | [ (.number|tostring), (.title|@base64), (.author.login // ""), .url, ((.labels|map(.name))|join("\u0001")), .headRefName, .baseRefName, ((.changedFiles // 0)|tostring), ((.reviewRequests|map(.login // .name // ""))|join("\u0001")), ((.body // "")|@base64) ] | @tsv' \
        > "$PRS" 2>"$TMPD/err"; then
     # Leave the cutoff untouched so the next run retries this window rather than skipping it.
     log "poll-github-prs: ERROR querying ${full}: $(head -1 "$TMPD/err"); leaving cutoff unchanged"
+    phase_a_error "github" "PR query failed for ${full}"
     continue
   fi
 

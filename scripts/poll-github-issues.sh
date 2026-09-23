@@ -73,6 +73,7 @@ emit() { [ -n "$MANIFEST" ] && printf '%s\n' "$*" >> "$MANIFEST"; return 0; }
 b64d() { base64 -d 2>/dev/null || base64 -D 2>/dev/null; }
 
 command -v gh >/dev/null 2>&1 || { log "poll-github-issues: gh not found; skipping"; exit 3; }
+GH_TIMEOUT="${EA_POLL_CMD_TIMEOUT:-120}"
 
 EA_CFG="$("${SCRIPT_DIR}/ea-config.sh" dump)"; export EA_CFG
 cfg()  { printf '%s\n' "$EA_CFG" | awk -F= -v k="$1" '$1==k {sub(/^[^=]*=/,""); print; exit}'; }
@@ -136,7 +137,7 @@ while IFS= read -r full; do
   while IFS= read -r who; do
     [ -n "$who" ] || continue
     # Deliberately NO --label filter (trap 1). One query per distinct assignee, merged below.
-    if gh issue list --repo "$full" --assignee "$who" --state open --limit 100 \
+    if with_timeout "$GH_TIMEOUT" gh issue list --repo "$full" --assignee "$who" --state open --limit 100 \
          --json number,title,body,labels,url,updatedAt \
          --jq '.[] | [ (.number|tostring), .updatedAt, (.title|@base64), ((.body // "")|@base64), ((.labels|map(.name))|join("\u0001")), .url ] | @tsv' \
          >> "$ISSUES" 2>"$TMPD/err"; then
@@ -151,6 +152,7 @@ EOF
     # Leave this repo's cutoff untouched so the next run retries the same window. Advancing it
     # after a failed query would silently drop every issue in that window, forever.
     log "poll-github-issues: all queries failed for ${full}; leaving cutoff unchanged"
+    phase_a_error "github_issues" "issue query failed for ${full}"
     continue
   fi
 
