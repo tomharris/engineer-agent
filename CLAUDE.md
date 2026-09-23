@@ -715,6 +715,22 @@ started succeeding. `cron-poll.sh` also takes a **PID lockfile** (`state/cron-po
 early if another poll is already running (a stale lock from a dead PID is reclaimed): two concurrent
 polls thrash the same state/receipt files and each burns its full budget racing the other.
 
+> **The lockfile cannot catch a hung poll under launchd — launchd never starts a second instance of
+> a job that is still running, so the next fire never reaches the lock check.** Observed
+> 2026-09-22: one `gh pr list` blocked for 24h, every later fire was silently swallowed, and
+> `launchctl print` still said `running` / `last exit code = 0`. Three guards, all in plain bash:
+> - **Per-command timeout.** Every `gh` call in the GitHub collectors and every Slack CLI call in
+>   `poll-slack.sh` runs under `with_timeout` (`lib-paths.sh`; macOS ships no `timeout(1)`),
+>   `EA_POLL_CMD_TIMEOUT` seconds, default 120. The curl-based collectors already carry
+>   `--max-time`.
+> - **Whole-run watchdog.** `cron-poll.sh` kills its own process tree after `EA_POLL_MAX_SECONDS`
+>   (default 3600) and pushes an urgent ntfy alert first, since a killed run never reaches the
+>   receipt check.
+> - **Phase A errors reach the receipt.** The GitHub collectors log a failed repo and carry on
+>   (exit 0), so neither receipt writer saw the failure and the receipt said `ok`. Collectors now
+>   call `phase_a_error`, which appends to `state/poll-phase-a-errors.txt` (truncated per run);
+>   `cron-poll.sh` merges each line into `errors:` and downgrades `ok` to `partial`.
+
 > **A supervised daemon runs whatever it parsed at launch — editing the script on disk
 > does not reload it.** `install-listener.sh`'s `systemctl --user enable --now` is a no-op on an
 > already-running unit, so before this was fixed a code deploy could leave the *old* listener

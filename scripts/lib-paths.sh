@@ -343,3 +343,39 @@ claude_bin_changed() {
   [ -n "$previous" ] || return 1
   printf '%s\n' "$resolved"
 }
+
+# with_timeout <secs> <cmd> [args...] — run cmd, TERM it after <secs> (KILL 5s later). Returns
+# cmd's status, or 124 on timeout. macOS ships no timeout(1). Redirections at the call site apply
+# to cmd. Every network read on an unattended path needs one: a `gh pr list` once blocked for 24h,
+# and launchd never starts a second instance of a running job, so every later poll was silently lost.
+with_timeout() {
+  local secs="$1"; shift
+  "$@" &
+  local pid=$! rc=0
+  (
+    fired=0; s=""
+    trap '[ -n "$s" ] && kill "$s" 2>/dev/null; exit "$fired"' TERM
+    sleep "$secs" & s=$!; wait "$s"
+    kill -0 "$pid" 2>/dev/null || exit 0
+    fired=124
+    kill -TERM "$pid" 2>/dev/null
+    sleep 5 & s=$!; wait "$s"
+    kill -KILL "$pid" 2>/dev/null
+    exit 124
+  ) </dev/null >/dev/null 2>&1 &
+  local wd=$!
+  wait "$pid" || rc=$?
+  kill -TERM "$wd" 2>/dev/null || true
+  local wrc=0; wait "$wd" 2>/dev/null || wrc=$?
+  [ "$wrc" -eq 124 ] && return 124
+  return "$rc"
+}
+
+# phase_a_error <source> <message> — record a Phase A collector failure. cron-poll.sh exports
+# EA_PHASE_A_ERRORS and merges these into the receipt's errors:, so a collector that logs an error
+# and carries on (exit 0) still shows up as status: partial rather than ok.
+phase_a_error() {
+  [ -n "${EA_PHASE_A_ERRORS:-}" ] || return 0
+  printf '%s: %s\n' "$1" "$2" | tr -d '"\\' | tr '\n' ' ' | sed 's/ *$//' >> "$EA_PHASE_A_ERRORS" 2>/dev/null || true
+  printf '\n' >> "$EA_PHASE_A_ERRORS" 2>/dev/null || true
+}

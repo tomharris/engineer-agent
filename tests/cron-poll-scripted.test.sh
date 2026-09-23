@@ -50,6 +50,7 @@ export PROMPT_CAPTURE="$TMP/last-prompt.txt"
 
 cat > "$HOME/.local/bin/gh" <<'EOF'
 #!/bin/bash
+[ -n "${GH_HANG:-}" ] && [ "$1" = "$GH_HANG" ] && exec sleep 30
 repo=""; assignee=""
 while [ $# -gt 0 ]; do
   case "$1" in --repo) repo="$2"; shift 2 ;; --assignee) assignee="$2"; shift 2 ;; *) shift ;; esac
@@ -63,6 +64,7 @@ chmod +x "$HOME/.local/bin/gh"
 cat > "$TMP/bin/claude" <<'EOF'
 #!/bin/bash
 echo "invoked" >> "$CLAUDE_CALLS"
+[ -n "${CLAUDE_HANG:-}" ] && exec sleep 30
 prompt="${*: -1}"
 rid="$(printf '%s' "$prompt" | sed -n 's/.*run_id: "\([^"]*\)".*/\1/p' | head -1)"
 [ -n "$rid" ] || rid="$(printf '%s' "$prompt" | grep -o '[0-9]\{8\}T[0-9]\{6\}Z-[0-9]*' | head -1)"
@@ -260,6 +262,36 @@ mv "$EA_AGENT_DIR/queue/drafts/20260802-090000-ticket-WIRE-5000.md" "$EA_AGENT_D
 : > "$LOG"; run_cron "github-issues github"
 if [ -f "$LEDGER" ]; then bad "ledger must be dropped once the queue is clean"; else ok "ledger pruned when the duplicate is resolved"; fi
 rm -f "$EA_AGENT_DIR"/queue/*/*.md
+
+echo "== 8. a hung gh call times out and the receipt says partial, not ok =="
+# The failure this pins: `gh pr list` blocked for 24h, and because launchd never overlaps a job,
+# every later poll was lost with nothing in the receipt.
+: > "$LOG"
+start=$(date +%s)
+GH_HANG=pr EA_POLL_CMD_TIMEOUT=2 run_cron "github-issues github"
+elapsed=$(( $(date +%s) - start ))
+if [ "$elapsed" -lt 20 ]; then ok "run finished despite the hung gh (${elapsed}s)"; else bad "run took ${elapsed}s; gh was not timed out"; fi
+R="$EA_AGENT_DIR/state/last-poll-receipt.yaml"
+eq "status downgraded" "partial" "$(sed -n 's/^status: *//p' "$R")"
+if grep -q '^  - "github: PR query failed for acme/only"$' "$R"; then ok "collector error merged into receipt"; else bad "collector error missing from receipt"; fi
+if grep -q '^errors: \[\]' "$R"; then bad "stale empty errors list left behind"; else ok "errors list rewritten"; fi
+
+echo "== 8b. ...and a clean run afterwards is ok again (the error file is per-run) =="
+run_cron "github-issues github"
+eq "status back to ok" "ok" "$(sed -n 's/^status: *//p' "$R")"
+
+echo "== 9. the wall-clock watchdog kills a hung run and alerts =="
+printf 'acme/only|me|8|%s|%s|%s||https://gh/8\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$(b64 'Another issue')" "$(b64 'body')" > "$GH_FIXTURE"
+: > "$LOG"
+start=$(date +%s)
+CLAUDE_HANG=1 EA_POLL_MAX_SECONDS=2 run_cron "github-issues github"
+elapsed=$(( $(date +%s) - start ))
+if [ "$elapsed" -lt 20 ]; then ok "hung model run killed (${elapsed}s)"; else bad "run took ${elapsed}s; watchdog did not fire"; fi
+if grep -q 'poll exceeded 2s' "$LOG"; then ok "watchdog logged the kill"; else bad "watchdog did not log"; fi
+if [ -f "$EA_AGENT_DIR/state/cron-poll.lock" ]; then bad "lock left behind after watchdog kill"; else ok "lock released"; fi
+sleep 1
+if pgrep -f 'sleep 30' >/dev/null; then bad "hung child survived the watchdog"; pkill -f 'sleep 30'; else ok "no surviving children"; fi
+rm -f "$EA_AGENT_DIR"/queue/*/*.md; : > "$GH_FIXTURE"
 
 echo
 echo "Passed: $PASS  Failed: $FAIL"

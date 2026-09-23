@@ -145,7 +145,7 @@ slack_call() {
   local out="$1"; shift
   local ws_args=()
   [ -n "${WORKSPACE:-}" ] && ws_args=(-w "$WORKSPACE")
-  "$SLACK_BIN" "$@" --json "${ws_args[@]}" > "$out" 2>"$TMPD/slackerr"
+  with_timeout "${EA_POLL_CMD_TIMEOUT:-120}" "$SLACK_BIN" "$@" --json "${ws_args[@]}" > "$out" 2>"$TMPD/slackerr"
 }
 
 # slack_messages <file> — the message objects out of a read/thread response.
