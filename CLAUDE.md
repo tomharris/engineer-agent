@@ -350,6 +350,10 @@ The `qa` subsection drives QA test plans: `base_url` and `console_command` (used
 ## Queue File Format
 
 Items enter the queue either via polling (`/engineer-agent poll` or the cron) or manually (`/engineer-agent add-ticket <ref>`). Both paths produce identically-shaped queue files.
+Invoking `/engineer-agent:implement-ticket <ref>` directly also goes through `add-ticket` (forced
+`--implement`) before implementing, so the ticket gets a queue item and a `seen_*` entry and the
+next poll reconciles it as `unchanged` instead of queueing a duplicate. `seen_*` alone would not
+do this: pollers dedup on queue files, and the scripted collectors never read `seen_*`.
 
 Files move through: `~/.local/share/engineer-agent/queue/incoming/` → `queue/drafts/` → `queue/completed/` or `queue/rejected/`
 

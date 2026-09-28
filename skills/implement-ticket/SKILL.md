@@ -18,7 +18,37 @@ Implement the code changes described in a ticket through iterative, in-session d
 
 A queue item file in `~/.local/share/engineer-agent/queue/drafts/` with type `ticket` that has been approved by the human. The file contains the ticket details, acceptance criteria, and implementation plan.
 
+A human may instead invoke this skill directly with a **ticket reference** (`/engineer-agent:implement-ticket ENG-123`, a Jira URL, a GitHub issue URL, or `owner/repo#N`) rather than a queue item. Step 0 turns that into a queue item first.
+
 ## Steps
+
+### 0. Register a Directly-Invoked Ticket
+
+Skip this step when the input is already a queue item path or item id.
+
+Otherwise the ticket has no queue item, so the next poll would find it assigned, see nothing in the
+queue, and mint a duplicate `ticket` item for work already in progress. The pollers dedup on queue
+files (`references/queue-reconciliation.md`), **not** on `seen_*` state — the scripted collectors
+never read `seen_*` at all — so recording the ticket in `seen_tickets` / `seen_issues` alone would
+not prevent it. The ticket needs both a queue item and its seen entry, which is exactly what
+`add-ticket` writes:
+
+1. Parse the reference exactly as `add-ticket` Step 2 does to get `source_id`.
+2. Look in `queue/incoming/*.md` and `queue/drafts/*.md` for an item whose frontmatter `source_id`
+   matches (either ticket type). If one is in `drafts/`, use it as the input and continue at Step 1.
+   If one is in `incoming/`, or it is a `ticket-investigation`, stop and tell the user to resolve it
+   via `/engineer-agent review-queue` (or `add-ticket {ref} --implement` after removing it) — never
+   create a second live item.
+3. Otherwise read `${CLAUDE_PLUGIN_ROOT}/commands/add-ticket.md` (fall back to
+   `{plugin-root}/commands/add-ticket.md` if the env var is unset) and follow its Steps 1–8 with
+   `--implement` forced (this skill writes code, so the deliverable is not re-decided) and
+   `--project` passed through if the user gave one. Do **not** pass `--no-draft`: the item must land
+   in `drafts/`, because Step 7's direct-invocation path leaves it there for `review-queue` to open
+   the PR from. Step 8 of `add-ticket` appends the ticket to `seen_tickets` / `seen_issues`.
+4. Use the resulting `drafts/` item as the input for Step 1.
+
+Once the item is in `drafts/`, a poll reconciles it as `unchanged`; once it is in `completed/`, as
+`skip` (terminal is absorbing). Either way no duplicate is created.
 
 ### 1. Read the Approved Item
 
