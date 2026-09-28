@@ -499,7 +499,7 @@ The end-to-end loop these commands are designed to chain into, per ticket:
 
 ```
 # code work (Story, Bug, …)
-/engineer-agent:implement-ticket <ticket>   # branch, implement iteratively, self-review, draft PR
+/engineer-agent:implement-ticket <ticket>   # queue it (like add-ticket), branch, implement, self-review, draft PR
         │  (in parallel)
         └─ /security-review                  # security pass on the diff
 /engineer-agent:qa <ticket>                  # generate + run QA test plan
