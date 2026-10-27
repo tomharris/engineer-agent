@@ -60,6 +60,26 @@ eq "ticket-plan is its own type"        "ticket-plan" \
 eq "ticket-investigation is its own"    "ticket-investigation" \
    "$("$LIST" --type ticket-investigation --tsv | cut -f5 | tr '\n' ' ' | sed 's/ $//')"
 
+echo "== queue-list: review-queue.md's short filter names resolve to their types =="
+eq "--type investigation is ticket-investigation" "ticket-investigation" \
+   "$("$LIST" --type investigation --tsv | cut -f5 | tr '\n' ' ' | sed 's/ $//')"
+eq "--type pr is pr-review" "pr-review" \
+   "$("$LIST" --type pr --tsv | cut -f5 | tr '\n' ' ' | sed 's/ $//')"
+ALIASES="$TMP/aliases"
+mkdir -p "$ALIASES/queue"/{incoming,drafts,completed,rejected}
+for t in qa-test-plan code-audit-finding codify-candidate slack-question doc-review spec-refinement \
+         design-doc ticket-refinement gap-audit; do
+  EA_AGENT_DIR="$ALIASES" mk drafts "1-$t.md" "$t" alpha normal "2026-01-01T00:00:00Z" --drafted
+done
+for pair in qa:qa-test-plan audit:code-audit-finding codify:codify-candidate slack:slack-question \
+            doc:doc-review spec:spec-refinement design:design-doc refinement:ticket-refinement \
+            gap:gap-audit; do
+  eq "--type ${pair%%:*} is ${pair#*:}" "${pair#*:}" \
+     "$(EA_AGENT_DIR="$ALIASES" "$LIST" --type "${pair%%:*}" --tsv | cut -f5 | tr '\n' ' ' | sed 's/ $//')"
+done
+eq "full type names still work" "qa-test-plan" \
+   "$(EA_AGENT_DIR="$ALIASES" "$LIST" --type qa-test-plan --tsv | cut -f5)"
+
 echo "== queue-list: project filter =="
 eq "--project beta" "3-ticket.md 6-pr-review.md" \
    "$("$LIST" --project beta --tsv | cut -f4 | sort | tr '\n' ' ' | sed 's/ $//')"
