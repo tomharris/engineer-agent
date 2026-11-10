@@ -84,10 +84,10 @@ fi
 # GUI login session and cannot read the macOS login keychain, so approvals may fail with "Not
 # logged in". A launchd LaunchAgent runs in the GUI session but still fails if the keychain locks.
 # On a machine with a forceLoginOrgUUID managed policy there is no environment-credential fix (a
-# `claude setup-token` OAuth token is rejected too -- see CLAUDE.md); resolve that with your org's IT.
+# `claude setup-token` OAuth token is rejected too -- see docs/architecture/headless-runs.md); resolve that with your org's IT.
 echo "NOTE: a supervised listener runs outside the GUI login session and cannot read the macOS" >&2
 echo "      login keychain. If approvals fail with 'Not logged in' or an organization-verification" >&2
-echo "      error, see the headless-auth section of CLAUDE.md; on a forceLoginOrgUUID-managed" >&2
+echo "      error, see docs/architecture/headless-runs.md; on a forceLoginOrgUUID-managed" >&2
 echo "      machine there is no environment-credential fix -- work with your org's IT." >&2
 
 # cron/systemd/launchd do not inherit the interactive shell environment. launchd in

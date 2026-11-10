@@ -172,7 +172,7 @@ Do NOT generate a draft. The item stays in `incoming/` until the user assigns a 
 #### Queue Item Format
 
 **Filename:** `{YYYYMMDD-HHmmss}-{type}-gh-{number}.md` — so an investigation is
-`…-ticket-investigation-gh-45.md`. The filename must carry the real type: CLAUDE.md's format is
+`…-ticket-investigation-gh-45.md`. The filename must carry the real type: docs/architecture/queue.md's format is
 `{type}-{short-id}` and `review-queue`'s filter reads it.
 
 **Content:**

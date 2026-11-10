@@ -1144,4 +1144,4 @@ config/
 
 ## Maintenance
 
-When adding, changing, or removing commands, skills, config options, or integrations, check both `CLAUDE.md` and `README.md` for needed updates. Keep both files in sync with each other and with actual plugin behavior.
+When adding, changing, or removing commands, skills, config options, or integrations, check `CLAUDE.md`, `README.md` and `docs/architecture/` for needed updates. Keep them in sync with each other and with actual plugin behavior.

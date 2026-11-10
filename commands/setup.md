@@ -90,7 +90,7 @@ Separately, if this machine has a `forceLoginOrgUUID` managed policy
 (`/Library/Application Support/ClaudeCode/managed-settings.json`), it blocks *all* headless auth —
 `ANTHROPIC_API_KEY`, `apiKeyHelper`, and `claude setup-token` alike — and no scheduler choice helps;
 the only paths (cloud-provider inference, or an IT exemption) require your org's IT. Do **not** re-add
-an `auth.env`/`CLAUDE_CODE_OAUTH_TOKEN` loader. See the headless-auth section of `CLAUDE.md`.
+an `auth.env`/`CLAUDE_CODE_OAUTH_TOKEN` loader. See `docs/architecture/headless-runs.md`.
 
 ### 6. Print Summary
 
@@ -115,7 +115,7 @@ Next steps:
          Claude Code's Keychain OAuth token (needs curl + jq); no spy install. Verify with
          `${CLAUDE_PLUGIN_ROOT}/scripts/slack-mcp.sh auth`.
   3. macOS headless auth: cron cannot read the login keychain. On a forceLoginOrgUUID-managed
-     machine there is no environment-credential fix — see CLAUDE.md and work with your org's IT.
+     machine there is no environment-credential fix — see `docs/architecture/headless-runs.md` and work with your org's IT.
   4. Run /engineer-agent add-project from other project directories to register them.
   5. Run /engineer-agent status to verify everything is working.
 ```

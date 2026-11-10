@@ -331,7 +331,7 @@ Set frontmatter `status: completed` and **write the file to
 **Write the `completed/` copy; do not assume you can delete the `drafts/` original.** On the confined
 headless path the cwd sandbox cannot reach outside the worktree, so the `drafts/` copy is removed by
 the listener in plain bash after the run — the same privileged reconciliation `implement-ticket`
-relies on (CLAUDE.md → "Confined headless ticket investigation"). Attempting the delete yourself and
+relies on (`docs/architecture/confined-runs.md` → "Confined headless ticket investigation"). Attempting the delete yourself and
 failing is fine; treating the failure as a failed investigation is not.
 
 Report one line:
@@ -387,7 +387,7 @@ Report one line:
 
 ## Ledger Dispositions
 
-The shared `### Findings & Disposition` ledger (CLAUDE.md → "Body sections") uses `fixed` /
+The shared `### Findings & Disposition` ledger (`docs/architecture/queue.md` → "Body sections") uses `fixed` /
 `accepted-risk` / `deferred` / `real-bug-filed` / `not-executed` / `n/a`. An investigation fixes
 nothing, so it adds two and reuses the rest:
 

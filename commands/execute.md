@@ -10,7 +10,7 @@ allowed-tools: ["Bash", "Read", "Write", "Edit", "Glob", "Grep", "mcp__slite__ap
 > **The `allowed-tools` list above is a second gate on top of the listener's `--allowedTools`; both
 > must name a verb.** This command runs unattended, and a permission prompt in a headless run is a
 > denial — an unlisted MCP write verb means the action silently never happens and the item strands in
-> `drafts/`, the exact failure mode CLAUDE.md documents for the poll's `gh`/Slack allowlists.
+> `drafts/`, the exact failure mode docs/architecture/headless-runs.md documents for the poll's `gh`/Slack allowlists.
 > (`mcp__atlassian__createJiraIssue`, needed by `code-audit-finding`, was missing here until the
 > investigation work added the comment verbs alongside it.)
 
