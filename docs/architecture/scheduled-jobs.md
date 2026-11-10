@@ -175,6 +175,10 @@ reader will otherwise "fix" back:
   Nothing enforces "only `url`" except the prompt and the extension's site permissions. The
   validator requires a localhost `url` so the app under test is the branch, not a shared
   environment. This is why it runs only after the same trust gate as the implementation.
+  Claude in Chrome drives the browser that was "picked last" across every connected device, so a
+  Chrome on another machine sees its own localhost. `browser.chrome_device` makes the run call
+  `select_browser` first and fail if it can't. A wrong device still fails closed, because it can't
+  reach the server.
 - **`browser.setup` / `browser.serve` run branch code unconfined** (bash, your user, your env):
   `npm ci` runs dependency install scripts and `npm run dev` runs the model's code. This is the
   confined run's accepted residual (its `Bash(npm *)` rule already runs model-edited

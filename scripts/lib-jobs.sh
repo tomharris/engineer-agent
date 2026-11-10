@@ -165,7 +165,7 @@ jobs_validate_after_pr() {
   [ -n "$(_ar_children "$p")" ] || return 0
   _ar_check_keys "$p" "budget_usd max_runtime mark_ready ci browser" "after_pr" || return 1
   _ar_check_keys "$p.ci" "timeout fix_attempts" "after_pr.ci" || return 1
-  _ar_check_keys "$p.browser" "setup serve url ready_timeout instructions" "after_pr.browser" || return 1
+  _ar_check_keys "$p.browser" "setup serve url ready_timeout instructions chrome_device" "after_pr.browser" || return 1
   [ -n "$(gr_project_repos "$1")" ] || { echo "after_pr needs projects.$1.github.owner and github.repos"; return 1; }
   v="$(_arc "$p.budget_usd")"
   [ -z "$v" ] || [[ "$v" =~ ^[0-9]+(\.[0-9]+)?$ ]] || { echo "after_pr.budget_usd '${v}' must be a number"; return 1; }
@@ -181,6 +181,9 @@ jobs_validate_after_pr() {
     [ -n "$(_arc "$p.browser.serve")" ] || { echo "after_pr.browser.serve is required"; return 1; }
     [[ "$(_arc "$p.browser.url")" =~ ^https?://(localhost|127\.0\.0\.1)(:[0-9]+)?(/|$) ]] \
       || { echo "after_pr.browser.url must be an http://localhost[:port] URL (the branch is served locally)"; return 1; }
+    v="$(_arc "$p.browser.chrome_device")"
+    [ -z "$v" ] || [[ "$v" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] \
+      || { echo "after_pr.browser.chrome_device '${v}' must be a Claude in Chrome deviceId (a UUID)"; return 1; }
   fi
   return 0
 }

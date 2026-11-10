@@ -150,6 +150,13 @@ eq "worktrees are removed" 1 "$(git -C "$TMP/repo" worktree list | grep -c .)"
 eq "no fix run when CI passes" 0 "$(fix_runs)"
 grep -qE 'Bash\(gh |Bash\(git push' "$CLAUDE_ARGS" && bad "a model run was granted gh or raw git push" || ok "model runs get no gh verbs or raw git push"
 
+reset; write_config '["pr-ready"]' '{ browser: { serve: "true", url: "http://localhost:3999", chrome_device: "43c79157-2ce8-4235-8767-08f49362b5ec" } }'
+run >/dev/null
+grep -q 'select_browser with deviceId 43c79157-2ce8-4235-8767-08f49362b5ec' "$CLAUDE_ARGS" && ok "chrome_device pins the browser" || bad "no select_browser instruction"
+reset; write_config '["pr-ready"]'
+run >/dev/null
+grep -q 'select_browser with deviceId' "$CLAUDE_ARGS" && bad "select instruction without chrome_device" || ok "no chrome_device: no select instruction"
+
 echo "== the pr-ready tier"
 reset; write_config '["draft-pr"]'
 eq "exits 0 without the tier" 0 "$(run)"
@@ -261,6 +268,8 @@ write_config '[]' '{ browser: { serve: "npm run dev", url: "https://staging.exam
 eq "a non-localhost browser url is refused" "after_pr.browser.url must be an http://localhost[:port] URL (the branch is served locally)" "$(valid)"
 write_config '[]' '{ browser: { url: "http://localhost:3000" } }'
 eq "browser without serve is refused" "after_pr.browser.serve is required" "$(valid)"
+write_config '[]' '{ browser: { serve: "x", url: "http://localhost:1", chrome_device: "Browser 1" } }'
+eq "a non-UUID chrome_device is refused" "after_pr.browser.chrome_device 'Browser 1' must be a Claude in Chrome deviceId (a UUID)" "$(valid)"
 write_config '[]' '{ ci: { fix_attempts: 5 } }'
 eq "fix_attempts above 3 is refused" "after_pr.ci.fix_attempts '5' must be 0-3" "$(valid)"
 
