@@ -1352,8 +1352,9 @@ resolved this by intuition each run; a script has to pick, which is how the ambi
 ## Scheduled jobs
 
 `projects.<slug>.jobs` gives one project's integration its own interval, **alongside** the global
-poll. Spec: `docs/superpowers/specs/2026-11-09-scheduled-jobs-design.md` (phased; phase 1 is built —
-dispatcher + `slack`/`watch` with `watch: [channels]`).
+poll. Spec: `docs/superpowers/specs/2026-11-09-scheduled-jobs-design.md` (phased; phases 1–2 are built —
+dispatcher + `slack`/`watch` with `watch: [channels]`, and `jira`/`implement-next` assignment rules,
+which validate and dry-run via `jobs-ctl.sh preview` but do not run yet).
 
 ```
 jobs-tick.sh (every 60s; install-jobs.sh)
@@ -1386,6 +1387,22 @@ Things a reader will otherwise "fix" back:
 - **Failure pushes: first failure, then the pause** (`guards.pause_after_failures`, default 3) —
   not one per run, for the same reason the dedup warning is push-once.
 - `JOBS_SUPPORTED` in `ea-config.sh` is the single list of runnable `integration:action` pairs.
+
+**Assignment rules (`lib-assign-rules.sh`)** decide which Jira ticket `implement-next` may pick.
+Read-only: search + dev-panel reads, never an assign or transition. Four things not to undo:
+- **`ea-config.sh` copies the `rules` subtree verbatim** and `ar_validate` rejects unknown keys at
+  every level. A mistyped `requires:` or `label_none:` would otherwise be a rule with a safety
+  predicate silently missing.
+- **`require.assignee` is inferred as `empty` only when the JQL says `assignee is EMPTY`, else
+  `me`; `any` is never inferred**, so a rule cannot take someone else's ticket by accident.
+- **Every uncertain predicate fails closed**: no story-point estimate, an unparseable timestamp, an
+  unreachable dev panel (`no_linked_pr`), a blocker link without a status category.
+- **A failed search aborts selection rather than falling through** to the next rule, since rules
+  are priority-ordered. A ticket with any queue item in its `(ticket, source_id)` family, terminal
+  included, is never picked.
+
+`lib-jira-api.sh` holds the curl helpers `poll-jira.sh` used inline (credential on stdin), so
+`jira-claim.sh` (phase 3) shares them. `ar_jira_init` sets globals: call it directly, not in `$(…)`.
 
 ## Tests
 

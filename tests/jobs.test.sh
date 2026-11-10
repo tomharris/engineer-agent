@@ -157,7 +157,7 @@ has "hours malformed" "must look like 9-17" "$(v 5m 9 '' channels)"
 has "unknown day" "days entry 'monday'" "$(v 5m '' monday channels)"
 has "unbuilt watch source" "watch source 'mentions' is not supported yet" "$(v 5m '' '' channels,mentions)"
 has "bad id" "must match" "$(v 5m '' '' channels 'Watch!')"
-has "unsupported pair" "unsupported integration/action 'jira:implement-next'" "$(v 5m '' '' '' auto jira:implement-next)"
+has "unsupported pair" "unsupported integration/action 'github:merge'" "$(v 5m '' '' '' auto github:merge)"
 has "bad pause_after" "positive integer" "$(v 5m '' '' channels watch slack:watch 0)"
 dup="alpha|0|watch|slack|watch|5m||||||1||
 alpha|1|watch|slack|watch|5m||||||1||"

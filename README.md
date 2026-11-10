@@ -361,16 +361,19 @@ heal was declined and needs a look.
 
 When scheduled jobs are configured, `status` also lists them (see `/engineer-agent jobs`).
 
-### `/engineer-agent jobs [list | run <project>.<id> | pause <project>.<id> | resume <project>.<id>]`
+### `/engineer-agent jobs [list | run <project>.<id> | pause <project>.<id> | resume <project>.<id> | preview <project>.<id>]`
 
 Inspect and control scheduled jobs (see [Scheduled Jobs](#scheduled-jobs)). `list` (the default)
 shows each job's interval, state (`idle` / `running` / `paused` / `invalid`), last run and next due
 time. `run` runs one now, ignoring its interval and hours. `resume` clears a pause, including the
-automatic one after repeated failures.
+automatic one after repeated failures. `preview` dry-runs a Jira `implement-next` job's rules
+(read-only): it fetches each rule's tickets and shows which one would be picked and why each other
+one was skipped.
 
 ```
 /engineer-agent jobs
 /engineer-agent jobs run billing-api.slack-watch
+/engineer-agent jobs preview billing-api.jira-autopilot
 ```
 
 ### `/engineer-agent digest [--days N]`
@@ -842,8 +845,15 @@ Supported today: `slack` / `watch` with `watch: [channels]`, the same scan, rele
 routing as the scripted Slack collector, limited to the project's own channels. It requires an
 `agent.typesafe` credential (plus `curl` and `jq`). When it finds something, a drafting run
 starts using the poll's read-only allowlist; drafts land in `drafts/` and push to ntfy as usual. Thread
-watching, mentions, emoji reactions and Jira `implement-next` are specified in
+watching, mentions and emoji reactions are specified in
 `docs/superpowers/specs/2026-11-09-scheduled-jobs-design.md` and not built yet.
+
+Jira `implement-next` is partly built: its assignment `rules` are validated (a job with bad rules is
+`invalid` in `/engineer-agent jobs`) and can be dry-run with `/engineer-agent jobs preview`, but the
+job does not run yet. Each rule's `jql` decides what is fetched; its `require` predicates are
+re-checked against every fetched ticket, the first rule with an eligible ticket wins, and a ticket
+already in the queue (including completed or rejected) is never picked. See the commented
+`jira-autopilot` example in `config/engineer.example.yaml` for every predicate.
 
 How it behaves:
 
@@ -1027,6 +1037,8 @@ scripts/
   jobs-draft.sh                Drafting run for a job's collected items
   job-slack-watch.sh           slack/watch job collector
   lib-jobs.sh                  Job config validation, due/window checks, per-job state
+  lib-assign-rules.sh          Jira implement-next rules: validation, predicates, first-match selection
+  lib-jira-api.sh              Jira REST helpers (credential on curl stdin)
   lib-poll-allowlist.sh        Read-only allowlist shared by the poll and job drafting
   notify.sh                    Publish a push notification to ntfy
   turn-notify-hook.sh          Hook handler: FYI push at each implement-ticket turn end

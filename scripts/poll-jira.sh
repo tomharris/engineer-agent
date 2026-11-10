@@ -109,34 +109,10 @@ if [ -z "$JIRA_TOKEN" ]; then
 fi
 
 # --- HTTP ------------------------------------------------------------------------------------
-# The credential goes to curl on STDIN via `--config -`, never in argv: an argv credential is
-# readable by any other process on the box via `ps`, and this runs unattended every 15 minutes.
-# Writes the response body to $1 and prints the HTTP status.
-jira_api() {
-  local out="$1" method="$2" path="$3" body="${4:-}" code
-  local url="https://${JIRA_SITE}${JIRA_API_BASE}${path}"
-  if [ -n "$body" ]; then
-    code="$(printf 'user = "%s:%s"\n' "$JIRA_EMAIL" "$JIRA_TOKEN" \
-      | curl -sS --config - -o "$out" -w '%{http_code}' \
-             -X "$method" -H 'Content-Type: application/json' -H 'Accept: application/json' \
-             --max-time 60 --data-binary "$body" "$url" 2>"$TMPD/curlerr")"
-  else
-    code="$(printf 'user = "%s:%s"\n' "$JIRA_EMAIL" "$JIRA_TOKEN" \
-      | curl -sS --config - -o "$out" -w '%{http_code}' \
-             -X "$method" -H 'Accept: application/json' --max-time 60 "$url" 2>"$TMPD/curlerr")"
-  fi
-  printf '%s' "${code:-000}"
-}
+# shellcheck source=lib-jira-api.sh
+. "${SCRIPT_DIR}/lib-jira-api.sh"
 
 JIRA_FIELDS='["summary","description","issuetype","components","labels","status","priority","updated"]'
-
-# jira_search <out> <jql> <maxResults> [fields-json] — one page of /search/jql.
-jira_search() {
-  local out="$1" jql="$2" mx="$3" fields="${4:-$JIRA_FIELDS}" token="${5:-}" body
-  body="$(jq -nc --arg jql "$jql" --argjson mx "$mx" --argjson f "$fields" --arg tok "$token" \
-    '{jql: $jql, maxResults: $mx, fields: $f} + (if $tok == "" then {} else {nextPageToken: $tok} end)')"
-  jira_api "$out" POST "/search/jql" "$body"
-}
 
 state_load
 
@@ -184,7 +160,7 @@ jql_quote_list() { local out="" v; while IFS= read -r v; do [ -n "$v" ] || conti
 ASSIGNEE_LIST="$(printf '%s\n' "$ALL_ASSIGNEES" | jql_quote_list)"
 ACCOUNT_OFFSET_SECS=0
 if [ -n "$ASSIGNEE_LIST" ]; then
-  code="$(jira_search "$TMPD/tz.json" "assignee IN (${ASSIGNEE_LIST}) ORDER BY updated DESC" 1)"
+  code="$(jira_search "$TMPD/tz.json" "assignee IN (${ASSIGNEE_LIST}) ORDER BY updated DESC" 1 "$JIRA_FIELDS")"
   if [ "$code" = "200" ]; then
     tzstamp="$(jq -r '.issues[0].fields.updated // empty' "$TMPD/tz.json" 2>/dev/null)"
     off="$(printf '%s' "$tzstamp" | sed -nE 's/.*([+-][0-9]{2}:?[0-9]{2})$/\1/p')"
