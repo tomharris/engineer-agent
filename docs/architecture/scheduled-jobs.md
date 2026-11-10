@@ -171,7 +171,9 @@ reader will otherwise "fix" back:
 - **CI first, then the browser,** so the browser tests the head that will be reviewed, including
   any fix commit.
 - **The browser run drives your real Chrome** (`--chrome`, your sign-ins). Its allowlist is Read/Grep,
-  git read and a fixed list of Chrome tools (no `javascript_tool`, uploads or browser switching).
+  git read and a fixed list of Chrome tools (no uploads or browser switching). `javascript_tool`
+  is allowed so it can measure computed styles instead of judging screenshots; it runs in whatever
+  tab is open, so use a dedicated Chrome profile with no other sign-ins.
   Nothing enforces "only `url`" except the prompt and the extension's site permissions. The
   validator requires a localhost `url` so the app under test is the branch, not a shared
   environment. This is why it runs only after the same trust gate as the implementation.
