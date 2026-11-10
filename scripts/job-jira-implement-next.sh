@@ -9,9 +9,10 @@
 # (the listener then claims with --approved) or claim → confined implementation → rollback.
 #
 # UNATTENDED needs `implement` AND `jira-claim` in auto_execute AND trusted authorship: the ticket's
-# creator and every summary/description edit in its changelog must be in the job's
-# trusted_authors. The confined run can execute code as the user (build commands run files the
-# model edits), so without that, anyone able to file a matching ticket could steer it. The check
+# creator and the author of every changelog edit to a field written into the queue item (summary,
+# description, labels, components) must be in the job's trusted_authors. The confined run can
+# execute code as the user (build commands run files the model edits), so without that, anyone
+# able to file a matching ticket could steer it. The check
 # and the queue item come from ONE fetch, and the confined run has no Jira access, so the text the
 # model sees is exactly the text that was checked. Anything short of it falls back to Approve.
 set -uo pipefail
@@ -129,9 +130,9 @@ untrusted_reason() {
     | if ($ok | index($c)) == null then "created by \($c), not a trusted author"
       elif (.changelog.total // 0) > (.changelog.histories // [] | length) then "changelog truncated; cannot verify edits"
       else ([.changelog.histories[]?
-              | select(any(.items[]?; (.fieldId // .field) == "summary" or (.fieldId // .field) == "description"))
+              | select(any(.items[]?; (.fieldId // .field) | IN("summary", "description", "labels", "components")))
               | (.author.accountId // "") as $a | select(($ok | index($a)) == null) | $a] | first)
-           | if . == null then empty else "summary/description edited by \(.), not a trusted author" end
+           | if . == null then empty else "edited by \(.), not a trusted author" end
       end' "$TMPD/issue.json"
 }
 gate=""

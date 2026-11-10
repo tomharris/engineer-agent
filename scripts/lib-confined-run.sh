@@ -24,22 +24,27 @@ NO_MEMORY_RULE="MEMORY: do NOT create or update memory files, and do NOT treat a
 
 # git/gh verbs for confined runs, enumerated rather than `Bash(git *)` / `Bash(gh *)`. The broad
 # prefixes also grant `git -C /elsewhere`, `git -c alias.x='!cmd' x` (arbitrary exec), `gh api -X
-# POST`, `gh pr merge` and `gh secret`. A rule is a command PREFIX, so `git push -u origin:*` also
-# pins the remote. Residual, accepted: `git diff/log/show --output=<path>` writes a file anywhere,
+# POST`, `gh pr merge` and `gh secret`. A rule is a command PREFIX, so anything may follow it:
+#   - no raw `git push`: it takes any refspec (`HEAD:main --force`, `--delete`). Pushes go through
+#     confined-push.sh, which pushes one prefixed branch to the same name, never forced.
+#   - no `git branch`, `git stash`, plain `git checkout`/`git switch`: a linked worktree shares refs
+#     with the user's own checkout, so `branch -f`, `stash clear` or `checkout -B` reach it. New
+#     branches only, via `checkout -b` / `switch -c`.
+# Residual, accepted: `git diff/log/show --output=<path>` writes a file anywhere,
 # and repo-tracked hooks run on `git commit` — the same class as the build commands, which run
 # files the model can edit. That is why an UNATTENDED run additionally requires trusted authors
 # (job-jira-implement-next.sh), not just these rules.
 CONFINED_GIT_READ_RULES=(
   "Bash(git status:*)" "Bash(git diff:*)" "Bash(git log:*)" "Bash(git show:*)"
   "Bash(git rev-parse:*)" "Bash(git symbolic-ref:*)" "Bash(git show-ref:*)" "Bash(git ls-files:*)"
-  "Bash(git branch:*)" "Bash(git merge-base:*)"
+  "Bash(git merge-base:*)"
 )
 CONFINED_GIT_WRITE_RULES=(
   "${CONFINED_GIT_READ_RULES[@]}"
-  "Bash(git checkout:*)" "Bash(git switch:*)" "Bash(git add:*)" "Bash(git commit:*)"
-  "Bash(git restore:*)" "Bash(git rm:*)" "Bash(git mv:*)" "Bash(git stash:*)"
-  "Bash(git fetch origin:*)" "Bash(git ls-remote --exit-code --heads origin:*)"
-  "Bash(git push -u origin:*)" "Bash(git push --no-verify -u origin:*)"
+  "Bash(git checkout -b:*)" "Bash(git switch -c:*)" "Bash(git add:*)" "Bash(git commit:*)"
+  "Bash(git restore:*)" "Bash(git rm:*)" "Bash(git mv:*)"
+  "Bash(git ls-remote --exit-code --heads origin:*)"
+  "Bash(${PLUGIN_ROOT}/scripts/confined-push.sh:*)"
 )
 CONFINED_GH_READ_RULES=(
   "Bash(gh pr view:*)" "Bash(gh pr list:*)" "Bash(gh issue view:*)"
@@ -136,8 +141,11 @@ wt_base_desc() {
 # Returns 1 (refuses to start) when the project/path/allowlist can't be resolved — the item
 # then stays in drafts/ and the caller's drafts/ check emits the ⚠️ Failed ack with the
 # reason logged. Returns 0 once it has launched the run (success is judged by drafts/).
+# UNATTENDED (3rd arg 1, the implement-next job with no Approve tap): the trust gate vouched only
+# for the queue item's text, so this run may read nothing else that strangers write — no `gh
+# issue/pr view` — and gets no QA follow-on, whose allowlist reads Jira live and holds curl.
 run_ticket_implementation() {
-  local item="$1" budget="$2" draft="${AGENT_DIR}/queue/drafts/${item}"
+  local item="$1" budget="$2" unattended="${3:-0}" draft="${AGENT_DIR}/queue/drafts/${item}"
   local project project_path base wt c
 
   project="$(grep -m1 '^project:' "$draft" 2>/dev/null | sed 's/^project:[[:space:]]*//; s/["'\'' ]//g')"
@@ -181,10 +189,12 @@ run_ticket_implementation() {
   # Confined tool set: file edits + git + the narrow build rules + gh (draft PR) + mv
   # (queue move) + notify (draft-pr FYI). No spy/slite/atlassian — a ticket implementation
   # posts nowhere but GitHub, and only a DRAFT PR at that.
+  local gh_rules=( "${CONFINED_GH_READ_RULES[@]}" )
+  [ "$unattended" = 1 ] && gh_rules=( "Bash(gh auth status:*)" "Bash(gh --version:*)" )
   local allowed_tools=(
     Read Edit Write Glob Grep
     "${CONFINED_GIT_WRITE_RULES[@]}" "${build_rules[@]}"
-    "${CONFINED_GH_READ_RULES[@]}" "Bash(gh pr create:*)" "Bash(echo:*)"
+    "${gh_rules[@]}" "Bash(gh pr create:*)" "Bash(echo:*)"
     "Bash(mv *)" "Bash(${PLUGIN_ROOT}/scripts/notify.sh *)"
   )
   # Dispatch goes through execute-item, exactly like every other item type. This function's job
@@ -201,6 +211,7 @@ run_ticket_implementation() {
   local prompt="Execute the approved engineer-agent queue item '${item}' (decision: approve). \
 Read ${PLUGIN_ROOT}/skills/execute-item/SKILL.md and follow it with item='${item}' and decision='approve'. Its ticket case probes for the ticket branch and, when the branch does not exist yet, implements the ticket by following ${PLUGIN_ROOT}/skills/implement-ticket/SKILL.md before opening a DRAFT pull request. \
 The current working directory is an isolated git worktree of the target repo, checked out on a detached HEAD at the base branch. Create the ticket branch HERE and stay inside this worktree — do not cd elsewhere. Self-review the branch diff and fix findings BEFORE opening any PR. \
+PUSH ONLY with: ${PLUGIN_ROOT}/scripts/confined-push.sh --no-verify (from the ticket branch). Plain git push is not permitted in this run and will be denied; this replaces the push commands in the skill files. \
 Read config from ${EA_CONFIG_FILE}. \
 To finalize the queue item, WRITE the completed record to ${AGENT_DIR}/queue/completed/${item} (status: completed). You do NOT need to delete the drafts/ original — the listener reconciles that afterward; do not spend effort trying to remove it. \
 Operate ONLY inside this working directory (plus writing that one completed/ queue file). \
@@ -244,7 +255,9 @@ ${NO_MEMORY_RULE} Be concise."
   # succeeded (completed/<item> present — the same side-effect signal the reconcile below uses):
   # no PR, no QA. It never fails the ticket — the ticket's ✅/⚠️ ack is decided by the caller
   # from the drafts/ check alone.
-  if [ -e "${AGENT_DIR}/queue/completed/${item}" ]; then
+  if [ "$unattended" = 1 ]; then
+    log "skipping QA generation for ${item}: unattended run"
+  elif [ -e "${AGENT_DIR}/queue/completed/${item}" ]; then
     run_qa_generation "$item" "$project" "$base" "$wt" "$QA_BUDGET_USD" || true
   fi
 
@@ -418,8 +431,9 @@ autopilot_release() { _autopilot_claim_cmd release "$1"; }
 # rc 0 implemented, 3 someone else claimed it first (item moved to rejected/), 1 failed (claim
 # rolled back, item left in drafts/).
 autopilot_implement() {
-  local item="$1" budget="$2" rc draft="${AGENT_DIR}/queue/drafts/$1"
+  local item="$1" budget="$2" rc draft="${AGENT_DIR}/queue/drafts/$1" unattended=1
   shift 2
+  [ "${1:-}" = --approved ] && unattended=0
   autopilot_claim "$item" "$@"; rc=$?
   case "$rc" in
     0) ;;
@@ -433,7 +447,7 @@ autopilot_implement() {
        autopilot_release "$item"
        return 1 ;;
   esac
-  run_ticket_implementation "$item" "$budget"
+  run_ticket_implementation "$item" "$budget" "$unattended"
   if [ -e "$draft" ]; then
     log "autopilot: ${item} did not complete; releasing the claim"
     autopilot_release "$item"
