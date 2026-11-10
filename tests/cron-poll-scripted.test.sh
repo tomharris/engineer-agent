@@ -105,7 +105,30 @@ run_cron ""
 if claude_ran; then ok "model IS invoked when the flag is absent"; else bad "model must still run when unconfigured"; fi
 if [ -s "$EA_AGENT_DIR/state/poll-manifest.tsv" ]; then bad "collector must not run when unconfigured"; else ok "collector did not run"; fi
 
+echo "== 1b. a source owned by an exclusive scheduled job is excluded from the model's poll =="
+cat > "$EA_AGENT_DIR/engineer.yaml" <<'YAML'
+projects:
+  alpha:
+    path: "/tmp/alpha"
+    tracker: "none"
+    slack:
+      channels: ["C1"]
+    jobs:
+      - id: watch
+        integration: slack
+        action: watch
+        every: 5m
+        exclusive: true
+YAML
+run_cron ""
+if grep -q 'EXCLUSIVE: these project/source pairs are polled by a scheduled job, not by this run: alpha/slack\.' "$PROMPT_CAPTURE"; then
+  ok "prompt tells the model to skip alpha/slack"; else bad "EXCLUSIVE directive missing or wrong"; fi
+sed -i.bak '/exclusive: true/d' "$EA_AGENT_DIR/engineer.yaml"; rm -f "$EA_AGENT_DIR/engineer.yaml.bak"
+run_cron ""
+if grep -q 'EXCLUSIVE:' "$PROMPT_CAPTURE"; then bad "EXCLUSIVE directive present without exclusive"; else ok "no directive without exclusive"; fi
+
 echo "== 2. flag on, nothing new => the model is SKIPPED entirely =="
+write_config ""
 : > "$GH_FIXTURE"   # zero open issues: the steady state of a healthy queue
 run_cron "github-issues"
 if claude_ran; then bad "model must NOT be invoked when there is no work"; else ok "model skipped entirely (the token win)"; fi

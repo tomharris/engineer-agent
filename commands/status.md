@@ -36,7 +36,11 @@ path; the poll moves these to `drafts/`, so a non-zero count means the move was 
 duplicate `(type, source_id)` groups that auto-healing declined to resolve — the poll pushes about
 each of those exactly once, so `status` is where a standing duplicate stays visible.
 
-`--json` is available if you need the numbers rather than the table.
+When scheduled jobs are configured it ends with a "Scheduled jobs" table (from
+`scripts/jobs-ctl.sh list`). Call out any job that is `paused`, `invalid`, or whose last run was not
+`ok` — the dispatcher skips those silently every minute.
+
+`--json` is available if you need the numbers rather than the table (it omits jobs).
 
 ### 3. Check Integrations
 

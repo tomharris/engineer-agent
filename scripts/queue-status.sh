@@ -158,3 +158,13 @@ else
     *) printf '  PROBLEM: receipt has no recognisable status\n' ;;
   esac
 fi
+
+# Scheduled jobs (scripts/jobs-tick.sh). Printed only when some are configured, so installs that
+# never add `jobs` see no change. A paused, invalid or failing job is otherwise silent — the tick
+# skips it every minute without a push.
+JOBS_OUT="$("${SCRIPT_DIR}/jobs-ctl.sh" list 2>/dev/null)"
+if [ -n "$JOBS_OUT" ] && [ "$JOBS_OUT" != "No scheduled jobs configured." ]; then
+  echo
+  echo "Scheduled jobs"
+  printf '%s\n' "$JOBS_OUT" | sed 's/^/  /'
+fi

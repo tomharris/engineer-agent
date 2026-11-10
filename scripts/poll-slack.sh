@@ -174,6 +174,9 @@ CHANNELS="$TMPD/channels.all"; : > "$CHANNELS"
 while IFS= read -r slug; do
   [ -n "$slug" ] || continue
   [ "$(cfg "projects.${slug}.source.slack")" = "configured" ] || continue
+  # A channel this project does not watch has no route to it (Tier 0 is the channel's watchers),
+  # so with --project reading it would only pay for messages the filter below discards.
+  [ -z "$ONLY_PROJECT" ] || [ "$slug" = "$ONLY_PROJECT" ] || continue
   cfgl "projects.${slug}.slack.channels" >> "$CHANNELS"
 done < <(cfgl project)
 sed -i.bak -E '/^[[:space:]]*$/d' "$CHANNELS" 2>/dev/null; rm -f "${CHANNELS}.bak"
