@@ -77,6 +77,8 @@ of truth for this location — source it rather than hardcoding the path.
     ├── autopilot-items.tsv    — Queue items the implement-next job wrote (the only provenance the listener trusts for a Jira claim)
     ├── implement-inflight/    — One marker per running confined ticket implementation (<pid>\t<project>)
     ├── jira-account-id        — Cached Jira accountId per agent.jira.email
+    ├── watched-threads.tsv    — Slack threads answered via engineer-agent (channel, thread_ts, last_seen_ts, added_at, project) for the my-threads watch
+    ├── slack-events.log       — Outcomes of scripts/slack-event.sh (status reactions, thread watches)
     ├── jobs.log               — Scheduled-jobs dispatcher log
     ├── turn-notify/           — One marker per session armed for turn-completion pushes (<session_id>)
     └── turn-notify.log        — Turn-completion hook diagnostics (only when EA_TURN_NOTIFY_DEBUG=1)
@@ -97,7 +99,7 @@ shared tracker from flooding the queue (and exhausting the cron run's budget) on
 without having to pre-seed `seen_issues`.
 
 Two `agent` subsections drive autonomy (both optional):
-- `agent.autonomy.auto_execute` — a list of action tiers allowed to run **without** an approval gate. Supported: `draft-pr` (draft PRs merge nothing / request no review), and for the `implement-next` scheduled job `implement` (start the confined implementation without an Approve tap) and `jira-claim` (assign/transition its ticket without one); that job needs both to run unattended (see "Scheduled jobs"). Absent ⇒ empty ⇒ everything is gated.
+- `agent.autonomy.auto_execute` — a list of action tiers allowed to run **without** an approval gate. Supported: `draft-pr` (draft PRs merge nothing / request no review), and for the `implement-next` scheduled job `implement` (start the confined implementation without an Approve tap) and `jira-claim` (assign/transition its ticket without one); that job needs both to run unattended (see "Scheduled jobs"). `slack-react` adds/removes the `agent.slack.reactions` status emoji on a Slack item's message. Absent ⇒ empty ⇒ everything is gated.
 - `agent.notify.ntfy` — push-notification + remote-approval settings (`server`, `topic`, `command_topic`, `auth_token`). Absent ⇒ no notifications; the workflow is otherwise unchanged.
 - `agent.investigation` — which tickets deliver a **findings document** instead of code
   (`jira_types`, `github_labels`, `title_keywords`). Absent ⇒ shipped defaults apply, which include
@@ -448,6 +450,10 @@ YAML frontmatter fields:
   API does not reliably expose tags, and the gate should see when the match was the weaker kind
 - `channel_id` / `channel_name` / `message_ts` / `author` / `author_id`: (slack-question only) where
   the message came from and who wrote it
+- `thread_ts`: (slack-question only) the thread parent when the message is itself a reply; the
+  answer is posted there instead of under `message_ts`
+- `watch_source`: (slack-question only) `mentions` | `my-threads` when a slack/watch job found it
+  that way; absent for a channel scan
 - `relevance_method`: (slack-question only) how the "is this a question for me?" tier was decided —
   `typesafe` when `scripts/poll-slack.sh` judged it. Absent on a model-drafted item, which decided
   it inline and recorded nothing
@@ -982,6 +988,10 @@ adding a source, give the poll its read verbs only. (The investigation feature n
 poll verbs: the poll only drafts an *investigation plan*, `mcp__atlassian__getJiraIssue` already
 supplies the `issuetype` the kind ladder reads, and `Read` already reaches
 `references/ticket-kind.md`. The comment and the transition happen later, behind the gate.)
+**One named exception:** a scripted Slack collector runs `scripts/slack-event.sh detected` on an
+item it creates, which adds an emoji reaction (with `slack-react` in `auto_execute`). It is allowed
+because the emoji comes from a config-closed map and the target is the message just read, taken
+from the item's frontmatter; no model is involved.
 
 Key invariant: **`/engineer-agent review-queue` (terminal) and `/engineer-agent execute` (remote) both delegate to the shared `execute-item` skill** — the single source of truth for what approving an item does. Two typed exceptions: `qa-test-plan` is interactive-only and is refused on the remote path; and an approved `ticket-investigation` on the remote path is handled by the listener's confined **read-only** investigation (`run_ticket_investigation`) rather than by `execute-item` — `investigate-ticket` posts the ticket comment itself, while `execute-item`'s own `ticket-investigation` case is the *finisher* for the interactive path, posting an **already-written** `## Findings` section and refusing if there isn't one.
 
@@ -998,8 +1008,9 @@ Key invariant: **`/engineer-agent review-queue` (terminal) and `/engineer-agent 
   [Spy](https://github.com/tomharris/spy) CLI (`spy`, default) reusing the local Slack desktop
   session (no OAuth/app install), OR `scripts/slack-mcp.sh` (`mcp-proxy`, for Enterprise Grid)
   going through the Keychain OAuth token + Anthropic MCP proxy. Both expose the same interface:
-  reads with `<slack> read`/`<slack> thread`, posts with `<slack> send` (`--thread <ts>` for
-  threaded replies). Same binary works in interactive skills and the headless cron/ntfy scripts.
+  reads with `<slack> read`/`<slack> thread`/`<slack> search`, posts with `<slack> send`
+  (`--thread <ts>` for threaded replies), reacts with `<slack> react`/`unreact` (idempotent in
+  both). Same binary works in interactive skills and the headless cron/ntfy scripts.
   Because the MCP-proxy shim runs as one Bash invocation, its internal `curl`/`jq`/`security`
   subprocesses need no separate allowlist entry — a single `Bash(<shim> read:*)`-style rule
   covers the whole call. **But that rule must match the shim's path as the model *actually runs*
@@ -1370,14 +1381,15 @@ resolved this by intuition each run; a script has to pick, which is how the ambi
 ## Scheduled jobs
 
 `projects.<slug>.jobs` gives one project's integration its own interval, **alongside** the global
-poll. Spec: `docs/superpowers/specs/2026-11-09-scheduled-jobs-design.md` (phased; phases 1–4 are built —
-dispatcher, `slack`/`watch` with `watch: [channels]`, and `jira`/`implement-next`).
+poll. Spec: `docs/superpowers/specs/2026-11-09-scheduled-jobs-design.md` (phased; phases 1–5 are built —
+dispatcher, `slack`/`watch` with `channels`/`mentions`/`my-threads`, status reactions, and
+`jira`/`implement-next`).
 
 ```
 jobs-tick.sh (every 60s; install-jobs.sh)
   for each valid, unpaused, in-window, due job → detached run_job:
     job lock → handler → receipt → failure streak / pause
-      slack:watch          job-slack-watch.sh → poll-slack.sh --project → manifest → jobs-draft.sh
+      slack:watch          job-slack-watch.sh → poll-slack.sh --project --sources <watch> → manifest → jobs-draft.sh
       jira:implement-next  job-jira-implement-next.sh: guards → ar_select → drafts/ item
                            → push for Approve, or (implement + jira-claim) claim → confined run
 ```
@@ -1406,6 +1418,27 @@ Things a reader will otherwise "fix" back:
 - **Failure pushes: first failure, then the pause** (`guards.pause_after_failures`, default 3) —
   not one per run, for the same reason the dedup warning is push-once.
 - `JOBS_SUPPORTED` in `ea-config.sh` is the single list of runnable `integration:action` pairs.
+
+**Slack watch sources and status reactions** — things a reader will otherwise "fix" back:
+- **`poll-slack.sh` runs every source through one `consider_msg`.** `channels` keeps the keyword
+  filter and `last_checked_ts`; `mentions` (search) and `my-threads` (re-read
+  `state/watched-threads.tsv`) skip the keyword filter and keep their own cutoffs (`mentions_ts` in
+  the job's state file; `last_seen_ts` per thread). Each cutoff holds on any error in its source.
+- **`my-threads` does not threshold `directed_at_user`**: being in the thread is the direction.
+  The other three judgments still apply.
+- **Mention candidates are every project with a `mentions` watch**, so two of them give `_unrouted`
+  rather than an arbitrary winner. `after:` is day-granular, so the search starts a day early and
+  `mentions_ts` does the exact filtering.
+- **`slack-event.sh` takes a queue item, never a channel/ts/emoji.** It reads the target from the
+  item's frontmatter and the emoji from `agent.slack.reactions`, so a model running it (execute-item
+  on `posted`/`rejected`) picks only which of its own items to signal. `posted` also records the
+  thread for `my-threads`, regardless of the tier. Always exits 0.
+- **`drafted` fires from bash** (cron-poll.sh and jobs-draft.sh), only for items that reached
+  `drafts/`, never on the model's word.
+- **Shim verbs are discovered, not assumed.** `slack-mcp.sh react`/`unreact`/`search` look the
+  tool up in `tools/list` and map arguments from its `inputSchema`; a missing tool exits 64. The
+  connector has no remove-reaction tool, so `unreact` is 64 under `mcp-proxy` and earlier status
+  emoji stay. Callers log 64 and move on.
 
 **Assignment rules (`lib-assign-rules.sh`)** decide which Jira ticket `implement-next` may pick.
 Read-only: search + dev-panel reads, never an assign or transition. Four things not to undo:

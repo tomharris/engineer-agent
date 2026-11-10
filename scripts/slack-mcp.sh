@@ -20,6 +20,11 @@
 #   thread <channel> <ts>    [--json] [-w <ws>]              full thread context
 #   send   <channel> <text>  [--thread <ts>] [--json] [-w <ws>]   post a (threaded) message
 #   auth                     [--json] [-w <ws>]              signed-in identity / health check
+#   react   <channel> <ts> <emoji>                           add a reaction (no-op if present)
+#   unreact <channel> <ts> <emoji>                           remove a reaction (no-op if absent)
+#   search  <query...> [count]                               message search; `key:value` tokens
+#                                                            (after:, in:, from:) become filters
+# A verb whose connector tool is absent from tools/list exits 64 (EX_UNSUPPORTED) without calling it.
 # Discovery / debug (not used by skills):
 #   list-tools               dump the connector's tools/list (use this to confirm tool names)
 #   call <tool> <json-args>  call an arbitrary connector tool, print its raw text result
@@ -42,6 +47,7 @@ set -euo pipefail
 # EX_TOKEN_EXPIRED: distinct exit code so a caller (poll-slack, status) can tell "token expired,
 # skip cleanly" apart from "real error". Matches BSD sysexits EX_TEMPFAIL.
 readonly EX_TOKEN_EXPIRED=75
+readonly EX_UNSUPPORTED=64
 
 PLUGIN_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=lib-paths.sh
@@ -60,6 +66,11 @@ readonly DEFAULT_SERVER="https://mcp-proxy.anthropic.com/v1/mcp"
 TOOL_HISTORY="${EA_SLACK_TOOL_HISTORY:-slack_read_channel}"
 TOOL_THREAD="${EA_SLACK_TOOL_THREAD:-slack_read_thread}"
 TOOL_POST="${EA_SLACK_TOOL_POST:-slack_send_message}"
+# The connector has no remove-reaction tool today, so `unreact` exits 64 until one appears.
+# Argument names for these three are read from the tool's inputSchema, not assumed.
+TOOL_REACT="${EA_SLACK_TOOL_REACT:-slack_add_reaction}"
+TOOL_UNREACT="${EA_SLACK_TOOL_UNREACT:-slack_remove_reaction}"
+TOOL_SEARCH="${EA_SLACK_TOOL_SEARCH:-slack_search_public_and_private}"
 
 # --- Config: agent.slack.mcp.{server,server_id} -------------------------------------------
 # yaml_agent_slack_mcp() is provided by lib-paths.sh (sourced above) — the same agent:-scoped
@@ -188,10 +199,25 @@ mcp_tools_list() {
   printf '%s' "$resp" | jq '.result'
 }
 
-# mcp_call_text <tool> <arguments-json> -> prints the concatenated text of the tool result
-# content blocks (MCP results are content:[{type:"text",text:...}]). Errors are fatal.
+# tool_schema <tool> — the tool's inputSchema from tools/list, or nothing if the connector lacks it.
+# Requires mcp_connect first.
+tool_schema() {
+  local resp
+  resp="$(extract_jsonrpc "$(post_rpc '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}')")"
+  require_json "tools/list" "$resp"
+  printf '%s' "$resp" | jq -c --arg n "$1" 'first(.result.tools[]? | select(.name == $n) | (.inputSchema // {})) // empty'
+}
+
+unsupported() {
+  jq -nc --arg v "$1" --arg t "$2" '{ok:false, unsupported:true, verb:$v, tool:$t}'
+  exit "$EX_UNSUPPORTED"
+}
+
+# mcp_call_text <tool> <arguments-json> [tolerated-error-regex] -> prints the concatenated text of
+# the tool result content blocks (MCP results are content:[{type:"text",text:...}]). Errors are
+# fatal, except a tool-level error whose text matches the regex, which prints nothing.
 mcp_call_text() {
-  local tool="$1" args="$2" req resp err
+  local tool="$1" args="$2" tolerate="${3:-}" req resp err msg
   req=$(jq -nc --arg n "$tool" --argjson a "$args" \
     '{jsonrpc:"2.0", id:3, method:"tools/call", params:{name:$n, arguments:$a}}')
   resp="$(extract_jsonrpc "$(post_rpc "$req")")"
@@ -200,7 +226,9 @@ mcp_call_text() {
   [ -n "$err" ] && die "tool '$tool' failed: $err"
   # isError inside the result is a tool-level failure (bad channel, no permission, ...).
   if [ "$(printf '%s' "$resp" | jq -r '.result.isError // false' 2>/dev/null)" = "true" ]; then
-    die "tool '$tool' error: $(printf '%s' "$resp" | jq -r '[.result.content[]?.text] | join(" ")')"
+    msg="$(printf '%s' "$resp" | jq -r '[.result.content[]?.text] | join(" ")')"
+    if [ -n "$tolerate" ] && printf '%s' "$msg" | grep -qE "$tolerate"; then return 0; fi
+    die "tool '$tool' error: ${msg}"
   fi
   printf '%s' "$resp" | jq -r '[.result.content[]? | select(.type=="text") | .text] | join("\n")'
 }
@@ -320,6 +348,112 @@ cmd_send() {
     '{ok:true, ts:$ts, channel:$c} + (if ($raw|length)>0 then {note:$raw} else {} end)'
 }
 
+# schema_prop <schema> <regex> — first inputSchema property name matching the regex.
+schema_prop() {
+  printf '%s' "$1" | jq -r --arg re "$2" 'first((.properties // {}) | keys_unsorted[] | select(test($re))) // empty'
+}
+
+# cmd_reaction <verb> <tool> <channel> <ts> <emoji> — react/unreact. Already-present (add) and
+# absent (remove) are success, so callers can repeat a status change safely.
+cmd_reaction() {
+  local verb="$1" tool="$2" channel="$3" ts="$4" emoji="${5#:}" schema kc kt ke
+  emoji="${emoji%:}"
+  mcp_connect
+  schema="$(tool_schema "$tool")"
+  [ -n "$schema" ] || unsupported "$verb" "$tool"
+  kc="$(schema_prop "$schema" '^channel')"
+  kt="$(schema_prop "$schema" '(^|_)ts$|timestamp')"
+  ke="$(schema_prop "$schema" 'emoji|reaction|^name$')"
+  [ -n "$kc" ] && [ -n "$kt" ] && [ -n "$ke" ] \
+    || die "tool '$tool': cannot map channel/ts/emoji onto its arguments: $(printf '%s' "$schema" | jq -c '.properties // {} | keys')"
+  mcp_call_text "$tool" "$(jq -nc --arg kc "$kc" --arg kt "$kt" --arg ke "$ke" \
+      --arg c "$channel" --arg t "$ts" --arg e "$emoji" '{($kc):$c, ($kt):$t, ($ke):$e}')" \
+    'already_reacted|no_reaction' >/dev/null
+  jq -nc --arg c "$channel" --arg t "$ts" --arg e "$emoji" '{ok:true, channel:$c, ts:$t, emoji:$e}'
+}
+
+# parse_search_text — the search tool's results blob (stdin) into spy's search `hits` shape:
+#   ### Result N of M
+#   Channel: #name (ID: C123)          (DMs: "Channel: DM (ID: D…)")
+#   From: Name <email> (ID: U111)
+#   Message_ts: 1793715429.744769
+#   Permalink: [link](https://…/archives/C123/p1793715429744769)
+#   Text:
+#   <body until a line that is exactly --->
+# A body can contain those lines, so a message could forge a record. Every forged record must claim
+# an index in 1..N, which the real record with that index also claims: the response is rejected
+# (exit 3) unless the indices are exactly 1..N once each and agree with the "## Messages (N" header.
+parse_search_text() {
+  local tmp; tmp="$(mktemp)"
+  awk '
+    BEGIN { US=sprintf("%c",31); GS=sprintf("%c",30) }
+    function flush() {
+      if (!have) return
+      sub(/^\n+/,"",body); sub(/\n+$/,"",body)
+      printf "%s%s%s%s%s%s%s%s%s%s%s%s%s%s", ts, US, uid, US, uname, US, cid, US, cname, US, link, US, body, GS
+      have=0; intext=0; ts=""; uid=""; uname=""; cid=""; cname=""; link=""; body=""
+    }
+    (!have && /^## Messages \([0-9]+/) { h=$0; sub(/^## Messages \(/,"",h); hdr=h+0; next }
+    /^### Result [0-9]+ of [0-9]+/ {
+      flush(); have=1; n++
+      split($0, f, " "); i=f[3]+0; m=f[5]+0
+      if (seen[i]++ || (tot != "" && m != tot)) bad=1
+      tot=m; next }
+    (have && intext && $0 == "---") { intext=0; next }
+    (have && intext) { body=(body=="")?$0:body "\n" $0; next }
+    (have && /^Channel: /) { h=substr($0,10); if (match(h,/\(ID: [A-Z0-9]+\)/)) cid=substr(h,RSTART+5,RLENGTH-6)
+                             p=index(h," (ID:"); cname=(p>0)?substr(h,1,p-1):h; sub(/^#/,"",cname); next }
+    (have && /^From: /) { h=substr($0,7); if (match(h,/\(ID: [A-Z0-9]+\)/)) uid=substr(h,RSTART+5,RLENGTH-6)
+                          p=index(h," <"); if (p==0) p=index(h," (ID:"); uname=(p>0)?substr(h,1,p-1):h; next }
+    (have && /^Message_ts: /) { ts=substr($0,13); sub(/[ \t\r]+$/,"",ts); next }
+    (have && /^Permalink: /) { if (match($0,/\(https?:[^)]*\)/)) link=substr($0,RSTART+1,RLENGTH-2); next }
+    (have && /^Text:/) { intext=1; t=substr($0,6); sub(/^ /,"",t); if (t != "") body=t; next }
+    END {
+      flush()
+      if (n > 0 && (bad || n != tot || (hdr != "" && hdr != n))) bad=1
+      for (k = 1; k <= n; k++) if (!(k in seen)) bad=1
+      if (bad) { print "ambiguous search results (a message may contain a forged record)" > "/dev/stderr"; exit 3 }
+    }
+  ' > "$tmp" || { rm -f "$tmp"; return 3; }
+  jq -Rs '
+    split("\u001e") | map(select(length>0)) | map(split("\u001f")) | map({
+      ts: .[0], user_id: .[1], user_name: .[2], channel_id: .[3], channel_name: .[4],
+      permalink: .[5], text: (.[6] // "") })' "$tmp"
+  rm -f "$tmp"
+}
+
+# cmd_search <count> <query tokens...> — spy-shaped {query,total,hits}. Tokens of the form
+# word:value become the tool's filters string; the rest are keywords. Optional arguments are sent
+# only when the tool's schema declares them. response_format "detailed" is required: the
+# "concise" format carries no ids or timestamps.
+cmd_search() {
+  local count="$1"; shift
+  local query="$*" schema args raw hits arg tok parts kws=() filters=()
+  for arg in "$@"; do
+    read -r -a parts <<< "$arg"
+    for tok in ${parts[@]+"${parts[@]}"}; do
+      if [[ "$tok" =~ ^[a-z_]+:[^[:space:]]+$ ]]; then filters+=("$tok"); else kws+=("$tok"); fi
+    done
+  done
+  mcp_connect
+  schema="$(tool_schema "$TOOL_SEARCH")"
+  [ -n "$schema" ] || unsupported search "$TOOL_SEARCH"
+  args="$(jq -nc --argjson s "$schema" --arg f "${filters[*]:-}" --arg k "${kws[*]:-}" --argjson n "$count" '
+    ($s.properties // {}) as $p
+    | {}
+    + (if $p.keywords then {keywords: ($k | split(" ") | map(select(length > 0)))}
+       elif $p.query then {query: ([$k, $f] | map(select(length > 0)) | join(" "))} else {} end)
+    + (if $p.filters and $f != "" then {filters: $f} else {} end)
+    + (if $p.natural_language_query and $k != "" then {natural_language_query: $k} else {} end)
+    + (if $p.limit then {limit: $n} else {} end)
+    + (if $p.sort then {sort: "timestamp"} else {} end)
+    + (if $p.sort_dir then {sort_dir: "desc"} else {} end)
+    + (if $p.response_format then {response_format: "detailed"} else {} end)')"
+  raw="$(mcp_call_text "$TOOL_SEARCH" "$args")"
+  hits="$(extract_result_text "$raw" results | parse_search_text)" || die "search: ambiguous results; refusing to guess"
+  jq -nc --arg q "$query" --argjson h "$hits" '{query:$q, total:($h|length), hits:$h}'
+}
+
 cmd_auth() {
   # No message traffic — a successful initialize proves the token + connector are usable,
   # which is exactly what the status health check needs.
@@ -328,7 +462,7 @@ cmd_auth() {
 }
 
 usage() {
-  sed -n '2,40p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+  sed -n '2,43p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
   exit "${1:-0}"
 }
 
@@ -357,10 +491,21 @@ main() {
     send)    [ ${#pos[@]} -ge 2 ] || die "usage: send <channel> <text> [--thread <ts>]"
              cmd_send "${pos[0]}" "${pos[1]}" "$thread_ts" ;;
     auth)    cmd_auth ;;
+    react|unreact)
+             [ ${#pos[@]} -eq 3 ] || die "usage: $sub <channel> <ts> <emoji>"
+             if [ "$sub" = react ]; then t="$TOOL_REACT"; else t="$TOOL_UNREACT"; fi
+             cmd_reaction "$sub" "$t" "${pos[0]}" "${pos[1]}" "${pos[2]}" ;;
+    search)  [ ${#pos[@]} -ge 1 ] || die "usage: search <query...> [count]"
+             n=20
+             if [ ${#pos[@]} -gt 1 ] && [[ "${pos[${#pos[@]}-1]}" =~ ^[1-9][0-9]*$ ]]; then
+               n="${pos[${#pos[@]}-1]}"; unset 'pos[${#pos[@]}-1]'
+             fi
+             cmd_search "$n" "${pos[@]}" ;;
     list-tools) mcp_tools_list ;;
     call)    [ ${#pos[@]} -ge 2 ] || die "usage: call <tool> <json-args>"
              mcp_connect; mcp_call_text "${pos[0]}" "${pos[1]}" ;;
     _parse)  parse_messages_text ;;   # test seam: parse a messages-blob from stdin, no network
+    _parse_search) parse_search_text ;;
     -h|--help|help) usage 0 ;;
     *)       die "unknown subcommand: $sub (try --help)" ;;
   esac

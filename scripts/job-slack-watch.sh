@@ -1,9 +1,9 @@
 #!/bin/bash
 # job-slack-watch.sh — collector for a `slack` / `watch` scheduled job.
 #
-# Phase 1 supports `watch: [channels]` only: the same channel scan, relevance judgment, routing and
-# reconciliation as the global poll's scripts/poll-slack.sh, scoped to one project's channels and
-# with its OWN cutoff file. The separate cutoff is what makes running alongside the global poll safe:
+# Runs scripts/poll-slack.sh for one project with the job's `watch` sources (default: channels):
+# the same relevance judgment, routing and reconciliation as the global poll, with its OWN cutoff
+# file. The separate cutoff is what makes running alongside the global poll safe:
 # both do a read-modify-write of their state file, and sharing last-poll.yaml would lose updates.
 # Anything both paths find is deduplicated by the queue's (type, source_id) reconciliation.
 #
@@ -27,7 +27,15 @@ while [ $# -gt 0 ]; do
 done
 [ -n "$PROJECT" ] && [ -n "$JOB" ] && [ -n "$MANIFEST" ] || { echo "job-slack-watch.sh: missing arguments" >&2; exit 2; }
 
+. "${SCRIPT_DIR}/lib-jobs.sh"
+jobs_cfg_load
+IDX="$(jobs_enumerate | awk -F'|' -v k="$JOB" '($1 "." $3) == k { print $2; exit }')"
+[ -n "$IDX" ] || { echo "job-slack-watch.sh: no such job: $JOB" >&2; exit 2; }
+SOURCES="$(_jcfgl "projects.${PROJECT}.job.${IDX}.watch")"; SOURCES="${SOURCES:-channels}"
+TTL="$(_jcfg "projects.${PROJECT}.job.${IDX}.thread_ttl")"; TTL="$(jobs_duration_seconds "${TTL:-7d}")"
+
 EA_POLL_STATE_FILE="${EA_AGENT_DIR}/state/jobs/${JOB}.state.yaml" \
 EA_JOBS_IGNORE_EXCLUSIVE=1 \
 EA_PHASE_A_ERRORS="$ERRORS" \
-  bash "${SCRIPT_DIR}/poll-slack.sh" --project "$PROJECT" --manifest "$MANIFEST" ${RUN_TS:+--run-ts "$RUN_TS"}
+  bash "${SCRIPT_DIR}/poll-slack.sh" --project "$PROJECT" --manifest "$MANIFEST" ${RUN_TS:+--run-ts "$RUN_TS"} \
+    --sources "$SOURCES" --thread-ttl "$TTL"

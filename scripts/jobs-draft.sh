@@ -78,10 +78,13 @@ Be concise." \
   </dev/null || echo "jobs-draft: claude exited $?"
 
 total=0; drafted=0
-while IFS="	" read -r _action path _rest || [ -n "${path:-}" ]; do
+while IFS="	" read -r _action path mtype _rest || [ -n "${path:-}" ]; do
   [ -n "${path:-}" ] || continue
   total=$((total+1))
   b="$(basename "$path")"
+  if [ "${mtype:-}" = slack-question ] && [ -f "${AGENT_DIR}/queue/drafts/${b}" ]; then
+    bash "${PLUGIN_ROOT}/scripts/slack-event.sh" drafted "$b" >/dev/null 2>&1
+  fi
   # An _unrouted item may legitimately stay in incoming/ (review-queue surfaces it there); it still
   # counts once it carries a draft.
   if [ -f "${AGENT_DIR}/queue/drafts/${b}" ] \

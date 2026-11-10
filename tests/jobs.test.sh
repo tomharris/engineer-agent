@@ -64,7 +64,7 @@ echo "$job" >> "$HSTUB/h.calls"
 if [ -f "$HSTUB/h.$job.items" ]; then
   while read -r f; do
     p="$EA_AGENT_DIR/queue/incoming/$f"
-    printf -- '---\ntype: slack-question\nsource_id: "slack:%s"\nproject: alpha\n---\n## Context\n' "$f" > "$p"
+    printf -- '---\ntype: slack-question\nsource: slack\nsource_id: "slack:%s"\nproject: alpha\nchannel_id: "C1"\nmessage_ts: "1700000000.000100"\n---\n## Context\n' "$f" > "$p"
     printf 'create\t%s\tslack-question\talpha\tslack:%s\t0\t0\ttitle\n' "$p" "$f" >> "$manifest"
   done < "$HSTUB/h.$job.items"
 fi
@@ -155,7 +155,10 @@ has "hours start >= end" "0 <= start < end <= 24" "$(v 5m 17-9 '' channels)"
 has "hours past 24" "0 <= start < end <= 24" "$(v 5m 9-25 '' channels)"
 has "hours malformed" "must look like 9-17" "$(v 5m 9 '' channels)"
 has "unknown day" "days entry 'monday'" "$(v 5m '' monday channels)"
-has "unbuilt watch source" "watch source 'mentions' is not supported yet" "$(v 5m '' '' channels,mentions)"
+has "unbuilt watch source" "watch source 'reactions' is not supported yet" "$(v 5m '' '' channels,reactions)"
+has "mentions without agent.slack.user_id" "needs agent.slack.user_id" "$(EA_JOBS_CFG='agent.slack.method=spy' v 5m '' '' channels,mentions)"
+eq "mentions with agent.slack.user_id" "" "$(EA_JOBS_CFG='agent.slack.user_id=UME' v 5m '' '' mentions,my-threads)"
+has "bad thread_ttl" "thread_ttl '7 days'" "$(EA_JOBS_CFG='projects.alpha.job.0.thread_ttl=7 days' v 5m '' '' my-threads)"
 has "bad id" "must match" "$(v 5m '' '' channels 'Watch!')"
 has "unsupported pair" "unsupported integration/action 'github:merge'" "$(v 5m '' '' '' auto github:merge)"
 has "bad pause_after" "positive integer" "$(v 5m '' '' channels watch slack:watch 0)"
@@ -287,6 +290,18 @@ eq "status ok" ok "$(rfield alpha.watch status)"
 has "drafting prompt forbids polling" "Do NOT poll any source" "$(cat "$TMP/claude.calls")"
 has "drafting run uses the poll allowlist" "Bash(gh pr view:*)" "$(cat "$TMP/claude.calls")"
 case "$(cat "$TMP/claude.calls")" in *"slack-mcp.sh send"*|*"spy send"*) bad "send verb leaked into the allowlist" ;; *) ok "no Slack send verb" ;; esac
+
+printf '#!/bin/bash\nprintf "%%s\\n" "$*" >> "%s"\n' "$TMP/spy.argv" > "$TMP/bin/spy"; chmod +x "$TMP/bin/spy"
+reset_state; base_config; rm -f "$TMP/spy.argv"
+printf 'agent:\n  autonomy:\n    auto_execute: [slack-react]\n  slack:\n    reactions:\n      drafted: memo\n' >> "$CFG"
+echo "20261109-100000-slack-question-r.md" > "$TMP/h.alpha.watch.items"
+tick
+eq "no drafted reaction for an item that did not reach drafts/" "" "$(cat "$TMP/spy.argv" 2>/dev/null)"
+reset_state; base_config; rm -f "$TMP/spy.argv"
+printf 'agent:\n  autonomy:\n    auto_execute: [slack-react]\n  slack:\n    reactions:\n      drafted: memo\n' >> "$CFG"
+echo "20261109-100000-slack-question-r.md" > "$TMP/h.alpha.watch.items"
+CLAUDE_MODE=move tick
+eq "a drafted Slack item gets the drafted reaction" "react C1 1700000000.000100 memo --json" "$(cat "$TMP/spy.argv" 2>/dev/null)"
 
 reset_state; base_config
 echo "20261109-100000-slack-question-b.md" > "$TMP/h.alpha.watch.items"
