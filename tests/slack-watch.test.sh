@@ -173,6 +173,14 @@ hits "$(hit 1700000100.000100 U1)"
 run_job; f="$(items | head -1)"
 eq "two projects watching mentions => _unrouted, not an arbitrary winner" "_unrouted" "$(fmv "$f" project)"
 
+config "[mentions]"; reset; seed_cutoff 1700000000.000000
+hits "$(hit 9999999999.000000 U1)"
+run_job; eq "a future-dated hit is ignored and does not move the cutoff" "0|1700000000.000000" \
+  "$(nitems)|$(sed -n 's/.*mentions_ts: //p' "$STATE" | tr -d '"')"
+config "[mentions]"; reset; seed_cutoff 1700000000.000000
+hits "$(hit 1700000100.000100 U1 'https://myco.slack.com/archives/C999/p1700000100000100')"
+run_job; eq "a hit whose permalink names another message is ignored" "0" "$(nitems)"
+
 EA_TEST_TS_KEY=tskey bash "$POLL" --sources mentions >/dev/null 2>&1
 eq "mentions without --project is a usage error" "2" "$?"
 

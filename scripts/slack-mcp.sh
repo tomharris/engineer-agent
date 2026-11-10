@@ -380,7 +380,11 @@ cmd_reaction() {
 #   Permalink: [link](https://…/archives/C123/p1793715429744769)
 #   Text:
 #   <body until a line that is exactly --->
+# A body can contain those lines, so a message could forge a record. Every forged record must claim
+# an index in 1..N, which the real record with that index also claims: the response is rejected
+# (exit 3) unless the indices are exactly 1..N once each and agree with the "## Messages (N" header.
 parse_search_text() {
+  local tmp; tmp="$(mktemp)"
   awk '
     BEGIN { US=sprintf("%c",31); GS=sprintf("%c",30) }
     function flush() {
@@ -389,7 +393,12 @@ parse_search_text() {
       printf "%s%s%s%s%s%s%s%s%s%s%s%s%s%s", ts, US, uid, US, uname, US, cid, US, cname, US, link, US, body, GS
       have=0; intext=0; ts=""; uid=""; uname=""; cid=""; cname=""; link=""; body=""
     }
-    /^### Result [0-9]+ of [0-9]+/ { flush(); have=1; next }
+    (!have && /^## Messages \([0-9]+/) { h=$0; sub(/^## Messages \(/,"",h); hdr=h+0; next }
+    /^### Result [0-9]+ of [0-9]+/ {
+      flush(); have=1; n++
+      split($0, f, " "); i=f[3]+0; m=f[5]+0
+      if (seen[i]++ || (tot != "" && m != tot)) bad=1
+      tot=m; next }
     (have && intext && $0 == "---") { intext=0; next }
     (have && intext) { body=(body=="")?$0:body "\n" $0; next }
     (have && /^Channel: /) { h=substr($0,10); if (match(h,/\(ID: [A-Z0-9]+\)/)) cid=substr(h,RSTART+5,RLENGTH-6)
@@ -399,11 +408,18 @@ parse_search_text() {
     (have && /^Message_ts: /) { ts=substr($0,13); sub(/[ \t\r]+$/,"",ts); next }
     (have && /^Permalink: /) { if (match($0,/\(https?:[^)]*\)/)) link=substr($0,RSTART+1,RLENGTH-2); next }
     (have && /^Text:/) { intext=1; t=substr($0,6); sub(/^ /,"",t); if (t != "") body=t; next }
-    END { flush() }
-  ' | jq -Rs '
+    END {
+      flush()
+      if (n > 0 && (bad || n != tot || (hdr != "" && hdr != n))) bad=1
+      for (k = 1; k <= n; k++) if (!(k in seen)) bad=1
+      if (bad) { print "ambiguous search results (a message may contain a forged record)" > "/dev/stderr"; exit 3 }
+    }
+  ' > "$tmp" || { rm -f "$tmp"; return 3; }
+  jq -Rs '
     split("\u001e") | map(select(length>0)) | map(split("\u001f")) | map({
       ts: .[0], user_id: .[1], user_name: .[2], channel_id: .[3], channel_name: .[4],
-      permalink: .[5], text: (.[6] // "") })'
+      permalink: .[5], text: (.[6] // "") })' "$tmp"
+  rm -f "$tmp"
 }
 
 # cmd_search <count> <query tokens...> — spy-shaped {query,total,hits}. Tokens of the form
@@ -432,7 +448,7 @@ cmd_search() {
     + (if $p.sort then {sort: "timestamp"} else {} end)
     + (if $p.sort_dir then {sort_dir: "desc"} else {} end)')"
   raw="$(mcp_call_text "$TOOL_SEARCH" "$args")"
-  hits="$(extract_result_text "$raw" results | parse_search_text)"
+  hits="$(extract_result_text "$raw" results | parse_search_text)" || die "search: ambiguous results; refusing to guess"
   jq -nc --arg q "$query" --argjson h "$hits" '{query:$q, total:($h|length), hits:$h}'
 }
 

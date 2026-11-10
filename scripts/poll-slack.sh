@@ -554,6 +554,14 @@ if has_source mentions && [ "$TOKEN_SKIP" -eq 0 ]; then
         mts="$(printf '%s' "$msg" | jq -r '.ts // ""')"
         [[ "$ch" =~ ^[A-Z0-9]+$ ]] && [[ "$mts" =~ ^[0-9]+\.[0-9]+$ ]] || continue
         awk -v a="$mts" -v b="$mcut" 'BEGIN { exit !(a+0 > b+0) }' || continue
+        # A message cannot be from the future; such a ts would also freeze mentions_ts.
+        awk -v a="$mts" -v n="$(( $(epoch_now) + 300 ))" 'BEGIN { exit !(a+0 <= n) }' \
+          || { log "poll-slack: ignoring search hit ${ch}:${mts} with a future timestamp"; continue; }
+        plink="$(printf '%s' "$msg" | jq -r '.permalink // ""')"
+        if [ -n "$plink" ]; then
+          case "$plink" in */archives/"$ch"/p"${mts//./}"|*/archives/"$ch"/p"${mts//./}"\?*) ;;
+            *) log "poll-slack: ignoring search hit ${ch}:${mts} whose permalink disagrees"; continue ;; esac
+        fi
         # A reply's permalink names its thread; the item must reply there, not start a new thread.
         parent="$(printf '%s' "$msg" | jq -r '.permalink // ""' | sed -nE 's/.*[?&]thread_ts=([0-9]+\.[0-9]+).*/\1/p')"
         LOCAL_ERR=0
