@@ -556,6 +556,15 @@ fi
 #      is announced again rather than swallowed by a stale entry.
 # A standing duplicate stays visible without pushes: `/engineer-agent status` reports the count.
 
+# `drafted` status reactions for scripted Slack items Phase B actually moved to drafts/ (ground
+# truth, not the model's report). slack-event.sh is a no-op without the slack-react tier.
+if [ -n "$MANIFEST" ] && [ -s "$MANIFEST" ]; then
+  while IFS="	" read -r _a mpath mtype _rest || [ -n "${mpath:-}" ]; do
+    [ "${mtype:-}" = slack-question ] && [ -f "${AGENT_DIR}/queue/drafts/$(basename "$mpath")" ] \
+      && bash "${PLUGIN_ROOT}/scripts/slack-event.sh" drafted "$mpath" >/dev/null 2>&1
+  done < "$MANIFEST"
+fi
+
 # Before the dedup check: move any FINISHED draft that is parked in incoming/ into drafts/, the
 # only directory the approval gate reads. Ordered first deliberately — it changes which directory
 # an item lives in, and queue-dedup-check's healing rules turn on exactly that (a copy in drafts/

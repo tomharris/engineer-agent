@@ -184,6 +184,7 @@ _emit_jobs() {
     printf 'projects.%s.job.%s.pause_after_failures=%s\n' "$slug" "$i" "$(_get "${p}.guards.pause_after_failures")"
     printf 'projects.%s.job.%s.max_in_flight=%s\n' "$slug" "$i" "$(_get "${p}.guards.max_in_flight")"
     printf 'projects.%s.job.%s.daily_cap=%s\n'     "$slug" "$i" "$(_get "${p}.guards.daily_cap")"
+    printf 'projects.%s.job.%s.thread_ttl=%s\n'    "$slug" "$i" "$(_get "${p}.thread_ttl")"
     case " $JOBS_SUPPORTED " in
       *" ${integ}:${action} "*) printf 'projects.%s.job.%s.supported=1\n' "$slug" "$i" ;;
       *)                        printf 'projects.%s.job.%s.supported=0\n' "$slug" "$i" ;;
@@ -228,6 +229,10 @@ cmd_dump() {
   # — absent, the judgment leans on the configured keywords alone and is correspondingly weaker.
   printf 'agent.slack.user_name=%s\n'    "$(_get agent.slack.user_name)"
   printf 'agent.slack.user_id=%s\n'      "$(_get agent.slack.user_id)"
+  # Status-reaction map (scripts/slack-event.sh): a closed set of events, emoji names only.
+  for v in detected drafted posted rejected implementing pr_opened; do
+    printf 'agent.slack.reactions.%s=%s\n' "$v" "$(_get "agent.slack.reactions.${v}")"
+  done
   _emit_list agent.autonomy.auto_execute agent.autonomy.auto_execute
 
   # --- Jira / Slite REST access (scripts/poll-jira.sh, scripts/poll-slite.sh) ----------------

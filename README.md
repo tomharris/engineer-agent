@@ -831,7 +831,8 @@ projects:
         hours: "8-18"            # optional, machine-local time
         days: [mon, tue, wed, thu, fri]
         exclusive: true          # optional: the global poll stops reading this project's Slack
-        watch: [channels]
+        watch: [channels, mentions, my-threads]
+        thread_ttl: 7d           # my-threads: how long after your answer a thread stays watched
 ```
 
 Install the dispatcher once; it fires every minute and runs whatever is due:
@@ -841,12 +842,27 @@ Install the dispatcher once; it fires every minute and runs whatever is due:
 /path/to/engineer-agent/scripts/install-jobs.sh --uninstall
 ```
 
-Supported today: `slack` / `watch` with `watch: [channels]`, the same scan, relevance judgment and
-routing as the scripted Slack collector, limited to the project's own channels. It requires an
-`agent.typesafe` credential (plus `curl` and `jq`). When it finds something, a drafting run
-starts using the poll's read-only allowlist; drafts land in `drafts/` and push to ntfy as usual. Thread
-watching, mentions and emoji reactions are specified in
+`slack` / `watch` uses the scripted Slack collector's relevance judgment and routing, so it
+requires an `agent.typesafe` credential (plus `curl` and `jq`). Its `watch` sources:
+
+- `channels` — the project's own channels, as the global poll scans them.
+- `mentions` — `search "<@you>"` across the workspace (needs `agent.slack.user_id`). If several
+  projects watch mentions, a hit becomes an `_unrouted` item listing them.
+- `my-threads` — new replies in threads you answered through engineer-agent. Approving a Slack
+  answer records its thread in `state/watched-threads.tsv`; a reply from someone else is judged
+  like any message, except "is it aimed at me?" is not required. Threads drop out after
+  `thread_ttl` (default `7d`).
+
+When it finds something, a drafting run starts using the poll's read-only allowlist; drafts land in
+`drafts/` and push to ntfy as usual. Reaction triggers are specified in
 `docs/superpowers/specs/2026-11-09-scheduled-jobs-design.md` and not built yet.
+
+**Status reactions** (`slack-react` in `agent.autonomy.auto_execute`): the Slack message an item
+came from gets the `agent.slack.reactions` emoji for its state — `detected` when a collector queues
+it, `drafted` once drafted, then `posted` or `rejected` — each replacing the previous one. The
+reactions are added as you. The target is read from the queue item, never chosen by a model, and a
+failed reaction never fails the step that fired it. Under `mcp-proxy` the connector cannot remove
+a reaction, so earlier ones stay.
 
 Jira `implement-next` picks the next ticket by its `rules` and implements it. Dry-run the rules with
 `/engineer-agent jobs preview`. Each run:
@@ -964,7 +980,7 @@ Claude Code's `Bash()` permissions match on command prefix, not working director
 
 As with cron, set `CLAUDE_BIN` to pick a specific Claude Code binary — e.g. `CLAUDE_BIN=/opt/claude/bin/claude scripts/install-listener.sh`. Since the supervised service does not inherit your shell environment, the installer bakes the install-time value into the systemd unit (`Environment=`) or launchd plist (`EnvironmentVariables`).
 
-**Hands-free draft PRs:** with `agent.autonomy.auto_execute: ["draft-pr"]`, draft-PR creation after a ticket is implemented runs without an approval gate — a draft PR merges nothing and requests no review, and you still review it on GitHub. Every other action (Slack posts, PR approve/request-changes, issue creation, non-draft PRs) always requires explicit approval. The one other tier, `jira-claim`, applies only to a Jira `implement-next` scheduled job (see [Scheduled Jobs](#scheduled-jobs)).
+**Hands-free draft PRs:** with `agent.autonomy.auto_execute: ["draft-pr"]`, draft-PR creation after a ticket is implemented runs without an approval gate — a draft PR merges nothing and requests no review, and you still review it on GitHub. Every other action (Slack posts, PR approve/request-changes, issue creation, non-draft PRs) always requires explicit approval. `implement` and `jira-claim` apply only to a Jira `implement-next` scheduled job, and `slack-react` adds status reactions to Slack messages (see [Scheduled Jobs](#scheduled-jobs)).
 
 ### Turn-completion pushes
 
@@ -1059,6 +1075,7 @@ scripts/
   jobs-ctl.sh                  List / run / pause / resume scheduled jobs
   jobs-draft.sh                Drafting run for a job's collected items
   job-slack-watch.sh           slack/watch job collector
+  slack-event.sh               Slack status reactions + watched-thread registry for a queue item
   lib-jobs.sh                  Job config validation, due/window checks, per-job state
   lib-assign-rules.sh          Jira implement-next rules: validation, predicates, first-match selection
   lib-jira-api.sh              Jira REST helpers (credential on curl stdin)

@@ -55,7 +55,9 @@ If **decision** is `reject`:
 1. Add `rejected_reason: "{reason or 'rejected via execute'}"` to the frontmatter.
 2. Set `status: rejected`.
 3. Move the file to `~/.local/share/engineer-agent/queue/rejected/`.
-4. Report: `rejected {filename}`.
+4. If `type` is `slack-question`, run `${CLAUDE_PLUGIN_ROOT}/scripts/slack-event.sh rejected {filename}`
+   (best-effort status reaction; it always exits 0 — ignore its output).
+5. Report: `rejected {filename}`.
 
 Stop here.
 
@@ -87,10 +89,15 @@ read `projects.<project>.tracker`, or infer from `source` frontmatter (`github` 
   Resolve the binary (if `agent.slack.method` is `mcp-proxy` →
   `${CLAUDE_PLUGIN_ROOT}/scripts/slack-mcp.sh`; else `agent.slack.bin`, default `spy`) and
   workspace (`projects.<project>.slack.workspace` ?? `agent.slack.workspace`), then use the
-  item's `channel_id` and `message_ts` (the thread parent):
+  item's `channel_id` and thread: `thread_ts` when the item has one (the message is itself a
+  reply), else `message_ts`:
   ```bash
-  <slack> send {channel_id} "{reply_text}" --thread {message_ts} -w {workspace} --json
+  <slack> send {channel_id} "{reply_text}" --thread {thread_ts or message_ts} -w {workspace} --json
   ```
+  After the send succeeds, run `${CLAUDE_PLUGIN_ROOT}/scripts/slack-event.sh posted {filename}`.
+  It swaps the status reaction and registers the thread for the `my-threads` watch; it always
+  exits 0, so ignore its output. Pass only the queue filename: it reads the target from the
+  item's frontmatter.
   Under `mcp-proxy`, a `75` exit (`{"skipped": true}` — Keychain token expired) means the post
   did not happen: treat it as a failed action (Step 5's failure rule — leave the item in
   `drafts/`, report it, exit non-zero) so it is retried once Claude Code re-auths.

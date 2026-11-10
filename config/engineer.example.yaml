@@ -76,6 +76,12 @@ agent:
                           # Both feed the "is this question aimed at me?" judgment, and user_id
                           # also drops your own messages before any judgment is paid for. Optional;
                           # without them the judgment leans on `keywords` alone and is weaker.
+                          # A slack watch job's `mentions` source requires user_id.
+    reactions:            # status reactions, applied only with "slack-react" in auto_execute.
+      detected: eyes      # event -> emoji name (^[a-z0-9_+-]+$); an unmapped event adds nothing.
+      drafted: memo       # Each status replaces the earlier ones. mcp-proxy cannot remove a
+      posted: white_check_mark   # reaction, so there the earlier emoji stays.
+      rejected: no_entry_sign
     mcp:                  # only used when method: mcp-proxy
       server: "https://mcp-proxy.anthropic.com/v1/mcp"   # Anthropic MCP proxy base
       server_id: "REPLACE_ME"   # your authorized Slack connector's id (an mcpsrv_… or a UUID).
@@ -240,6 +246,8 @@ agent:
   # trusted_authors. Otherwise each pick waits for an Approve tap. WARNING: the implementation runs your build commands on files the
   # model edits, so text in a ticket can get code run on this machine as you. trusted_authors is
   # what limits that to people you trust. Deny-by-default.
+  # "slack-react" adds/removes the agent.slack.reactions status emoji on the Slack message an item
+  # came from (as you): on detection, drafting, posting and rejection.
   autonomy:
     auto_execute: ["draft-pr"]
 
@@ -360,8 +368,8 @@ projects:
       document_parent: ""                # Slite channel/note id for the QA doc; empty → user's private (personal) channel
     # Scheduled jobs: per-integration work on its own interval, dispatched every minute by
     # scripts/jobs-tick.sh (install with scripts/install-jobs.sh). Runs ALONGSIDE the global poll.
-    # Supported today: integration slack / action watch / watch [channels]. A slack watch job uses
-    # the scripted Slack collector, so it needs an agent.typesafe credential (curl + jq too).
+    # A slack watch job uses the scripted Slack collector, so it needs an agent.typesafe
+    # credential (curl + jq too).
     jobs: []
     # jobs:
     #   - id: slack-watch                # ^[a-z0-9-]+$, unique within the project
@@ -371,7 +379,9 @@ projects:
     #     hours: "8-18"                  # optional; machine-local hours, start inclusive, end exclusive
     #     days: [mon, tue, wed, thu, fri]  # optional
     #     exclusive: false               # true => the global poll skips this project's slack source
-    #     watch: [channels]
+    #     watch: [channels]              # any of: channels, mentions (needs agent.slack.user_id),
+    #                                    #   my-threads (threads you answered via engineer-agent)
+    #     thread_ttl: 7d                 # my-threads: stop watching a thread this long after you answered
     #     budget_usd: 2.00               # optional; cap for the drafting run (default 2.00)
     #     guards:
     #       pause_after_failures: 3      # consecutive failed runs before the job pauses itself

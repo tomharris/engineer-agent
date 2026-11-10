@@ -350,16 +350,23 @@ Same shape as existing suites (`tests/run-all.sh`, mktemp sandbox, PATH shims fo
    `scripts/confined-push.sh` (prefixed branch, same name, no force), dropped verbs acting on refs
    shared with the user's checkout, and removed `gh` text reads and the QA follow-on from
    unattended runs.
-5. spy `unreact`; shim `react`/`unreact`/`search`; `slack-react.sh` +
-   `slack-react` tier; `watched-threads.tsv` + `my-threads`; `mentions`.
+5. **Built.** spy `unreact` (react/unreact idempotent); shim `react`/`unreact`/`search`, each
+   discovered from `tools/list` with arguments mapped from its `inputSchema` (the connector has no
+   remove-reaction tool, so `unreact` exits 64 there); `scripts/slack-event.sh` + `slack-react`
+   tier; `watched-threads.tsv` + `my-threads`; `mentions`. Deviations: the script is
+   `slack-event.sh <event> <queue-item>` (the item, not channel/ts, so a model never names a
+   target) and also registers the thread on `posted`; `watched-threads.tsv` gains a `project`
+   column (a job reads only its own project's threads); mentions route over every project with a
+   `mentions` watch; `implementing`/`pr_opened` are mapped but nothing fires them yet (no ticket
+   has a Slack origin); the shim's `read` still drops the `Reactions:` line (phase 6 needs it).
 6. Reaction triggers (spy: reactions in `read` output).
 7. `ready_check`.
 
 ## Decisions
 
-- **Slack connector:** exposes reaction add/remove and search tools, so phase 5 covers both
-  backends. Exact tool names are pinned from `slack-mcp.sh list-tools` at implementation time and
-  overridable via `EA_SLACK_TOOL_*`, like the existing three.
+- **Slack connector:** exposes `slack_add_reaction` and `slack_search_public_and_private` but no
+  remove-reaction tool, so `unreact` is unsupported (64) under `mcp-proxy`. Tool names are
+  overridable via `EA_SLACK_TOOL_*`; argument names come from each tool's `inputSchema`.
 - **`daily_cap`:** per job. Two jobs in one project each get their own cap.
 - **Failed implementation:** no Jira comment. A comment is append-only with no idempotent retry
   (see "Confined headless ticket investigation"); the rollback plus the ntfy push are the signal.

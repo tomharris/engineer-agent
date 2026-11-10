@@ -140,6 +140,8 @@ run_generic_execute() {
     slack_rules+=(
       "Bash(${shim_root}/scripts/slack-mcp.sh *)"
       "Bash(bash ${shim_root}/scripts/slack-mcp.sh *)"
+      "Bash(${shim_root}/scripts/slack-event.sh *)"
+      "Bash(bash ${shim_root}/scripts/slack-event.sh *)"
     )
   done
   local allowed_tools=(

@@ -401,6 +401,8 @@ write_doc_item() {
 # Named arguments:
 #   --path --source-url --source-id --title --priority --created-at --project
 #   --channel-id --channel-name --message-ts --author --author-id
+#   --thread-ts <ts>         parent ts when the message is a thread reply (the reply goes there)
+#   --watch-source <s>       "mentions" | "my-threads" (omitted for a channel scan)
 #   --matched <slugs>        space-separated; emitted only for _unrouted items
 #   --routing-method --routing-rationale
 #   --relevance-method <m>   "typesafe" | "" (omitted when the tier did not run)
@@ -410,7 +412,7 @@ write_doc_item() {
 write_slack_item() {
   local path="" url="" sid="" title="" prio="normal" created="" project=""
   local ch="" chname="" mts="" author="" author_id="" matched="" rmethod="" rrat=""
-  local relm="" rels="" f_body="" f_thread=""
+  local relm="" rels="" f_body="" f_thread="" thread_ts="" wsrc=""
   while [ $# -gt 0 ]; do
     case "$1" in
       --path) path="$2"; shift 2 ;;              --source-url) url="$2"; shift 2 ;;
@@ -423,6 +425,7 @@ write_slack_item() {
       --routing-rationale) rrat="$2"; shift 2 ;; --relevance-method) relm="$2"; shift 2 ;;
       --relevance-scores) rels="$2"; shift 2 ;;  --body-file) f_body="$2"; shift 2 ;;
       --thread-file) f_thread="$2"; shift 2 ;;
+      --thread-ts) thread_ts="$2"; shift 2 ;;    --watch-source) wsrc="$2"; shift 2 ;;
       *) shift ;;
     esac
   done
@@ -442,6 +445,8 @@ write_slack_item() {
     echo "channel_id: \"$(yaml_escape "$ch")\""
     echo "channel_name: \"$(yaml_escape "$chname")\""
     echo "message_ts: \"$(yaml_escape "$mts")\""
+    [ -n "$thread_ts" ] && echo "thread_ts: \"$(yaml_escape "$thread_ts")\""
+    [ -n "$wsrc" ] && echo "watch_source: \"$(yaml_escape "$wsrc")\""
     echo "author: \"$(yaml_escape "$author")\""
     [ -n "$author_id" ] && echo "author_id: \"$(yaml_escape "$author_id")\""
     [ -n "$rmethod" ] && echo "routing_method: \"$(yaml_escape "$rmethod")\""

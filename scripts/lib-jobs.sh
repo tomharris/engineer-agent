@@ -14,8 +14,8 @@
 JOBS_STATE_DIR="${EA_AGENT_DIR}/state/jobs"
 JOBS_MIN_EVERY=60
 JOBS_DAYS="mon tue wed thu fri sat sun"
-# Phase 1 ships only the channel scan; the other watch sources are specified but not built yet.
-JOBS_SLACK_WATCH_SUPPORTED="channels"
+# `reactions` (trigger emoji) is specified but not built yet.
+JOBS_SLACK_WATCH_SUPPORTED="channels mentions my-threads"
 
 _jobs_script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib-assign-rules.sh
@@ -114,6 +114,12 @@ jobs_validate() {
     for w in ${watch//,/ }; do
       case " $JOBS_SLACK_WATCH_SUPPORTED " in *" $w "*) ;; *) echo "watch source '${w}' is not supported yet (supported: ${JOBS_SLACK_WATCH_SUPPORTED})"; return 1 ;; esac
     done
+    jobs_cfg_load
+    case ",${watch}," in
+      *,mentions,*) [ -n "$(_jcfg agent.slack.user_id)" ] || { echo "watch source 'mentions' needs agent.slack.user_id"; return 1; } ;;
+    esac
+    d="$(_jcfg "projects.${slug}.job.${idx}.thread_ttl")"
+    [ -z "$d" ] || [ -n "$(jobs_duration_seconds "$d")" ] || { echo "thread_ttl '${d}' must look like 12h or 7d"; return 1; }
   fi
   return 0
 }
