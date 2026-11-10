@@ -193,6 +193,7 @@ CHROME_TOOLS=(
   mcp__claude-in-chrome__read_page mcp__claude-in-chrome__get_page_text mcp__claude-in-chrome__find
   mcp__claude-in-chrome__form_input mcp__claude-in-chrome__read_console_messages
   mcp__claude-in-chrome__read_network_requests mcp__claude-in-chrome__resize_window
+  mcp__claude-in-chrome__javascript_tool
 )
 
 # browser_test — sets BT to pass | fail | <reason it could not run>. Report in $D/browser-report.md.
