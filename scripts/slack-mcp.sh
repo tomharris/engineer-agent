@@ -424,7 +424,8 @@ parse_search_text() {
 
 # cmd_search <count> <query tokens...> — spy-shaped {query,total,hits}. Tokens of the form
 # word:value become the tool's filters string; the rest are keywords. Optional arguments are sent
-# only when the tool's schema declares them.
+# only when the tool's schema declares them. response_format "detailed" is required: the
+# "concise" format carries no ids or timestamps.
 cmd_search() {
   local count="$1"; shift
   local query="$*" schema args raw hits arg tok parts kws=() filters=()
@@ -446,7 +447,8 @@ cmd_search() {
     + (if $p.natural_language_query and $k != "" then {natural_language_query: $k} else {} end)
     + (if $p.limit then {limit: $n} else {} end)
     + (if $p.sort then {sort: "timestamp"} else {} end)
-    + (if $p.sort_dir then {sort_dir: "desc"} else {} end)')"
+    + (if $p.sort_dir then {sort_dir: "desc"} else {} end)
+    + (if $p.response_format then {response_format: "detailed"} else {} end)')"
   raw="$(mcp_call_text "$TOOL_SEARCH" "$args")"
   hits="$(extract_result_text "$raw" results | parse_search_text)" || die "search: ambiguous results; refusing to guess"
   jq -nc --arg q "$query" --argjson h "$hits" '{query:$q, total:($h|length), hits:$h}'

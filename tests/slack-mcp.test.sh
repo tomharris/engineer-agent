@@ -277,7 +277,7 @@ eq "react: unmappable schema fails" "1" "$?"
 : > "$CURL_LOG"
 out="$("$SHIM" search "<@U999>" after:2026-11-01 15 --json 2>/dev/null)"; rc=$?
 eq "search: exit 0" "0" "$rc"
-eq "search: tool args" '{"filters":"after:2026-11-01","keywords":["<@U999>"],"limit":15,"natural_language_query":"<@U999>","sort":"timestamp","sort_dir":"desc"}' \
+eq "search: tool args" '{"filters":"after:2026-11-01","keywords":["<@U999>"],"limit":15,"natural_language_query":"<@U999>","response_format":"detailed","sort":"timestamp","sort_dir":"desc"}' \
    "$(call_args slack_search_public_and_private | jq -cS .)"
 eq "search: total"       "2" "$(printf '%s' "$out" | jq -r '.total')"
 eq "search: hit0"        "1793715429.744769|U111|Alice Smith|C123|eng" \
