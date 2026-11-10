@@ -175,6 +175,11 @@ reader will otherwise "fix" back:
   Nothing enforces "only `url`" except the prompt and the extension's site permissions. The
   validator requires a localhost `url` so the app under test is the branch, not a shared
   environment. This is why it runs only after the same trust gate as the implementation.
+- **`browser.setup` / `browser.serve` run branch code unconfined** (bash, your user, your env):
+  `npm ci` runs dependency install scripts and `npm run dev` runs the model's code. This is the
+  confined run's accepted residual (its `Bash(npm *)` rule already runs model-edited
+  `package.json` scripts), not a new one, and it is bounded by the same trust gate. Not
+  `--ignore-scripts`: it breaks packages that need postinstall. An OS sandbox would be the real fix.
 - **`pr-ready` is its own tier**, since ready-for-review notifies reviewers. Without it the pipeline
   pushes that the PR passed and leaves it draft. It never moves the board status.
 - **A stop leaves the claim.** Unlike a failed implementation, the PR exists, so `on_fail` does not
