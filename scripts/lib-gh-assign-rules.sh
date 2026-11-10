@@ -12,7 +12,7 @@
 # and lib-queue.sh; gh and jq at selection time. Callers set TMPD.
 
 GR_RULE_KEYS="name query require ready_check claim on_fail"
-GR_REQ_LISTS="labels_any labels_none milestones issue_types project_statuses"
+GR_REQ_LISTS="labels_any labels_none milestones issue_types project_statuses title_prefixes"
 GR_REQ_SCALARS="assignee min_age min_quiet no_open_blockers no_linked_pr has_acceptance_criteria min_body_chars"
 GR_CLAIM_KEYS="assign project_status"
 GR_ONFAIL_KEYS="unassign project_status"
@@ -165,6 +165,7 @@ _gr_facts() {
     def l(n; v): "\(n)\t\(v)";
     l("repo"; .repository.nameWithOwner // "" | ascii_downcase),
     l("number"; .number // ""), l("state"; .state // ""),
+    l("title"; .title // "" | gsub("[\t\n\r]"; " ")),
     l("created"; .createdAt // ""), l("updated"; .updatedAt // ""),
     l("assignee_count"; .assignees.totalCount // 0),
     (.assignees.nodes[]?.login // empty | l("assignee"; ascii_downcase)),
@@ -212,6 +213,16 @@ gr_eval() {
     [ -n "$v" ] || { echo "${x% *}: none set"; return 1; }
     _ar_member "$v" "$want" 1 || { echo "${x% *}: '${v}' not in list"; return 1; }
   done
+
+  want="$(_arcl "$p.require.title_prefixes")"
+  if [ -n "$want" ]; then
+    v="$(_gr_lower "$(_ar_fact "$facts" title)")"; hit=0
+    while IFS= read -r x; do
+      x="$(_gr_lower "$x")"
+      [ -n "$x" ] && [ "${v:0:${#x}}" = "$x" ] && hit=1
+    done <<< "$want"
+    [ "$hit" = 1 ] || { echo "title_prefixes: title does not start with any"; return 1; }
+  fi
 
   want="$(_arcl "$p.require.labels_any")"
   if [ -n "$want" ]; then

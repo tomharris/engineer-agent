@@ -250,6 +250,8 @@ agent:
   # (assign the issue / set its Projects board status), and trusted_authors holding GitHub logins:
   # the issue's author and everyone who edited its title, body or labels. Bots that label issues
   # (e.g. "github-actions") count as editors and must be listed if you trust them.
+  # "pr-ready" lets an implement-next job's after_pr pipeline mark its PR ready for review (which
+  # requests reviews) once CI is green and the browser test passed.
   # "slack-react" adds/removes the agent.slack.reactions status emoji on the Slack message an item
   # came from (as you): on detection, drafting, posting and rejection.
   autonomy:
@@ -455,8 +457,25 @@ projects:
     #           no_linked_pr: true       # no closing PR, linked branch, or open PR referencing it
     #           has_acceptance_criteria: true
     #           min_body_chars: 200
+    #           title_prefixes: ["[Web]"]  # title starts with one of these (case-insensitive)
     #         claim: { assign: self, project_status: "In Progress" }  # adds the issue to the board if absent
     #         on_fail: { unassign: true, project_status: "Ready" }
+    #     # Optional, either tracker: after the draft PR exists (scripts/pr-pipeline.sh, detached).
+    #     after_pr:
+    #       budget_usd: 3.00             # per fix / browser run
+    #       max_runtime: 2h              # whole pipeline; exceeded => stop, PR stays draft
+    #       mark_ready: true             # needs "pr-ready" in autonomy.auto_execute
+    #       ci:
+    #         timeout: 30m
+    #         fix_attempts: 1            # 0-3 confined fix runs on red CI
+    #       browser:                     # optional; omit to skip the browser test
+    #         setup: "npm ci"            # run in a fresh worktree of the PR branch
+    #         serve: "npm run dev -- --port 3100"   # started in the background, killed afterwards
+    #         url: "http://localhost:3100"          # must be localhost
+    #         ready_timeout: 3m
+    #         instructions: "Log in as the seeded demo user (password in db/seeds.rb)."  # never a secret
+    #         chrome_device: ""          # Claude in Chrome deviceId on THIS machine; without it the run
+    #                                    #   drives whichever browser was picked last (maybe another host)
 
   # Example: project using GitHub Issues instead of Jira
   # my-app:
