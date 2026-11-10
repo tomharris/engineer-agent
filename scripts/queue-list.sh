@@ -32,6 +32,21 @@ while [ $# -gt 0 ]; do
   esac
 done
 
+# review-queue.md's short filter names. Anything else, including a full type, matches as given.
+case "$WANT_TYPE" in
+  pr)            WANT_TYPE="pr-review" ;;
+  slack)         WANT_TYPE="slack-question" ;;
+  investigation) WANT_TYPE="ticket-investigation" ;;
+  doc)           WANT_TYPE="doc-review" ;;
+  spec)          WANT_TYPE="spec-refinement" ;;
+  design)        WANT_TYPE="design-doc" ;;
+  refinement)    WANT_TYPE="ticket-refinement" ;;
+  gap)           WANT_TYPE="gap-audit" ;;
+  qa)            WANT_TYPE="qa-test-plan" ;;
+  audit)         WANT_TYPE="code-audit-finding" ;;
+  codify)        WANT_TYPE="codify-candidate" ;;
+esac
+
 prio_rank() { case "$1" in urgent) echo 0 ;; normal) echo 1 ;; low) echo 2 ;; *) echo 1 ;; esac; }
 
 ROWS=""
