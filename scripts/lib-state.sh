@@ -22,13 +22,16 @@
 # was unchanged, which false-warned on every quiet Slack poll and could be defeated by a model
 # fabricating a timestamp. Liveness belongs in the receipt; do not overload these values with it.
 #
+# EA_POLL_STATE_FILE overrides the default path. Scheduled jobs set it so each job keeps its own
+# cutoffs instead of racing the global poll's read-modify-write of last-poll.yaml.
+#
 # Requires lib-yaml.sh.
 
 EA_STATE=""
 
 # state_load [file] — parse the state file into the flat form held in $EA_STATE.
 state_load() {
-  local f="${1:-${EA_AGENT_DIR}/state/last-poll.yaml}"
+  local f="${1:-${EA_POLL_STATE_FILE:-${EA_AGENT_DIR}/state/last-poll.yaml}}"
   EA_STATE="$(YAML_SEP='|' yaml_dump "$f")"
 }
 
@@ -65,7 +68,7 @@ ${path}[]=${item}"
 
 # state_save [file] — re-emit the flat form as nested YAML.
 state_save() {
-  local f="${1:-${EA_AGENT_DIR}/state/last-poll.yaml}" tmp
+  local f="${1:-${EA_POLL_STATE_FILE:-${EA_AGENT_DIR}/state/last-poll.yaml}}" tmp
   tmp="$(mktemp)"
   printf '%s\n' "$EA_STATE" \
     | sed -E '/^[[:space:]]*$/d' \

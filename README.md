@@ -359,6 +359,20 @@ heal was declined and needs a look.
 /engineer-agent status
 ```
 
+When scheduled jobs are configured, `status` also lists them (see `/engineer-agent jobs`).
+
+### `/engineer-agent jobs [list | run <project>.<id> | pause <project>.<id> | resume <project>.<id>]`
+
+Inspect and control scheduled jobs (see [Scheduled Jobs](#scheduled-jobs)). `list` (the default)
+shows each job's interval, state (`idle` / `running` / `paused` / `invalid`), last run and next due
+time. `run` runs one now, ignoring its interval and hours. `resume` clears a pause, including the
+automatic one after repeated failures.
+
+```
+/engineer-agent jobs
+/engineer-agent jobs run billing-api.slack-watch
+```
+
 ### `/engineer-agent digest [--days N]`
 
 Generate a daily summary of all agent activity across all projects.
@@ -798,6 +812,53 @@ crontab -l | grep engineer-agent            # verify
 crontab -l | grep -v engineer-agent | crontab -   # remove
 ```
 
+## Scheduled Jobs
+
+The global poll checks every source of every project on one interval. Scheduled jobs give one
+project's integration its **own** interval, running alongside the poll (not replacing it):
+
+```yaml
+projects:
+  billing-api:
+    jobs:
+      - id: slack-watch
+        integration: slack
+        action: watch
+        every: 5m
+        hours: "8-18"            # optional, machine-local time
+        days: [mon, tue, wed, thu, fri]
+        exclusive: true          # optional: the global poll stops reading this project's Slack
+        watch: [channels]
+```
+
+Install the dispatcher once; it fires every minute and runs whatever is due:
+
+```bash
+/path/to/engineer-agent/scripts/install-jobs.sh              # macOS LaunchAgent / Linux crontab
+/path/to/engineer-agent/scripts/install-jobs.sh --uninstall
+```
+
+Supported today: `slack` / `watch` with `watch: [channels]`, the same scan, relevance judgment and
+routing as the scripted Slack collector, limited to the project's own channels. It requires an
+`agent.typesafe` credential (plus `curl` and `jq`). When it finds something, a drafting run
+starts using the poll's read-only allowlist; drafts land in `drafts/` and push to ntfy as usual. Thread
+watching, mentions, emoji reactions and Jira `implement-next` are specified in
+`docs/superpowers/specs/2026-11-09-scheduled-jobs-design.md` and not built yet.
+
+How it behaves:
+
+- **Each job is isolated.** It has its own lock, a wall-clock timeout (`EA_JOB_MAX_SECONDS`,
+  default 3600) that kills its whole process tree, its own receipt at
+  `state/jobs/<project>.<id>.receipt`, and its own Slack cutoff file, so it never races the
+  global poll's `last-poll.yaml`. Anything both paths find is deduplicated by the queue.
+- **Failures are loud once, then pause.** The first failed run pushes one alert. After
+  `guards.pause_after_failures` failures in a row (default 3) the job pauses itself and pushes once
+  more. Resume it with `/engineer-agent jobs resume <project>.<id>`. A paused job never claims
+  `exclusive`, so the global poll picks that source back up.
+- **Drafting yields to the poll.** The drafting run shares the poll's lock. If the poll is running,
+  drafting is deferred (`drafting: deferred` in the receipt) and the next tick retries.
+- **Invalid entries are reported, not run.** `/engineer-agent jobs` shows the reason.
+
 ## Push Notifications & Remote Approval
 
 With an `agent.notify.ntfy` block configured, the agent pushes work to your phone and lets you approve it remotely. The whole loop runs over [ntfy](https://ntfy.sh) — no custom server.
@@ -960,6 +1021,13 @@ hooks/
 scripts/
   cron-poll.sh                 Cron polling script
   install-cron.sh              Cron setup script
+  jobs-tick.sh                 Scheduled-jobs dispatcher (every 60s)
+  install-jobs.sh              Installs the scheduled-jobs dispatcher
+  jobs-ctl.sh                  List / run / pause / resume scheduled jobs
+  jobs-draft.sh                Drafting run for a job's collected items
+  job-slack-watch.sh           slack/watch job collector
+  lib-jobs.sh                  Job config validation, due/window checks, per-job state
+  lib-poll-allowlist.sh        Read-only allowlist shared by the poll and job drafting
   notify.sh                    Publish a push notification to ntfy
   turn-notify-hook.sh          Hook handler: FYI push at each implement-ticket turn end
   approval-listener.sh         Long-running ntfy command-topic subscriber (remote approval)
@@ -990,6 +1058,8 @@ config/
     ntfy-seen.yaml             Processed ntfy command message IDs (remote-approval dedup)
     ntfy-listener.since        Last-seen ntfy command timestamp (listener stream resume point)
     approval-listener.log      Listener activity log
+    jobs.log                   Scheduled-jobs dispatcher log
+    jobs/                      Per job (<project>.<id>.*): last-run, receipt, lock, failures, paused, invalid, state.yaml
     turn-notify/               One marker per session armed for turn-completion pushes
     turn-notify.log            Turn-completion hook diagnostics (only with EA_TURN_NOTIFY_DEBUG=1)
 ```

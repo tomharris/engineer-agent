@@ -94,7 +94,9 @@ _tracker() {
 # the kind of bookkeeping a script does not get wrong. The reason strings match the wording already
 # appearing in state/last-poll-receipt.yaml so the change is invisible in the receipt's diff.
 _source_state() {
-  local slug="$1" src="$2" tracker; tracker="$(_tracker "$slug")"
+  local slug="$1" src="$2" tracker owner; tracker="$(_tracker "$slug")"
+  owner="$(_exclusive_owner "$slug" "$src")"
+  if [ -n "$owner" ]; then printf 'skipped:owned by scheduled job %s' "$owner"; return 0; fi
   case "$src" in
     github)
       [ -n "$(_get "projects.${slug}.github.owner")" ] || { printf 'skipped:no github section configured'; return 0; }
@@ -119,6 +121,75 @@ _source_state() {
       printf 'configured' ;;
     *) printf 'skipped:unknown source' ;;
   esac
+}
+
+# --- Scheduled jobs (scripts/jobs-tick.sh) -----------------------------------------------------
+# The (integration:action) pairs the dispatcher has a handler for. Single source of truth: jobs
+# naming anything else are reported unsupported and never run, and never claim `exclusive`.
+JOBS_SUPPORTED="slack:watch"
+
+# Job integration name -> the source name used by _source_state / the receipt.
+_job_source() {
+  case "$1" in
+    github-issues) printf 'github_issues' ;;
+    *)             printf '%s' "$1" ;;
+  esac
+}
+
+# _exclusive_owner <slug> <source> — id of a job that owns this source exclusively, else nothing.
+#
+# Only a job that can actually run takes ownership: supported, and not paused. A paused job reading
+# as the owner would leave the source polled by nobody, with the receipt calling it "skipped" — a
+# silent outage. EA_JOBS_IGNORE_EXCLUSIVE=1 is set by the job's own collector run, which must see
+# the source as configured.
+_exclusive_owner() {
+  local slug="$1" src="$2" n i id integ action
+  [ "${EA_JOBS_IGNORE_EXCLUSIVE:-}" = "1" ] && return 0
+  n="$(yaml_seq_len "projects.${slug}.jobs")"
+  [ "${n:-0}" -gt 0 ] 2>/dev/null || return 0
+  i=0
+  while [ "$i" -lt "$n" ]; do
+    if [ "$(_get "projects.${slug}.jobs[${i}].exclusive")" = "true" ]; then
+      id="$(_get "projects.${slug}.jobs[${i}].id")"
+      integ="$(_get "projects.${slug}.jobs[${i}].integration")"
+      action="$(_get "projects.${slug}.jobs[${i}].action")"
+      if [ "$(_job_source "$integ")" = "$src" ] \
+         && case " $JOBS_SUPPORTED " in *" ${integ}:${action} "*) true ;; *) false ;; esac \
+         && [ ! -e "${EA_AGENT_DIR}/state/jobs/${slug}.${id}.paused" ]; then
+        printf '%s' "$id"; return 0
+      fi
+    fi
+    i=$((i+1))
+  done
+}
+
+# _emit_jobs <slug> — shape only; semantic validation lives in lib-jobs.sh.
+# Keyed by index, not id: a duplicate or malformed id must still reach the validator to be reported.
+_emit_jobs() {
+  local slug="$1" n i p integ action
+  n="$(yaml_seq_len "projects.${slug}.jobs")"
+  [ "${n:-0}" -gt 0 ] 2>/dev/null || { printf 'projects.%s.job_count=0\n' "$slug"; return 0; }
+  printf 'projects.%s.job_count=%s\n' "$slug" "$n"
+  i=0
+  while [ "$i" -lt "$n" ]; do
+    p="projects.${slug}.jobs[${i}]"
+    integ="$(_get "${p}.integration")"; action="$(_get "${p}.action")"
+    printf 'projects.%s.job.%s.id=%s\n'          "$slug" "$i" "$(_get "${p}.id")"
+    printf 'projects.%s.job.%s.integration=%s\n' "$slug" "$i" "$integ"
+    printf 'projects.%s.job.%s.action=%s\n'      "$slug" "$i" "$action"
+    printf 'projects.%s.job.%s.every=%s\n'       "$slug" "$i" "$(_get "${p}.every")"
+    printf 'projects.%s.job.%s.hours=%s\n'       "$slug" "$i" "$(_get "${p}.hours")"
+    printf 'projects.%s.job.%s.exclusive=%s\n'   "$slug" "$i" "$(_get "${p}.exclusive")"
+    printf 'projects.%s.job.%s.budget_usd=%s\n'  "$slug" "$i" "$(_get "${p}.budget_usd")"
+    printf 'projects.%s.job.%s.pause_after_failures=%s\n' "$slug" "$i" "$(_get "${p}.guards.pause_after_failures")"
+    case " $JOBS_SUPPORTED " in
+      *" ${integ}:${action} "*) printf 'projects.%s.job.%s.supported=1\n' "$slug" "$i" ;;
+      *)                        printf 'projects.%s.job.%s.supported=0\n' "$slug" "$i" ;;
+    esac
+    _emit_list "projects.${slug}.job.${i}.days"  "${p}.days"
+    _emit_list "projects.${slug}.job.${i}.watch" "${p}.watch"
+    i=$((i+1))
+  done
 }
 
 cmd_projects() { yaml_keys projects; }
@@ -262,6 +333,7 @@ cmd_dump() {
     for w in github github_issues slack jira slite; do
       printf 'projects.%s.source.%s=%s\n' "$slug" "$w" "$(_source_state "$slug" "$w")"
     done
+    _emit_jobs "$slug"
   done < <(yaml_keys projects)
 }
 

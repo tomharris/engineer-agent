@@ -73,6 +73,8 @@ of truth for this location — source it rather than hardcoding the path.
     ├── last-poll-receipt.yaml — Liveness receipt from the last cron poll (run_id, status, item count, skipped, errors)
     ├── claude-bin.path        — Resolved `claude` executable the last unattended poll ran (macOS TCC preflight)
     ├── ntfy-seen.yaml         — Processed ntfy command message IDs (remote-approval dedup)
+    ├── jobs/                  — Per scheduled job (<project>.<id>.*): last-run, receipt, lock, failures, paused, invalid, state.yaml (its own cutoffs)
+    ├── jobs.log               — Scheduled-jobs dispatcher log
     ├── turn-notify/           — One marker per session armed for turn-completion pushes (<session_id>)
     └── turn-notify.log        — Turn-completion hook diagnostics (only when EA_TURN_NOTIFY_DEBUG=1)
 ```
@@ -163,7 +165,7 @@ every call site does is resolve the **effective Slack binary**, then invoke it i
   default); the `mcp-proxy` shim accepts `-w` but ignores it (the connector is bound to its
   authorized workspace).
 
-To find config for a specific project, look up `projects.<slug>`. Each project entry has `path`, `tracker`, `github`, `slack`, `jira`, `slite`, `qa`, and (optional) `exec` and `investigation` subsections. `investigation` overrides the global kind lists for this project and carries `on_complete_status` — a Jira status to move the ticket to after a successful findings comment. Empty/absent ⇒ no transition, **and the transition MCP verbs are not added to the confined run's allowlist at all**, so capability follows config. `exec.allowed_commands` is the build/test command allowlist for confined headless ticket implementation — see "Confined headless ticket implementation" under Notifications & Remote Approval. The `tracker` field (`"jira"` | `"github-issues"` | `"none"`) determines which ticket tracker a project uses. If absent, it's inferred: `jira` section present → `"jira"`, `github.issues` section present → `"github-issues"`, neither → `"none"`.
+To find config for a specific project, look up `projects.<slug>`. Each project entry has `path`, `tracker`, `github`, `slack`, `jira`, `slite`, `qa`, and (optional) `exec`, `investigation` and `jobs` subsections. `jobs` is a list of scheduled jobs — see "Scheduled jobs". `investigation` overrides the global kind lists for this project and carries `on_complete_status` — a Jira status to move the ticket to after a successful findings comment. Empty/absent ⇒ no transition, **and the transition MCP verbs are not added to the confined run's allowlist at all**, so capability follows config. `exec.allowed_commands` is the build/test command allowlist for confined headless ticket implementation — see "Confined headless ticket implementation" under Notifications & Remote Approval. The `tracker` field (`"jira"` | `"github-issues"` | `"none"`) determines which ticket tracker a project uses. If absent, it's inferred: `jira` section present → `"jira"`, `github.issues` section present → `"github-issues"`, neither → `"none"`.
 
 ### Jira Multi-Source Config
 
@@ -1346,6 +1348,44 @@ follows the bracket is `queue`. `lib-ticket-kind.sh` implements the doc's **work
 closing bracket is itself a delimiter) and says so at the implementation site;
 `tests/ticket-kind.test.sh` pins every fires/does-not-fire example verbatim. A model reading the doc
 resolved this by intuition each run; a script has to pick, which is how the ambiguity became visible.
+
+## Scheduled jobs
+
+`projects.<slug>.jobs` gives one project's integration its own interval, **alongside** the global
+poll. Spec: `docs/superpowers/specs/2026-11-09-scheduled-jobs-design.md` (phased; phase 1 is built —
+dispatcher + `slack`/`watch` with `watch: [channels]`).
+
+```
+jobs-tick.sh (every 60s; install-jobs.sh)
+  for each valid, unpaused, in-window, due job → detached run_job:
+    job lock → handler (job-slack-watch.sh → poll-slack.sh --project) → manifest
+    → jobs-draft.sh if non-empty → receipt → failure streak / pause
+```
+
+Things a reader will otherwise "fix" back:
+- **One tick + due-check, not one LaunchAgent per job.** Per-job plists multiply the launchd
+  env-cache trap and the TCC re-grant. The plist sets `AbandonProcessGroup` because jobs run
+  detached from the tick; without it launchd kills them when the tick exits.
+- **Each job keeps its own cutoff file** (`EA_POLL_STATE_FILE` → `state/jobs/<key>.state.yaml`,
+  honored by `lib-state.sh`). Sharing `last-poll.yaml` with the global poll would be two
+  unsynchronized read-modify-writes. Overlap between the two paths is the queue's job: the
+  `(type, source_id)` reconciliation dedups.
+- **`jobs-draft.sh` takes the global poll's lock**, and a held lock means *deferred*, not failed.
+  The poll's resume sweep re-emits every undrafted `incoming/` item, so drafting concurrently could
+  put two models on one file. Deferral never strands: the job's next collector run re-emits them.
+- **The drafting allowlist is the poll's**, via `lib-poll-allowlist.sh`. Do not fork a second copy;
+  allowlist drift caused most past silent outages.
+- **Drafting success is ground truth**: a row counts only if its file is in `drafts/` (or carries a
+  draft while `_unrouted` in `incoming/`), never the model's report.
+- **`exclusive: true` is honored only for a job that can run** (supported pair, not paused) and
+  is computed in `ea-config.sh`'s `_source_state`, so the scripted path, the bash receipt and the
+  model's `EXCLUSIVE:` prompt line all agree. A paused job claiming a source would make it silently
+  unpolled. The job's own collector sets `EA_JOBS_IGNORE_EXCLUSIVE=1`.
+- **`poll-slack.sh --project` reads only that project's channels.** A channel the project doesn't
+  watch has no Tier 0 route to it, so reading it only buys messages the filter discards.
+- **Failure pushes: first failure, then the pause** (`guards.pause_after_failures`, default 3) —
+  not one per run, for the same reason the dedup warning is push-once.
+- `JOBS_SUPPORTED` in `ea-config.sh` is the single list of runnable `integration:action` pairs.
 
 ## Tests
 

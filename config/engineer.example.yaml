@@ -351,6 +351,23 @@ projects:
       console_command: ""                # e.g. "rails console", "python manage.py shell", "node" (optional)
       document_to: ""                    # where to document completed QA plans: "slite" | "" (empty/absent disables)
       document_parent: ""                # Slite channel/note id for the QA doc; empty → user's private (personal) channel
+    # Scheduled jobs: per-integration work on its own interval, dispatched every minute by
+    # scripts/jobs-tick.sh (install with scripts/install-jobs.sh). Runs ALONGSIDE the global poll.
+    # Supported today: integration slack / action watch / watch [channels]. A slack watch job uses
+    # the scripted Slack collector, so it needs an agent.typesafe credential (curl + jq too).
+    jobs: []
+    # jobs:
+    #   - id: slack-watch                # ^[a-z0-9-]+$, unique within the project
+    #     integration: slack
+    #     action: watch
+    #     every: 5m                      # 30s | 5m | 2h | 1d; minimum 1m
+    #     hours: "8-18"                  # optional; machine-local hours, start inclusive, end exclusive
+    #     days: [mon, tue, wed, thu, fri]  # optional
+    #     exclusive: false               # true => the global poll skips this project's slack source
+    #     watch: [channels]
+    #     budget_usd: 2.00               # optional; cap for the drafting run (default 2.00)
+    #     guards:
+    #       pause_after_failures: 3      # consecutive failed runs before the job pauses itself
 
   # Example: project using GitHub Issues instead of Jira
   # my-app:
