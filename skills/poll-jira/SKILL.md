@@ -196,7 +196,7 @@ Do NOT generate a draft. The item stays in `incoming/` until the user assigns a 
 #### Queue Item Format
 
 **Filename:** `{YYYYMMDD-HHmmss}-{type}-{ticket_key}.md` — so an investigation is
-`…-ticket-investigation-ENG-789.md`. The filename must carry the real type: CLAUDE.md's format is
+`…-ticket-investigation-ENG-789.md`. The filename must carry the real type: docs/architecture/queue.md's format is
 `{type}-{short-id}`, `review-queue`'s filter reads it, and the ntfy listener's item-id regex
 `^[A-Za-z0-9._-]+$` still matches.
 
