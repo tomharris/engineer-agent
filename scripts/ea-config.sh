@@ -126,7 +126,7 @@ _source_state() {
 # --- Scheduled jobs (scripts/jobs-tick.sh) -----------------------------------------------------
 # The (integration:action) pairs the dispatcher has a handler for. Single source of truth: jobs
 # naming anything else are reported unsupported and never run, and never claim `exclusive`.
-JOBS_SUPPORTED="slack:watch"
+JOBS_SUPPORTED="slack:watch jira:implement-next"
 
 # Job integration name -> the source name used by _source_state / the receipt.
 _job_source() {
@@ -182,12 +182,15 @@ _emit_jobs() {
     printf 'projects.%s.job.%s.exclusive=%s\n'   "$slug" "$i" "$(_get "${p}.exclusive")"
     printf 'projects.%s.job.%s.budget_usd=%s\n'  "$slug" "$i" "$(_get "${p}.budget_usd")"
     printf 'projects.%s.job.%s.pause_after_failures=%s\n' "$slug" "$i" "$(_get "${p}.guards.pause_after_failures")"
+    printf 'projects.%s.job.%s.max_in_flight=%s\n' "$slug" "$i" "$(_get "${p}.guards.max_in_flight")"
+    printf 'projects.%s.job.%s.daily_cap=%s\n'     "$slug" "$i" "$(_get "${p}.guards.daily_cap")"
     case " $JOBS_SUPPORTED " in
       *" ${integ}:${action} "*) printf 'projects.%s.job.%s.supported=1\n' "$slug" "$i" ;;
       *)                        printf 'projects.%s.job.%s.supported=0\n' "$slug" "$i" ;;
     esac
     _emit_list "projects.${slug}.job.${i}.days"  "${p}.days"
     _emit_list "projects.${slug}.job.${i}.watch" "${p}.watch"
+    _emit_list "projects.${slug}.job.${i}.trusted_authors" "${p}.trusted_authors"
     _emit_rules "$slug" "$i"
     i=$((i+1))
   done

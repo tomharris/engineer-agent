@@ -284,6 +284,18 @@ ar_my_account_id() {
   printf '%s' "$id"
 }
 
+# _ar_kind_skip <issue-json> — rc 1 with a reason when the kind ladder makes this an investigation
+# (Tier 1 is terminal for Jira); implement-next only implements. Active when AR_JIRA_TYPES_FILE is
+# set (the project's investigation.jira_types) and lib-ticket-kind.sh is loaded.
+_ar_kind_skip() {
+  local t
+  [ -n "${AR_JIRA_TYPES_FILE:-}" ] && command -v ticket_kind_classify >/dev/null 2>&1 || return 0
+  t="$(jq -r '.fields.issuetype.name // ""' "$1")"
+  if [ "$(ticket_kind_classify --tracker jira --title "" --jira-issue-type "$t" --jira-types-file "$AR_JIRA_TYPES_FILE" | cut -f1)" = ticket-investigation ]; then
+    echo "investigation kind (type ${t}); implement-next only implements"; return 1
+  fi
+}
+
 _ar_trace() { [ "${AR_TRACE:-0}" = 1 ] && printf '%s\n' "$*" >&2; return 0; }
 
 # ar_select <slug> <idx> — prints "<rule>\t<key>\t<issue-id>" for the ticket to pick (rc 0), nothing
@@ -322,7 +334,7 @@ ar_select() {
         _ar_trace "  ${key}  skip  already queued (${hit%%	*})"
         continue
       fi
-      if reason="$(ar_eval "$TMPD/issue.json" "$p")"; then
+      if reason="$(ar_eval "$TMPD/issue.json" "$p")" && reason="$(_ar_kind_skip "$TMPD/issue.json")"; then
         if [ -z "$pick" ]; then
           pick="$(printf '%s\t%s\t%s' "$name" "$key" "$id")"
           _ar_trace "  ${key}  PICK"

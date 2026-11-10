@@ -220,8 +220,15 @@ test_ticket_confined_run() {
   grep -qF -- "Bash(bin/rails *)" "$CLAUDE_ARGS_LOG" && grep -qF -- "Bash(bundle *)" "$CLAUDE_ARGS_LOG" \
     && ok "narrow build allowlist expanded from config" \
     || bad "build allowlist missing (args: $(cat "$CLAUDE_ARGS_LOG"))"
-  grep -qF -- "Bash(git *)" "$CLAUDE_ARGS_LOG" \
-    && ok "git allowed for the coding session" || bad "git not allowed"
+  local r
+  for r in "Bash(git commit:*)" "Bash(git push -u origin:*)" "Bash(git push --no-verify -u origin:*)" \
+           "Bash(git checkout:*)" "Bash(gh pr create:*)" "Bash(gh auth status:*)"; do
+    grep -qF -- "$r" "$CLAUDE_ARGS_LOG" && ok "coding session allows $r" || bad "coding session lacks $r"
+  done
+  # Broad prefixes re-grant `git -C /elsewhere`, `git -c alias.x=!cmd`, `gh api -X POST`, `gh pr merge`.
+  for r in "Bash(git *)" "Bash(gh *)" "Bash(gh api" "Bash(gh pr merge" "Bash(git -"; do
+    grep -qF -- "$r" "$CLAUDE_ARGS_LOG" && bad "confined allowlist grants $r" || ok "confined allowlist omits $r"
+  done
   grep -qF -- "Bash(spy *)" "$CLAUDE_ARGS_LOG" \
     && bad "spy leaked into the confined ticket allowlist" || ok "confined allowlist excludes spy/slite (not the generic path)"
   grep -q "worktree add" "$GIT_LOG" && grep -q "worktree remove" "$GIT_LOG" \
@@ -300,6 +307,11 @@ test_ticket_generates_qa() {
     || bad "QA run not launched (args: $(cat "$CLAUDE_ARGS_LOG"))"
   grep -qF -- "Bash(curl *)" "$CLAUDE_ARGS_LOG" \
     && ok "QA allowlist includes curl (Pass 3 execution)" || bad "QA allowlist missing curl"
+  local qa_args r
+  qa_args="$(grep "Generate a QA test plan" "$CLAUDE_ARGS_LOG")"
+  for r in "Bash(git *)" "Bash(gh *)" "Bash(git commit" "Bash(git push" "Bash(gh pr create"; do
+    printf '%s' "$qa_args" | grep -qF -- "$r" && bad "QA run grants $r" || ok "QA run omits $r"
+  done
   compgen -G "$EA_AGENT_DIR/queue/drafts/*qa-test-plan*" >/dev/null \
     && ok "qa-test-plan draft created" || bad "qa-test-plan draft missing"
   [ ! -e "$EA_AGENT_DIR/queue/drafts/$item" ] \

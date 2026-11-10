@@ -184,8 +184,8 @@ write_rules "" "- name: r
 validate >/dev/null; eq "complete rule is valid" "0" "$?"
 eq "JQL keeps a literal |" "project = BILL | x" "$(_arc "$P.jql")"
 rows="$(jobs_enumerate)"
-eq "valid rules still report the job as not runnable yet" \
-  "jira:implement-next does not run yet; check its rules with: jobs-ctl.sh preview bill.auto" \
+eq "implement-next on a project without a jira tracker is refused" \
+  "jira:implement-next needs a project with tracker jira" \
   "$(jobs_validate "$(printf '%s\n' "$rows" | head -1)" "$rows")"
 
 echo "== assignee default"

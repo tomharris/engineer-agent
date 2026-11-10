@@ -33,10 +33,11 @@ Print the output. **Do not recompute any of it.**
   is not `ok` prints its first error. Both are worth pointing out.
 - `run`: runs the job now in the foreground, ignoring `every` and `hours`/`days` but not pause,
   validation or the lock, and prints the receipt. A `slack` / `watch` run may start a drafting model
-  session if it finds anything.
+  session if it finds anything. A `jira` / `implement-next` run may queue a ticket and, with both
+  `implement` and `jira-claim` autonomy, claim it in Jira and run a full implementation session.
 - `preview`: `jira` / `implement-next` jobs only. Read-only: fetches each rule's tickets and prints
   every verdict (`PICK`, `eligible`, or `skip` with the first failed predicate), then the ticket that
-  would be picked. These jobs do not run yet; `list` shows them as `invalid` with a pointer here.
+  would be picked. It ignores the job's guards (in-flight, pending pick, daily cap).
 - `pause` / `resume`: `resume` also clears the failure streak. A job pauses itself after
   `guards.pause_after_failures` consecutive failed runs (default 3) and pushes one alert.
 

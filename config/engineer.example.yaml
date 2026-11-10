@@ -234,8 +234,12 @@ agent:
   # so it is safe to create automatically (you review it on GitHub and mark it ready).
   # Everything else (Slack posts, PR approve/request-changes, issue creation, non-draft PRs)
   # always requires approval. Leave the list empty to gate everything.
-  # "jira-claim" lets a jira implement-next job assign/transition its ticket without an Approve
-  # tap (deny-by-default; the job itself is not runnable yet).
+  # A jira implement-next job runs unattended only with BOTH "implement" (start the confined
+  # implementation) and "jira-claim" (assign/transition the ticket), AND only for tickets whose
+  # creator and every summary/description editor are in the job's trusted_authors. Otherwise each
+  # pick waits for an Approve tap. WARNING: the implementation runs your build commands on files the
+  # model edits, so text in a ticket can get code run on this machine as you. trusted_authors is
+  # what limits that to people you trust. Deny-by-default.
   autonomy:
     auto_execute: ["draft-pr"]
 
@@ -372,12 +376,18 @@ projects:
     #     guards:
     #       pause_after_failures: 3      # consecutive failed runs before the job pauses itself
     #
-    #   # NOT RUNNABLE YET: rules are validated and can be dry-run with
-    #   # `scripts/jobs-ctl.sh preview <project>.jira-autopilot` (read-only).
+    #   # Needs tracker jira and exec.allowed_commands. Dry-run its rules (read-only) with
+    #   # `scripts/jobs-ctl.sh preview <project>.jira-autopilot`.
     #   - id: jira-autopilot
     #     integration: jira
     #     action: implement-next
     #     every: 30m
+    #     budget_usd: 8.00               # implementation cap (default EA_TICKET_BUDGET_USD / 8.00)
+    #     trusted_authors: []            # Jira accountIds; required for unattended runs (see autonomy)
+    #     guards:
+    #       max_in_flight: 1             # implementations running on this project (any entry point)
+    #       daily_cap: 1                 # tickets this job picks per local day
+    #       pause_after_failures: 2
     #     rules:                         # ordered; first rule with an eligible ticket wins
     #       - name: small-bugs           # ^[a-z0-9-]+$
     #         jql: 'project = BILL AND type = Bug AND assignee is EMPTY ORDER BY rank'
