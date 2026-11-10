@@ -155,6 +155,34 @@ jobs_validate_implement() {
     [[ "$c" =~ ^[A-Za-z0-9._/-]+$ ]] && ok=1
   done < <(yaml_project_list "$slug" exec allowed_commands)
   [ "$ok" = 1 ] || { echo "${tracker}:implement-next needs projects.${slug}.exec.allowed_commands (build/test commands for the confined run)"; return 1; }
+  jobs_validate_after_pr "$slug" "$idx"
+}
+
+# jobs_validate_after_pr <slug> <idx> — the optional after_pr block (scripts/pr-pipeline.sh).
+# Unknown keys are errors: a mistyped `mark_redy` must not silently leave a PR in draft forever.
+jobs_validate_after_pr() {
+  local p="projects.$1.job.$2.after_pr" k v
+  [ -n "$(_ar_children "$p")" ] || return 0
+  _ar_check_keys "$p" "budget_usd max_runtime mark_ready ci browser" "after_pr" || return 1
+  _ar_check_keys "$p.ci" "timeout fix_attempts" "after_pr.ci" || return 1
+  _ar_check_keys "$p.browser" "setup serve url ready_timeout instructions" "after_pr.browser" || return 1
+  [ -n "$(gr_project_repos "$1")" ] || { echo "after_pr needs projects.$1.github.owner and github.repos"; return 1; }
+  v="$(_arc "$p.budget_usd")"
+  [ -z "$v" ] || [[ "$v" =~ ^[0-9]+(\.[0-9]+)?$ ]] || { echo "after_pr.budget_usd '${v}' must be a number"; return 1; }
+  for k in max_runtime ci.timeout browser.ready_timeout; do
+    v="$(_arc "$p.$k")"
+    [ -z "$v" ] || [ -n "$(jobs_duration_seconds "$v")" ] || { echo "after_pr.${k} '${v}' must look like 30m or 2h"; return 1; }
+  done
+  v="$(_arc "$p.ci.fix_attempts")"
+  [ -z "$v" ] || [[ "$v" =~ ^[0-3]$ ]] || { echo "after_pr.ci.fix_attempts '${v}' must be 0-3"; return 1; }
+  v="$(_arc "$p.mark_ready")"
+  _ar_bool "$v" || { echo "after_pr.mark_ready '${v}' must be true or false"; return 1; }
+  if [ -n "$(_ar_children "$p.browser")" ]; then
+    [ -n "$(_arc "$p.browser.serve")" ] || { echo "after_pr.browser.serve is required"; return 1; }
+    [[ "$(_arc "$p.browser.url")" =~ ^https?://(localhost|127\.0\.0\.1)(:[0-9]+)?(/|$) ]] \
+      || { echo "after_pr.browser.url must be an http://localhost[:port] URL (the branch is served locally)"; return 1; }
+  fi
+  return 0
 }
 
 # job_record_pick <key> <item> / job_picks_today <key> — the daily_cap ledger, keyed by the

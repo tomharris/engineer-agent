@@ -122,7 +122,7 @@ write_config "[]" "{ project_statuses: [Ready] }" '["le ad"]'
 eq "a malformed login is refused" "trusted_authors entry 'le ad' is not a GitHub login" "$(valid)"
 write_config "[]" "{ project_status: [Ready] }"
 eq "an unknown require key is refused" \
-  "rule ready require: unknown key 'project_status' (allowed: labels_any labels_none milestones issue_types project_statuses assignee min_age min_quiet no_open_blockers no_linked_pr has_acceptance_criteria min_body_chars)" "$(valid)"
+  "rule ready require: unknown key 'project_status' (allowed: labels_any labels_none milestones issue_types project_statuses title_prefixes assignee min_age min_quiet no_open_blockers no_linked_pr has_acceptance_criteria min_body_chars)" "$(valid)"
 write_config "[]" "{ milestones: v2 }"
 eq "a scalar where a list belongs is refused" "rule ready: require.milestones must be a list" "$(valid)"
 write_config "[]"; sed -i.bak 's/^        board: .*$//' "$EA_CONFIG_FILE"
@@ -175,6 +175,13 @@ reset; write_config "[]" "{ project_statuses: [Ready] }" "[lead]" "$ALLOW" "labe
 echo tom > "$ST/me"; echo "other" > "$ST/1.assignees"; echo "tom" > "$ST/2.assignees"
 eq "assignee defaults to me when the query does not say no:assignee" \
   "acme/web#1 skip  assignee: not assigned to me|acme/web#2 PICK" "$(verdicts | paste -sd'|' -)"
+
+reset; write_config "[]" '{ title_prefixes: ["[Web]"] }' "[lead]" "$ALLOW" "no:assignee label:ready"
+mkissue 1 lead "ready" '.title = "[web] Fix nav"'
+mkissue 2 lead "ready" '.title = "[Wayfinder] [Web] Fix nav"'
+echo "2 1" > "$ST/search"
+eq "title_prefixes matches only the start of the title, case-insensitively" \
+  "acme/web#2 skip  title_prefixes: title does not start with any|acme/web#1 PICK" "$(verdicts | paste -sd'|' -)"
 
 echo "== claim / release"
 reset; write_config "[]"
@@ -262,6 +269,20 @@ grep -q "Autopilot implemented acme/web#1" "$NOTIFY_LOG" && ok "success push" ||
 for r in "Bash(gh issue view" "Bash(gh pr view" "Bash(gh pr list" "Bash(gh api" "Bash(curl"; do
   grep -qF -- "$r" "$CLAUDE_ARGS" && bad "unattended run grants $r" || ok "unattended run omits $r"
 done
+
+printf '#!/bin/bash\nprintf "%%s\\n" "$*" >> "%s"\n' "$TMP/pipeline.log" > "$TMP/bin/pipeline"; chmod +x "$TMP/bin/pipeline"
+export EA_PR_PIPELINE_BIN="$TMP/bin/pipeline" EA_PR_PIPELINE_FOREGROUND=1
+: > "$TMP/pipeline.log"; reset; write_config "[implement, github-claim]"; run_job
+eq "no after_pr: no pipeline" "" "$(cat "$TMP/pipeline.log")"
+reset; write_config "[implement, github-claim]"
+awk '{print} /^        guards: /{print "        after_pr: { mark_ready: true }"}' "$EA_CONFIG_FILE" > "$TMP/c" && mv "$TMP/c" "$EA_CONFIG_FILE"
+run_job
+case "$(cat "$TMP/pipeline.log")" in "--item "*-ticket-gh-1.md) ok "after_pr launches the pipeline for the item" ;; *) bad "pipeline args [$(cat "$TMP/pipeline.log")]" ;; esac
+: > "$TMP/pipeline.log"; reset; write_config "[implement, github-claim]"
+awk '{print} /^        guards: /{print "        after_pr: { mark_ready: true }"}' "$EA_CONFIG_FILE" > "$TMP/c" && mv "$TMP/c" "$EA_CONFIG_FILE"
+FAKE_IMPL=fail run_job
+eq "a failed implementation launches no pipeline" "" "$(cat "$TMP/pipeline.log")"
+unset EA_PR_PIPELINE_BIN EA_PR_PIPELINE_FOREGROUND
 
 reset; write_config "[implement, github-claim]"
 FAKE_IMPL=fail run_job; eq "failed implementation exits 1" "1" "$?"

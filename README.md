@@ -896,7 +896,9 @@ GitHub `implement-next` (`integration: github-issues`) does the same for GitHub 
 - Predicates: `assignee`, `labels_any`/`labels_none`, `milestones`, `issue_types`,
   `project_statuses`, `min_age`/`min_quiet`, `no_open_blockers` (open "blocked by" dependencies),
   `no_linked_pr` (closing PR, linked branch or open referencing PR), `has_acceptance_criteria`,
-  `min_body_chars`. See the commented `gh-autopilot` example.
+  `min_body_chars`, `title_prefixes` (the title starts with one of them, case-insensitively; search
+  is fuzzy, so use this when the query matches on title text). See the commented `gh-autopilot`
+  example.
 - "Status" means the issue's single-select field on a Projects (v2) `board` (owner, number,
   `status_field`, default `Status`). `claim.project_status` adds the issue to the board if needed and
   moves it; `on_fail.project_status` moves it back if nobody has moved it since. The `gh` token needs
@@ -906,6 +908,23 @@ GitHub `implement-next` (`integration: github-issues`) does the same for GitHub 
   An issue with more than 100 edits is treated as untrusted.
 - An issue whose title might be an investigation (a leading `Investigate`, `Research`, …) is skipped
   rather than guessed; queue it with `add-ticket --implement` if it is code work.
+
+**After the PR (`after_pr`, either tracker).** Once an autopilot pick has its draft PR (unattended
+or via Approve), `scripts/pr-pipeline.sh` runs detached:
+
+1. Waits for CI on the PR head (`ci.timeout`, default 30m). On failure it hands the failed steps'
+   logs to up to `ci.fix_attempts` (default 1, max 3) confined fix runs: the same build allowlist and
+   `confined-push.sh` as the implementation, no `gh`. A fix counts only if the remote branch moved.
+2. With `browser`, serves the final head from a fresh worktree (`setup`, then `serve` in the
+   background, until `url` answers within `ready_timeout`) and runs a read-only Claude in Chrome
+   session against it. It passes only on a final `VERDICT: pass <nonce>` line carrying the nonce
+   minted for that run. `url` must be `http://localhost[:port]`. The report is kept in
+   `state/pr-pipeline/<item>/browser-report.md`.
+3. With `mark_ready: true` and `pr-ready` in `agent.autonomy.auto_execute`, marks the PR ready for
+   review (which requests reviews). Without the tier it pushes that the PR passed and leaves it draft.
+
+Any stop (CI still red, no checks, browser fail or no verdict, `max_runtime` exceeded, default 2h)
+pushes once, urgently, and leaves the PR in draft. The issue stays claimed: its PR exists.
 
 Claiming a ticket (assign to you, transition by status name) needs either a human Approve or
 `jira-claim` in `agent.autonomy.auto_execute`. The ticket is re-read before and after the assignment,
@@ -999,7 +1018,7 @@ Claude Code's `Bash()` permissions match on command prefix, not working director
 
 As with cron, set `CLAUDE_BIN` to pick a specific Claude Code binary — e.g. `CLAUDE_BIN=/opt/claude/bin/claude scripts/install-listener.sh`. Since the supervised service does not inherit your shell environment, the installer bakes the install-time value into the systemd unit (`Environment=`) or launchd plist (`EnvironmentVariables`).
 
-**Hands-free draft PRs:** with `agent.autonomy.auto_execute: ["draft-pr"]`, draft-PR creation after a ticket is implemented runs without an approval gate — a draft PR merges nothing and requests no review, and you still review it on GitHub. Every other action (Slack posts, PR approve/request-changes, issue creation, non-draft PRs) always requires explicit approval. `implement` and `jira-claim` / `github-claim` apply only to a Jira / GitHub `implement-next` scheduled job, and `slack-react` adds status reactions to Slack messages (see [Scheduled Jobs](#scheduled-jobs)).
+**Hands-free draft PRs:** with `agent.autonomy.auto_execute: ["draft-pr"]`, draft-PR creation after a ticket is implemented runs without an approval gate — a draft PR merges nothing and requests no review, and you still review it on GitHub. Every other action (Slack posts, PR approve/request-changes, issue creation, non-draft PRs) always requires explicit approval. `implement` and `jira-claim` / `github-claim` apply only to a Jira / GitHub `implement-next` scheduled job, `pr-ready` only to its `after_pr` pipeline, and `slack-react` adds status reactions to Slack messages (see [Scheduled Jobs](#scheduled-jobs)).
 
 ### Turn-completion pushes
 
@@ -1104,6 +1123,7 @@ scripts/
   gh-claim.sh                  Claim / release a GitHub issue (assignee + Projects board status)
   job-github-implement-next.sh The GitHub implement-next job handler
   lib-confined-run.sh          Confined headless ticket implementation (listener + implement-next)
+  pr-pipeline.sh               implement-next after_pr: CI wait + confined fix, browser test, mark ready
   confined-push.sh             The only push a confined run may make: one prefixed branch, no force
   lib-poll-allowlist.sh        Read-only allowlist shared by the poll and job drafting
   notify.sh                    Publish a push notification to ntfy

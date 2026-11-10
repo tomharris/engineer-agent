@@ -185,7 +185,8 @@ _emit_jobs() {
     printf 'projects.%s.job.%s.max_in_flight=%s\n' "$slug" "$i" "$(_get "${p}.guards.max_in_flight")"
     printf 'projects.%s.job.%s.daily_cap=%s\n'     "$slug" "$i" "$(_get "${p}.guards.daily_cap")"
     printf 'projects.%s.job.%s.thread_ttl=%s\n'    "$slug" "$i" "$(_get "${p}.thread_ttl")"
-    _emit_board "$slug" "$i"
+    _emit_subtree "$slug" "$i" board
+    _emit_subtree "$slug" "$i" after_pr
     case " $JOBS_SUPPORTED " in
       *" ${integ}:${action} "*) printf 'projects.%s.job.%s.supported=1\n' "$slug" "$i" ;;
       *)                        printf 'projects.%s.job.%s.supported=0\n' "$slug" "$i" ;;
@@ -198,10 +199,10 @@ _emit_jobs() {
   done
 }
 
-# _emit_board <slug> <idx> — the job's Projects (v2) board, verbatim (unknown keys reach the
-# validator, as with rules).
-_emit_board() {
-  printf '%s\n' "$YAML_DUMP_CACHE" | awk -v src="projects.$1.jobs[$2].board" -v dst="projects.$1.job.$2.board" '
+# _emit_subtree <slug> <idx> <key> — a job's mapping (board, after_pr) verbatim, so unknown keys
+# reach the validator, as with rules.
+_emit_subtree() {
+  printf '%s\n' "$YAML_DUMP_CACHE" | awk -v src="projects.$1.jobs[$2].$3" -v dst="projects.$1.job.$2.$3" '
     index($0, src) == 1 && substr($0, length(src) + 1, 1) ~ /^[.{]$/ { print dst substr($0, length(src) + 1) }'
 }
 

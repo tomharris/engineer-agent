@@ -4,7 +4,7 @@
 `projects.<slug>.jobs` gives one project's integration its own interval, **alongside** the global
 poll. Spec: `docs/superpowers/specs/2026-11-09-scheduled-jobs-design.md` (phased; phases 1–5 are built —
 dispatcher, `slack`/`watch` with `channels`/`mentions`/`my-threads`, status reactions,
-`jira`/`implement-next`, and `github-issues`/`implement-next` as phase 6a).
+`jira`/`implement-next`, and `github-issues`/`implement-next` as phase 6a, plus `after_pr` below).
 
 ```
 jobs-tick.sh (every 60s; install-jobs.sh)
@@ -151,3 +151,31 @@ Read-only: search + dev-panel reads, never an assign or transition. Four things 
   `github`; absent ⇒ `jira` for older rows) and `_autopilot_claim_cmd` picks the claim script from
   it, never from the item.
 
+
+**`after_pr` (`scripts/pr-pipeline.sh`)** — CI wait, confined fix, browser test, mark ready. Things a
+reader will otherwise "fix" back:
+- **Detached, not inside the job.** `autopilot_implement` launches it with `nohup` once the item is in
+  `completed/`, for both the unattended run and an Approve tap. Under the job's watchdog, a CI wait
+  would push the run past `EA_JOB_MAX_SECONDS`, and the handler's TERM trap would release a claim
+  whose PR already exists. It has its own `max_runtime` watchdog, which kills its children too: a
+  TERM trap waits for the foreground command to finish.
+- **Everything GitHub is bash.** The PR comes from the branch bash read off the worktree before
+  teardown (`state/pr-pipeline/<item>/branch`, prefix-checked), never from the model. The repo is the
+  project checkout's raw `remote.origin.url` (not `get-url`, which applies `insteadOf`), and it must
+  be in `github.repos`. Checks, failed-run logs and `gh pr ready` are bash calls. Neither model run
+  gets a `gh` verb.
+- **Success is a side effect.** A fix counts only if `ls-remote` shows the branch moved. A browser
+  pass needs a final `VERDICT: pass <nonce>` line with the nonce minted for that run, so a page or
+  log that prints "VERDICT: pass" cannot pass it. No checks reported after a grace period means
+  stop, not pass.
+- **CI first, then the browser,** so the browser tests the head that will be reviewed, including
+  any fix commit.
+- **The browser run drives your real Chrome** (`--chrome`, your sign-ins). Its allowlist is Read/Grep,
+  git read and a fixed list of Chrome tools (no `javascript_tool`, uploads or browser switching).
+  Nothing enforces "only `url`" except the prompt and the extension's site permissions. The
+  validator requires a localhost `url` so the app under test is the branch, not a shared
+  environment. This is why it runs only after the same trust gate as the implementation.
+- **`pr-ready` is its own tier**, since ready-for-review notifies reviewers. Without it the pipeline
+  pushes that the PR passed and leaves it draft. It never moves the board status.
+- **A stop leaves the claim.** Unlike a failed implementation, the PR exists, so `on_fail` does not
+  apply.
