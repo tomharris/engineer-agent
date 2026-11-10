@@ -246,6 +246,10 @@ agent:
   # trusted_authors. Otherwise each pick waits for an Approve tap. WARNING: the implementation runs your build commands on files the
   # model edits, so text in a ticket can get code run on this machine as you. trusted_authors is
   # what limits that to people you trust. Deny-by-default.
+  # A github-issues implement-next job is the same with "github-claim" in place of "jira-claim"
+  # (assign the issue / set its Projects board status), and trusted_authors holding GitHub logins:
+  # the issue's author and everyone who edited its title, body or labels. Bots that label issues
+  # (e.g. "github-actions") count as editors and must be listed if you trust them.
   # "slack-react" adds/removes the agent.slack.reactions status emoji on the Slack message an item
   # came from (as you): on detection, drafting, posting and rejection.
   autonomy:
@@ -419,6 +423,40 @@ projects:
     #           min_description_chars: 200
     #         claim: { assign: self, transition: "In Progress" }   # self | none
     #         on_fail: { unassign: true, transition: "To Do" }
+    #
+    #   # GitHub Issues twin. Needs tracker github-issues, github.owner/repos and exec.allowed_commands.
+    #   # Only issues in this project's github.repos are ever picked, whatever the query says.
+    #   - id: gh-autopilot
+    #     integration: github-issues
+    #     action: implement-next
+    #     every: 30m
+    #     trusted_authors: []            # GitHub logins; required for unattended runs (see autonomy)
+    #     board:                         # optional Projects (v2) board; needed for project_status(es).
+    #       owner: my-org                #   The gh token needs the `project` scope to move items.
+    #       number: 3
+    #       status_field: Status         # single-select field (default Status)
+    #     guards: { max_in_flight: 1, daily_cap: 1, pause_after_failures: 2 }
+    #     rules:
+    #       - name: ready
+    #         query: 'no:assignee label:ready'   # GitHub issue search; is:issue is:open is appended, and
+    #                                            #   repo:<owner>/<repo> for each github.repos unless the
+    #                                            #   query names a repo:/org:/user:
+    #         require:
+    #           assignee: empty          # empty | me | any. Absent: empty if the query says
+    #                                    #   no:assignee, else me. any is never inferred.
+    #           labels_any: []           # labels, milestones, issue_types, project_statuses:
+    #           labels_none: [blocked, needs-design]   #   case-insensitive
+    #           milestones: ["v2.1"]
+    #           issue_types: [Bug]       # GitHub issue types
+    #           project_statuses: [Ready]  # status on the job's board; not on the board fails
+    #           min_age: 2h
+    #           min_quiet: 30m
+    #           no_open_blockers: true   # no open "blocked by" issue dependency
+    #           no_linked_pr: true       # no closing PR, linked branch, or open PR referencing it
+    #           has_acceptance_criteria: true
+    #           min_body_chars: 200
+    #         claim: { assign: self, project_status: "In Progress" }  # adds the issue to the board if absent
+    #         on_fail: { unassign: true, project_status: "Ready" }
 
   # Example: project using GitHub Issues instead of Jira
   # my-app:

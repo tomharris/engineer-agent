@@ -43,10 +43,10 @@ trap 'rm -f "$LOCK_FILE"; [ -z "$WATCHDOG_PID" ] || kill "$WATCHDOG_PID" 2>/dev/
 # for 24h) silently swallows every later fire, and nothing reaches the receipt check. On expiry,
 # push an alert, then kill the run's process tree.
 POLL_MAX_SECONDS="${EA_POLL_MAX_SECONDS:-3600}"
-kill_tree() {
+# descendants <pid> — every descendant pid, children before grandchildren.
+descendants() {
   local c
-  for c in $(pgrep -P "$1" 2>/dev/null); do kill_tree "$c"; done
-  kill -TERM "$1" 2>/dev/null || true
+  for c in $(pgrep -P "$1" 2>/dev/null); do echo "$c"; descendants "$c"; done
 }
 (
   s=""
@@ -58,9 +58,12 @@ kill_tree() {
     --title 'engineer-agent: poll hung' \
     --message "Poll ran longer than ${POLL_MAX_SECONDS}s and was killed. Last log line: $(tail -1 "$LOG_FILE" | cut -c1-200)" \
     --priority urgent --tags warning --fyi >> "$LOG_FILE" 2>&1 || true
-  # TERM the parent first: it is blocked on a child, so it acts on the signal once that child dies.
+  # Snapshot the tree BEFORE signalling the parent: it exits on TERM at once, its children are
+  # re-parented to init, and a `pgrep -P $$` taken afterwards finds nothing to kill.
+  tree=""
+  for c in $(pgrep -P $$ 2>/dev/null); do [ "$c" = "$self" ] || tree="$tree $c $(descendants "$c")"; done
   kill -TERM $$ 2>/dev/null || true
-  for c in $(pgrep -P $$ 2>/dev/null); do [ "$c" = "$self" ] || kill_tree "$c"; done
+  for c in $tree; do kill -TERM "$c" 2>/dev/null || true; done
 ) </dev/null >/dev/null 2>&1 &
 WATCHDOG_PID=$!
 

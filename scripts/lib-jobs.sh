@@ -20,6 +20,8 @@ JOBS_SLACK_WATCH_SUPPORTED="channels mentions my-threads"
 _jobs_script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib-assign-rules.sh
 . "${_jobs_script_dir}/lib-assign-rules.sh"
+# shellcheck source=lib-gh-assign-rules.sh
+. "${_jobs_script_dir}/lib-gh-assign-rules.sh"
 
 # jobs_now — epoch; EA_NOW overrides for tests.
 jobs_now() { printf '%s' "${EA_NOW:-$(date +%s)}"; }
@@ -83,10 +85,14 @@ jobs_validate() {
   [[ "$id" =~ ^[a-z0-9-]+$ ]] || { echo "id '${id}' must match ^[a-z0-9-]+\$"; return 1; }
   [ "$(printf '%s\n' "$all" | awk -F'|' -v s="$slug" -v i="$id" '$1==s && $3==i' | wc -l | tr -d ' ')" -eq 1 ] \
     || { echo "duplicate job id '${id}' in project ${slug}"; return 1; }
-  if [ "${integ}:${action}" = "jira:implement-next" ]; then
-    ar_validate "$slug" "$idx" || return 1
-    jobs_validate_implement "$slug" "$idx" || return 1
-  fi
+  case "${integ}:${action}" in
+    jira:implement-next)
+      ar_validate "$slug" "$idx" || return 1
+      jobs_validate_implement "$slug" "$idx" jira || return 1 ;;
+    github-issues:implement-next)
+      gr_validate "$slug" "$idx" || return 1
+      jobs_validate_implement "$slug" "$idx" github-issues || return 1 ;;
+  esac
   [ "$sup" = "1" ] || { echo "unsupported integration/action '${integ}:${action}'"; return 1; }
   secs="$(jobs_duration_seconds "$every")"
   [ -n "$secs" ] || { echo "every '${every}' must look like 30s, 5m, 2h or 1d"; return 1; }
@@ -124,23 +130,31 @@ jobs_validate() {
   return 0
 }
 
-# jobs_validate_implement <slug> <idx> — guards and the sandbox prerequisite. Deny-by-default: the
-# allowlist check uses the same reader and charset as run_ticket_implementation, so a job that
-# validates here cannot be refused there for a missing build list.
+# jobs_validate_implement <slug> <idx> <jira|github-issues> — guards and the sandbox prerequisite.
+# Deny-by-default: the allowlist check uses the same reader and charset as
+# run_ticket_implementation, so a job that validates here cannot be refused there for a missing
+# build list.
 jobs_validate_implement() {
-  local slug="$1" idx="$2" v c ok=0
+  local slug="$1" idx="$2" tracker="$3" v c ok=0 re what
   for v in max_in_flight daily_cap; do
     c="$(_jcfg "projects.${slug}.job.${idx}.${v}")"
     [ -z "$c" ] || [[ "$c" =~ ^[1-9][0-9]*$ ]] || { echo "guards.${v} '${c}' must be a positive integer"; return 1; }
   done
+  case "$tracker" in
+    jira) re='^[A-Za-z0-9:_-]+$'; what="a Jira accountId" ;;
+    *)    re='^[A-Za-z0-9][A-Za-z0-9-]*(\[bot\])?$'; what="a GitHub login" ;;
+  esac
   while IFS= read -r c; do
-    [ -z "$c" ] || [[ "$c" =~ ^[A-Za-z0-9:_-]+$ ]] || { echo "trusted_authors entry '${c}' is not a Jira accountId"; return 1; }
+    [ -z "$c" ] || [[ "$c" =~ $re ]] || { echo "trusted_authors entry '${c}' is not ${what}"; return 1; }
   done < <(printf '%s\n' "$EA_JOBS_CFG" | awk -v p="projects.${slug}.job.${idx}.trusted_authors[]=" 'index($0,p)==1 {print substr($0,length(p)+1)}')
-  [ "$(_jcfg "projects.${slug}.tracker")" = jira ] || { echo "jira:implement-next needs a project with tracker jira"; return 1; }
+  [ "$(_jcfg "projects.${slug}.tracker")" = "$tracker" ] || { echo "${tracker}:implement-next needs a project with tracker ${tracker}"; return 1; }
+  if [ "$tracker" = github-issues ]; then
+    [ -n "$(gr_project_repos "$slug")" ] || { echo "github-issues:implement-next needs projects.${slug}.github.owner and github.repos"; return 1; }
+  fi
   while IFS= read -r c; do
     [[ "$c" =~ ^[A-Za-z0-9._/-]+$ ]] && ok=1
   done < <(yaml_project_list "$slug" exec allowed_commands)
-  [ "$ok" = 1 ] || { echo "jira:implement-next needs projects.${slug}.exec.allowed_commands (build/test commands for the confined run)"; return 1; }
+  [ "$ok" = 1 ] || { echo "${tracker}:implement-next needs projects.${slug}.exec.allowed_commands (build/test commands for the confined run)"; return 1; }
 }
 
 # job_record_pick <key> <item> / job_picks_today <key> — the daily_cap ledger, keyed by the

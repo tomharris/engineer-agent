@@ -35,7 +35,8 @@ Print the output. **Do not recompute any of it.**
   validation or the lock, and prints the receipt. A `slack` / `watch` run may start a drafting model
   session if it finds anything. A `jira` / `implement-next` run may queue a ticket and, with both
   `implement` and `jira-claim` autonomy, claim it in Jira and run a full implementation session.
-- `preview`: `jira` / `implement-next` jobs only. Read-only: fetches each rule's tickets and prints
+  A `github-issues` / `implement-next` run does the same for a GitHub issue, with `github-claim`.
+- `preview`: `implement-next` jobs only (`jira` or `github-issues`). Read-only: fetches each rule's tickets and prints
   every verdict (`PICK`, `eligible`, or `skip` with the first failed predicate), then the ticket that
   would be picked. It ignores the job's guards (in-flight, pending pick, daily cap).
 - `pause` / `resume`: `resume` also clears the failure streak. A job pauses itself after
