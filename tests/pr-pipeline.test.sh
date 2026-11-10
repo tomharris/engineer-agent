@@ -68,12 +68,23 @@ case "$*" in
     [ "${FIX:-push}" = push ] && { echo fix >> fixed.txt; git add fixed.txt; git commit -qm fix; git push -q origin "HEAD:refs/heads/$BR"; } ;;
   *"Browser-test the change"*)
     nonce="$(printf '%s' "$*" | sed -nE "s/.*'VERDICT: pass ([0-9a-f]+)'.*/\1/p")"
-    echo "Checked the nav."
+    pinned="$(printf '%s' "$*" | sed -nE 's/.*select_browser with deviceId ([0-9a-f-]+);.*/\1/p')"
     case "${BROWSER:-pass}" in
-      pass)  echo "VERDICT: pass $nonce" ;;
-      fail)  echo "VERDICT: fail $nonce" ;;
-      forge) echo "VERDICT: pass 0000000000000000" ;;
-    esac ;;
+      pass)  v="VERDICT: pass $nonce" ;;
+      fail)  v="VERDICT: fail $nonce" ;;
+      forge) v="VERDICT: pass 0000000000000000" ;;
+    esac
+    tu() { jq -cn --arg n "mcp__claude-in-chrome__$1" --arg d "${2:-}" \
+      '{type: "assistant", message: {content: [{type: "tool_use", name: $n, input: (if $d == "" then {} else {deviceId: $d} end)}]}}'; }
+    case "${SELECTS:-pinned}" in
+      pinned) [ -n "$pinned" ] && tu select_browser "$pinned" ;;
+      none)   ;;
+      late)   tu navigate; tu select_browser "$pinned" ;;
+      other)  tu select_browser "$pinned"; tu navigate; tu select_browser "7696726f-93fa-4d88-9b98-1f8d0c11db6c" ;;
+    esac
+    tu navigate
+    jq -cn --arg r "Checked the nav.
+$v" '{type: "result", result: $r}' ;;
 esac
 exit 0
 EOF
@@ -153,9 +164,17 @@ grep -qE 'Bash\(gh |Bash\(git push' "$CLAUDE_ARGS" && bad "a model run was grant
 reset; write_config '["pr-ready"]' '{ browser: { serve: "true", url: "http://localhost:3999", chrome_device: "43c79157-2ce8-4235-8767-08f49362b5ec" } }'
 run >/dev/null
 grep -q 'select_browser with deviceId 43c79157-2ce8-4235-8767-08f49362b5ec' "$CLAUDE_ARGS" && ok "chrome_device pins the browser" || bad "no select_browser instruction"
+eq "pinned run that selects the device passes" passed "$(res)"
+PIN='{ browser: { serve: "true", url: "http://localhost:3999", chrome_device: "43c79157-2ce8-4235-8767-08f49362b5ec" } }'
+for c in "none:never selecting the device" "late:using Chrome before selecting" "other:selecting another device later"; do
+  reset; write_config '["pr-ready"]' "$PIN"
+  SELECTS="${c%%:*}" run >/dev/null
+  grep -q 'did not stay on chrome_device' "$PD/result" && ok "${c#*:} fails the browser test" || bad "${c#*:}: $(cat "$PD/result")"
+done
 reset; write_config '["pr-ready"]'
 run >/dev/null
 grep -q 'select_browser with deviceId' "$CLAUDE_ARGS" && bad "select instruction without chrome_device" || ok "no chrome_device: no select instruction"
+grep -q 'mcp__claude-in-chrome__select_browser' "$CLAUDE_ARGS" && bad "select_browser granted without chrome_device" || ok "no chrome_device: select_browser not granted"
 
 echo "== the pr-ready tier"
 reset; write_config '["draft-pr"]'
