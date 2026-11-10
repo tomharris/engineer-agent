@@ -50,7 +50,7 @@ export PROMPT_CAPTURE="$TMP/last-prompt.txt"
 
 cat > "$HOME/.local/bin/gh" <<'EOF'
 #!/bin/bash
-[ -n "${GH_HANG:-}" ] && [ "$1" = "$GH_HANG" ] && exec sleep 30
+[ -n "${GH_HANG:-}" ] && [ "$1" = "$GH_HANG" ] && exec sleep 30.0417
 repo=""; assignee=""
 while [ $# -gt 0 ]; do
   case "$1" in --repo) repo="$2"; shift 2 ;; --assignee) assignee="$2"; shift 2 ;; *) shift ;; esac
@@ -64,7 +64,7 @@ chmod +x "$HOME/.local/bin/gh"
 cat > "$TMP/bin/claude" <<'EOF'
 #!/bin/bash
 echo "invoked" >> "$CLAUDE_CALLS"
-[ -n "${CLAUDE_HANG:-}" ] && exec sleep 30
+[ -n "${CLAUDE_HANG:-}" ] && exec sleep 30.0418
 prompt="${*: -1}"
 rid="$(printf '%s' "$prompt" | sed -n 's/.*run_id: "\([^"]*\)".*/\1/p' | head -1)"
 [ -n "$rid" ] || rid="$(printf '%s' "$prompt" | grep -o '[0-9]\{8\}T[0-9]\{6\}Z-[0-9]*' | head -1)"
@@ -313,7 +313,9 @@ if [ "$elapsed" -lt 20 ]; then ok "hung model run killed (${elapsed}s)"; else ba
 if grep -q 'poll exceeded 2s' "$LOG"; then ok "watchdog logged the kill"; else bad "watchdog did not log"; fi
 if [ -f "$EA_AGENT_DIR/state/cron-poll.lock" ]; then bad "lock left behind after watchdog kill"; else ok "lock released"; fi
 sleep 1
-if pgrep -f 'sleep 30' >/dev/null; then bad "hung child survived the watchdog"; pkill -f 'sleep 30'; else ok "no surviving children"; fi
+# Anchored, unique durations: a bare 'sleep 30' pattern also matches unrelated processes on the box
+# (and pkill would kill them).
+if pgrep -f '^sleep 30\.041[78]$' >/dev/null; then bad "hung child survived the watchdog"; pkill -f '^sleep 30\.041[78]$'; else ok "no surviving children"; fi
 rm -f "$EA_AGENT_DIR"/queue/*/*.md; : > "$GH_FIXTURE"
 
 echo
