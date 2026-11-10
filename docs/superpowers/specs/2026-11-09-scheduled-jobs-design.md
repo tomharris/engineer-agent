@@ -338,7 +338,11 @@ Same shape as existing suites (`tests/run-all.sh`, mktemp sandbox, PATH shims fo
    `exclusive` skip in `cron-poll.sh`. Slack `channels` watch as the first handler (parity).
 2. **Built.** `lib-assign-rules.sh` + tests (no writes), plus read-only `jobs-ctl.sh preview`.
 3. **Built.** `jira-claim.sh` + `jira-claim` tier.
-4. `lib-confined-run.sh` extraction, then `implement-next` + `implement` tier.
+4. **Built.** `lib-confined-run.sh` extraction, then `implement-next` + `implement` tier. Deviations
+   from the sequence above, each conservative: `daily_cap` counts tickets *picked* (a pick awaiting
+   Approve is not a claim, but uncapped it would queue a ticket every tick); a previous pick still
+   in `drafts/` blocks the next run; the listener honors autopilot items only via the bash-written
+   `state/autopilot-items.tsv`, never frontmatter; a lost claim race moves the item to `rejected/`.
 5. spy `unreact`; shim `react`/`unreact`/`search`; `slack-react.sh` +
    `slack-react` tier; `watched-threads.tsv` + `my-threads`; `mentions`.
 6. Reaction triggers (spy: reactions in `read` output).

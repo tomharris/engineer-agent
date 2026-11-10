@@ -59,12 +59,19 @@ job_body() {
       bash "${EA_JOB_HANDLER_SLACK_WATCH:-${PLUGIN_ROOT}/scripts/job-slack-watch.sh}" --project "$slug" --job "$key" \
         --manifest "$w/manifest.tsv" --errors "$w/errors" --run-ts "$run_ts" >> "$LOG_FILE" 2>&1
       rc=$? ;;
+    jira:implement-next)
+      bash "${EA_JOB_HANDLER_JIRA_IMPLEMENT_NEXT:-${PLUGIN_ROOT}/scripts/job-jira-implement-next.sh}" --job "$key" \
+        --errors "$w/errors" --items "$w/items" ${budget:+--budget "$budget"} >> "$LOG_FILE" 2>&1
+      rc=$?
+      [ "$rc" = 0 ] && items="$(cat "$w/items" 2>/dev/null || echo 0)" ;;
     *) echo "no handler for ${kind}" >> "$w/errors"; rc=2 ;;
   esac
-  case "$rc" in
-    0) ;;
-    3) status=error; echo "collector unavailable (exit 3): check agent.typesafe credential, curl and jq — see state/jobs.log" >> "$w/errors" ;;
-    *) status=error; echo "collector exited ${rc} — see state/jobs.log" >> "$w/errors" ;;
+  case "${kind}:${rc}" in
+    *:0) ;;
+    slack:watch:3) status=error; echo "collector unavailable (exit 3): check agent.typesafe credential, curl and jq — see state/jobs.log" >> "$w/errors" ;;
+    slack:watch:*) status=error; echo "collector exited ${rc} — see state/jobs.log" >> "$w/errors" ;;
+    *:3) status=error; [ -s "$w/errors" ] || echo "${kind} unavailable (exit 3) — see state/jobs.log" >> "$w/errors" ;;
+    *) status=error; [ -s "$w/errors" ] || echo "${kind} exited ${rc} — see state/jobs.log" >> "$w/errors" ;;
   esac
   [ "$status" = ok ] && [ -s "$w/errors" ] && status=partial
 

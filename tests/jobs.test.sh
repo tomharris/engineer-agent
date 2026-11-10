@@ -132,7 +132,7 @@ projects:
     jobs:
       - id: auto
         integration: jira
-        action: implement-next
+        action: triage
         every: 30m
         exclusive: true
 YAML

@@ -8,7 +8,8 @@
 #   jobs-ctl.sh pause <key>        stop a job running until resumed
 #   jobs-ctl.sh resume <key>       clear a pause (manual or circuit-breaker) and its failure streak
 #   jobs-ctl.sh preview <key>      jira:implement-next only: fetch each rule's tickets and show which
-#                                  one would be picked and why each other one was skipped (read-only)
+#                                  one would be picked and why each other one was skipped (read-only;
+#                                  ignores the job's guards)
 # <key> is <project>.<id>.
 set -uo pipefail
 
@@ -75,8 +76,12 @@ cmd_preview() {
   . "${PLUGIN_ROOT}/scripts/lib-queue.sh"
   # shellcheck source=lib-jira-api.sh
   . "${PLUGIN_ROOT}/scripts/lib-jira-api.sh"
+  # shellcheck source=lib-ticket-kind.sh
+  . "${PLUGIN_ROOT}/scripts/lib-ticket-kind.sh"
   ar_jira_init || die "$AR_ERR"
   TMPD="$(mktemp -d)"; trap 'rm -rf "$TMPD"' EXIT
+  _arcl "projects.${slug}.investigation.jira_types" > "$TMPD/jira_types"
+  export AR_JIRA_TYPES_FILE="$TMPD/jira_types"
   out="$(AR_TRACE=1 AR_EVAL_ALL=1 ar_select "$slug" "$idx" 2>&1 >"$TMPD/pick")"; rc=$?
   printf '%s\n' "$out"
   case "$rc" in

@@ -85,7 +85,7 @@ jobs_validate() {
     || { echo "duplicate job id '${id}' in project ${slug}"; return 1; }
   if [ "${integ}:${action}" = "jira:implement-next" ]; then
     ar_validate "$slug" "$idx" || return 1
-    [ "$sup" = "1" ] || { echo "jira:implement-next does not run yet; check its rules with: jobs-ctl.sh preview ${slug}.${id}"; return 1; }
+    jobs_validate_implement "$slug" "$idx" || return 1
   fi
   [ "$sup" = "1" ] || { echo "unsupported integration/action '${integ}:${action}'"; return 1; }
   secs="$(jobs_duration_seconds "$every")"
@@ -116,6 +116,31 @@ jobs_validate() {
     done
   fi
   return 0
+}
+
+# jobs_validate_implement <slug> <idx> — guards and the sandbox prerequisite. Deny-by-default: the
+# allowlist check uses the same reader and charset as run_ticket_implementation, so a job that
+# validates here cannot be refused there for a missing build list.
+jobs_validate_implement() {
+  local slug="$1" idx="$2" v c ok=0
+  for v in max_in_flight daily_cap; do
+    c="$(_jcfg "projects.${slug}.job.${idx}.${v}")"
+    [ -z "$c" ] || [[ "$c" =~ ^[1-9][0-9]*$ ]] || { echo "guards.${v} '${c}' must be a positive integer"; return 1; }
+  done
+  [ "$(_jcfg "projects.${slug}.tracker")" = jira ] || { echo "jira:implement-next needs a project with tracker jira"; return 1; }
+  while IFS= read -r c; do
+    [[ "$c" =~ ^[A-Za-z0-9._/-]+$ ]] && ok=1
+  done < <(yaml_project_list "$slug" exec allowed_commands)
+  [ "$ok" = 1 ] || { echo "jira:implement-next needs projects.${slug}.exec.allowed_commands (build/test commands for the confined run)"; return 1; }
+}
+
+# job_record_pick <key> <item> / job_picks_today <key> — the daily_cap ledger, keyed by the
+# MACHINE LOCAL date (spec decision), in state/jobs/<key>.picks.
+job_record_pick() { mkdir -p "$JOBS_STATE_DIR"; printf '%s\t%s\n' "$(_jobs_local "$(jobs_now)" %Y-%m-%d)" "$2" >> "$(job_path "$1" picks)"; }
+job_picks_today() {
+  local f; f="$(job_path "$1" picks)"
+  [ -f "$f" ] || { echo 0; return 0; }
+  awk -F'\t' -v d="$(_jobs_local "$(jobs_now)" %Y-%m-%d)" '$1==d {n++} END {print n+0}' "$f"
 }
 
 # jobs_in_window <hours> <days-csv> <epoch> — 0 if the epoch's LOCAL time is inside the window.

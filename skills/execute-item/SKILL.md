@@ -154,7 +154,7 @@ read `projects.<project>.tracker`, or infer from `source` frontmatter (`github` 
 
   > **Isolation and budget come from the caller, not from here.** This skill runs *inside*
   > whatever sandbox its caller built, so it can neither create nor widen one. On the remote
-  > (ntfy) path `scripts/approval-listener.sh`'s `run_ticket_implementation` prepares an isolated
+  > (ntfy) path, and the `implement-next` scheduled job, `run_ticket_implementation` (`scripts/lib-confined-run.sh`) prepares an isolated
   > git worktree, a config-driven build-command allowlist and `TICKET_BUDGET_USD` **in plain bash
   > before `claude` starts**, then invokes this skill inside it (see CLAUDE.md → "Confined
   > headless ticket implementation"). That ordering is the containment boundary: untrusted ticket

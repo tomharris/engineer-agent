@@ -848,9 +848,21 @@ starts using the poll's read-only allowlist; drafts land in `drafts/` and push t
 watching, mentions and emoji reactions are specified in
 `docs/superpowers/specs/2026-11-09-scheduled-jobs-design.md` and not built yet.
 
-Jira `implement-next` is partly built: its assignment `rules` are validated (a job with bad rules is
-`invalid` in `/engineer-agent jobs`) and can be dry-run with `/engineer-agent jobs preview`, and the
-claim step (`scripts/jira-claim.sh`) exists, but the job does not run yet. Each rule's `jql` decides what is fetched; its `require` predicates are
+Jira `implement-next` picks the next ticket by its `rules` and implements it. Dry-run the rules with
+`/engineer-agent jobs preview`. Each run:
+
+1. Skips if an implementation is already running for the project (`guards.max_in_flight`, default
+   1), if its previous pick is still in `drafts/`, or if it has picked `guards.daily_cap` tickets
+   today (default 1, local date).
+2. Picks one ticket and writes it to `drafts/` as a `ticket` item. Tickets the kind ladder treats as
+   investigations (`investigation.jira_types`, default includes `Task`) are skipped.
+3. Unless `agent.autonomy.auto_execute` has **both** `implement` and `jira-claim`, pushes it with
+   Approve/Reject and stops. Approving claims the ticket and implements it.
+4. Otherwise claims it, implements it in the same confined worktree an approved ticket uses (it
+   needs `exec.allowed_commands`), and opens a draft PR. On failure the claim is rolled back and the
+   item stays in `drafts/` until you act on it.
+
+Each rule's `jql` decides what is fetched; its `require` predicates are
 re-checked against every fetched ticket, the first rule with an eligible ticket wins, and a ticket
 already in the queue (including completed or rejected) is never picked. See the commented
 `jira-autopilot` example in `config/engineer.example.yaml` for every predicate.
@@ -1046,6 +1058,8 @@ scripts/
   lib-assign-rules.sh          Jira implement-next rules: validation, predicates, first-match selection
   lib-jira-api.sh              Jira REST helpers (credential on curl stdin)
   jira-claim.sh                Claim / release a Jira ticket for implement-next
+  job-jira-implement-next.sh   The implement-next job handler
+  lib-confined-run.sh          Confined headless ticket implementation (listener + implement-next)
   lib-poll-allowlist.sh        Read-only allowlist shared by the poll and job drafting
   notify.sh                    Publish a push notification to ntfy
   turn-notify-hook.sh          Hook handler: FYI push at each implement-ticket turn end
