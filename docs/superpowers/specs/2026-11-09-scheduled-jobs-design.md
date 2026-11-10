@@ -343,9 +343,13 @@ Same shape as existing suites (`tests/run-all.sh`, mktemp sandbox, PATH shims fo
    Approve is not a claim, but uncapped it would queue a ticket every tick); a previous pick still
    in `drafts/` blocks the next run; the listener honors autopilot items only via the bash-written
    `state/autopilot-items.tsv`, never frontmatter; a lost claim race moves the item to `rejected/`.
-   Unattended additionally requires `trusted_authors` (creator + every summary/description editor),
-   and the confined runs enumerate `git`/`gh` verbs instead of `Bash(git *)` / `Bash(gh *)`, after
-   a security review showed ticket text could otherwise steer an unattended run into code execution.
+   Unattended additionally requires `trusted_authors` (creator + every editor of summary,
+   description, labels or components), and the confined runs enumerate `git`/`gh` verbs instead of
+   `Bash(git *)` / `Bash(gh *)`, after a security review showed ticket text could otherwise steer an
+   unattended run into code execution. A follow-up review moved the push behind
+   `scripts/confined-push.sh` (prefixed branch, same name, no force), dropped verbs acting on refs
+   shared with the user's checkout, and removed `gh` text reads and the QA follow-on from
+   unattended runs.
 5. spy `unreact`; shim `react`/`unreact`/`search`; `slack-react.sh` +
    `slack-react` tier; `watched-threads.tsv` + `my-threads`; `mentions`.
 6. Reaction triggers (spy: reactions in `read` output).

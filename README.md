@@ -857,13 +857,14 @@ Jira `implement-next` picks the next ticket by its `rules` and implements it. Dr
 2. Picks one ticket and writes it to `drafts/` as a `ticket` item. Tickets the kind ladder treats as
    investigations (`investigation.jira_types`, default includes `Task`) are skipped.
 3. Pushes it with Approve/Reject and stops, unless `agent.autonomy.auto_execute` has **both**
-   `implement` and `jira-claim` **and** the ticket was created, and its summary and description
-   only ever edited, by accounts in the job's `trusted_authors`. Approving claims the ticket and
+   `implement` and `jira-claim` **and** the ticket was created, and its summary, description,
+   labels and components only ever edited, by accounts in the job's `trusted_authors`. Approving claims the ticket and
    implements it. The trusted-authors check matters because the implementation runs your build
    commands on files the model edits: without it, anyone who can file a matching ticket could get
    code run on your machine.
 4. Otherwise claims it, implements it in the same confined worktree an approved ticket uses (it
-   needs `exec.allowed_commands`), and opens a draft PR. On failure the claim is rolled back and the
+   needs `exec.allowed_commands`), and opens a draft PR. An unattended run cannot read issue or PR
+   text through `gh` and skips the QA follow-on; it pushes only through `scripts/confined-push.sh`. On failure the claim is rolled back and the
    item stays in `drafts/` until you act on it.
 
 Each rule's `jql` decides what is fetched; its `require` predicates are
@@ -1064,6 +1065,7 @@ scripts/
   jira-claim.sh                Claim / release a Jira ticket for implement-next
   job-jira-implement-next.sh   The implement-next job handler
   lib-confined-run.sh          Confined headless ticket implementation (listener + implement-next)
+  confined-push.sh             The only push a confined run may make: one prefixed branch, no force
   lib-poll-allowlist.sh        Read-only allowlist shared by the poll and job drafting
   notify.sh                    Publish a push notification to ntfy
   turn-notify-hook.sh          Hook handler: FYI push at each implement-ticket turn end

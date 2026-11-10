@@ -836,10 +836,17 @@ text can influence code *inside* the sandbox but never the *shape* of it:
 2. **Narrow allowlist.** Build/test commands come from `projects.<slug>.exec.allowed_commands`
    in config; the listener validates each against `^[A-Za-z0-9._/-]+$` and expands it to a
    `Bash(<cmd> *)` rule, added to `Read/Edit/Write/Glob/Grep`, enumerated `git` verbs
-   (`CONFINED_GIT_WRITE_RULES` — push only as `git push [--no-verify] -u origin`), `gh pr create`
-   plus read-only `gh` verbs, `Bash(mv *)`, and `notify.sh`. Never `Bash(git *)` / `Bash(gh *)`:
-   those also grant `git -C /elsewhere`, `git -c alias.x='!cmd'` (arbitrary exec), `gh api -X
-   POST` and `gh pr merge`. The QA run gets read-only `git`/`gh` only. **Deny-by-default:** a project with no (valid) list has remote
+   (`CONFINED_GIT_WRITE_RULES`), `gh pr create` plus read-only `gh` verbs, `Bash(mv *)`, and
+   `notify.sh`. Never `Bash(git *)` / `Bash(gh *)`: those also grant `git -C /elsewhere`,
+   `git -c alias.x='!cmd'` (arbitrary exec), `gh api -X POST` and `gh pr merge`. **The only push
+   is `scripts/confined-push.sh`**: a `Bash(git push -u origin:*)` prefix rule still admits
+   `HEAD:main`, `--force` and `--delete`, so the wrapper pushes one local branch under
+   `agent.branch_prefix/` to the same name, never the base, never forced. Verbs that act on refs
+   shared with the user's checkout (`git branch`, `stash`, `fetch`, plain `checkout`/`switch`) are
+   absent; only `checkout -b`/`switch -c` create a branch. An **unattended** run
+   (`implement-next` without an Approve) also loses `gh issue view` / `gh pr view` / `gh pr list`
+   — they read text the trust check never saw — and gets no QA follow-on, whose Jira read and
+   `curl` sit outside that check. The QA run gets read-only `git`/`gh` only. **Deny-by-default:** a project with no (valid) list has remote
    ticket approval *refused* — the item stays in `drafts/`, a `⚠️ Failed` push tells the user to
    set the list, and no unconfined session ever runs. It is never `Bash(*)` / `bypassPermissions`.
 3. **Draft-PR review gate** (downstream, unchanged): the output is a draft PR the human reviews.
@@ -1419,14 +1426,16 @@ Read-only: search + dev-panel reads, never an assign or transition. Four things 
 **`implement-next` (`job-jira-implement-next.sh`)** — things a reader will otherwise "fix" back:
 - **Unattended needs `implement` AND `jira-claim` AND trusted authorship.** The ticket's
   `creator` (not `reporter`, which the creator can set to anyone) and the author of every
-  summary/description edit in its changelog must be in the job's `trusted_authors` (Jira
+  changelog edit to a field written into the queue item (summary, description, labels,
+  components) must be in the job's `trusted_authors` (Jira
   accountIds); empty list, truncated changelog or any other author ⇒ untrusted. Any condition
   missing ⇒ the pick is written to `drafts/` with the reason and pushed with Approve/Reject; the
   Approve tap then claims with `--approved` and implements. This is the control for the sandbox's
   honest limit: the confined run can execute code as the user. It holds only because the check
   and the queue item come from **one** fetch and the confined run has **no Jira access**, so the
-  model reads exactly the text that was checked. Keep both true: do not add a Jira verb or `curl`
-  to the implementation allowlist, and do not re-fetch the ticket after the check. Reasons name
+  model reads exactly the text that was checked. Keep both true: do not add a Jira verb, `curl` or
+  a `gh` text read to the unattended allowlist, do not start QA from an unattended run, and do not
+  re-fetch the ticket after the check. Reasons name
   accountIds only, never display names (attacker-chosen text reaching the push).
 - **The listener trusts `state/autopilot-items.tsv`, never frontmatter.** Queue files can be
   written by a drafting model that read untrusted text; `autopilot: true` there is display only.

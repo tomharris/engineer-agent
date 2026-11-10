@@ -236,8 +236,8 @@ agent:
   # always requires approval. Leave the list empty to gate everything.
   # A jira implement-next job runs unattended only with BOTH "implement" (start the confined
   # implementation) and "jira-claim" (assign/transition the ticket), AND only for tickets whose
-  # creator and every summary/description editor are in the job's trusted_authors. Otherwise each
-  # pick waits for an Approve tap. WARNING: the implementation runs your build commands on files the
+  # creator and every editor of summary, description, labels or components are in the job's
+  # trusted_authors. Otherwise each pick waits for an Approve tap. WARNING: the implementation runs your build commands on files the
   # model edits, so text in a ticket can get code run on this machine as you. trusted_authors is
   # what limits that to people you trust. Deny-by-default.
   autonomy:

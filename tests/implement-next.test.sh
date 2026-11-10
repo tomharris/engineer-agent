@@ -25,6 +25,7 @@ export PATH="$TMP/bin:$PATH"
 export TZ=America/Denver
 export EA_NOW=1762840740                 # 2025-11-10 22:59 MST
 export EA_TEST_JIRA_TOKEN="s3cr3t"
+export CLAUDE_ARGS="$TMP/claude.args"
 export ST="$TMP/jira" REQ_LOG="$TMP/req.log" NOTIFY_LOG="$TMP/notify.log" CLAUDE_LOG="$TMP/claude.log"
 export EA_NOTIFY_BIN="$TMP/bin/notify" NOTIFY_BIN="$TMP/bin/notify" CLAUDE_BIN="$TMP/bin/claude"
 mkdir -p "$ST"
@@ -54,6 +55,8 @@ chmod +x "$TMP/bin/git"
 # hang blocks until killed. Records the in-flight markers visible while it runs.
 cat > "$TMP/bin/claude" <<'EOF'
 #!/bin/bash
+printf '%s\n' "$*" >> "$CLAUDE_ARGS"
+printf '%s' "$*" | grep -q "Generate a QA test plan" && exit 0
 item="$(printf '%s' "$*" | sed -nE "s/.*queue item '([^']+)'.*/\1/p")"
 printf '%s markers=%s\n' "$item" "$(cat "$EA_AGENT_DIR"/state/implement-inflight/* 2>/dev/null | cut -f2 | paste -sd, -)" >> "$CLAUDE_LOG"
 case "${FAKE_IMPL:-ok}" in
@@ -129,6 +132,8 @@ ${3-    exec:
         - "make"}
     investigation:
       jira_types: ["Spike"]
+    qa:
+      base_url: "http://localhost:3000"
     jobs:
       - id: auto
         integration: jira
@@ -147,7 +152,7 @@ YAML
 reset() {
   rm -rf "$Q"/*/* "$EA_AGENT_DIR/state" "$ST"/*; mkdir -p "$EA_AGENT_DIR/state" "$TMP/repo"
   rm -f "$EA_AGENT_DIR/hanging"
-  : > "$REQ_LOG"; : > "$NOTIFY_LOG"; : > "$CLAUDE_LOG"
+  : > "$REQ_LOG"; : > "$NOTIFY_LOG"; : > "$CLAUDE_LOG"; : > "$CLAUDE_ARGS"
   mkissue BILL-1 Bug; mkissue BILL-2 Bug; echo "BILL-1 BILL-2" > "$ST/search"
 }
 run_job() { bash "$HANDLER" --job bill.auto --errors "$TMP/errors" --items "$TMP/items" 2>/dev/null; }
@@ -216,6 +221,10 @@ eq "drafts/ reconciled" "" "$(drafts)"
 eq "in-flight marker present during the run" "${ITEM} markers=bill" "$(cat "$CLAUDE_LOG")"
 eq "in-flight marker removed after" "" "$(ls "$EA_AGENT_DIR/state/implement-inflight" 2>/dev/null)"
 grep -q "Autopilot implemented BILL-1" "$NOTIFY_LOG" && ok "success push" || bad "success push"
+for r in "Bash(gh issue view" "Bash(gh pr view" "Bash(gh pr list" "mcp__atlassian" "Bash(curl"; do
+  grep -qF -- "$r" "$CLAUDE_ARGS" && bad "unattended run grants $r" || ok "unattended run omits $r"
+done
+eq "unattended run starts no QA follow-on" "0" "$(grep -c "Generate a QA test plan" "$CLAUDE_ARGS")"
 
 reset; write_config "[implement, jira-claim]"
 FAKE_IMPL=fail run_job; eq "failed implementation exits 1" "1" "$?"
@@ -242,7 +251,11 @@ untrusted_case() {  # untrusted_case <name> <expected reason fragment> [trusted_
 reset; mkissue BILL-1 Bug acc-stranger
 untrusted_case "untrusted creator" "created by acc-stranger, not a trusted author"
 reset; mkissue BILL-1 Bug acc-lead '{"total":1,"histories":[{"author":{"accountId":"acc-stranger"},"items":[{"field":"description","fieldId":"description"}]}]}'
-untrusted_case "description edited by an untrusted account" "summary/description edited by acc-stranger, not a trusted author"
+untrusted_case "description edited by an untrusted account" "edited by acc-stranger, not a trusted author"
+reset; mkissue BILL-1 Bug acc-lead '{"total":1,"histories":[{"author":{"accountId":"acc-stranger"},"items":[{"field":"labels","fieldId":"labels"}]}]}'
+untrusted_case "labels edited by an untrusted account" "edited by acc-stranger, not a trusted author"
+reset; mkissue BILL-1 Bug acc-lead '{"total":1,"histories":[{"author":{"accountId":"acc-stranger"},"items":[{"field":"Component","fieldId":"components"}]}]}'
+untrusted_case "components edited by an untrusted account" "edited by acc-stranger, not a trusted author"
 reset; mkissue BILL-1 Bug acc-lead '{"total":150,"histories":[]}'
 untrusted_case "truncated changelog" "changelog truncated; cannot verify edits"
 reset
@@ -291,6 +304,7 @@ run_job; ITEM="$(drafts)"; : > "$REQ_LOG"
 ( source "$REPO_ROOT/scripts/approval-listener.sh"; handle_line "$(msg m1 "approve|$ITEM")" ) >/dev/null 2>&1
 eq "Approve claims the autopilot pick without the jira-claim tier" "acc-me|In Progress" "$(state BILL-1)"
 eq "Approve implements it" "1|" "$(ls "$Q/completed" | grep -c ticket-BILL-1)|$(drafts)"
+eq "an approved run keeps the QA follow-on" "1" "$(grep -c "Generate a QA test plan" "$CLAUDE_ARGS")"
 
 reset; write_config "[]"
 printf -- '---\ntype: ticket\nsource: jira\nsource_id: "BILL-2"\nproject: "bill"\nautopilot: true\nautopilot_job: "bill.auto"\nautopilot_rule: "bugs"\n---\n' \

@@ -221,12 +221,15 @@ test_ticket_confined_run() {
     && ok "narrow build allowlist expanded from config" \
     || bad "build allowlist missing (args: $(cat "$CLAUDE_ARGS_LOG"))"
   local r
-  for r in "Bash(git commit:*)" "Bash(git push -u origin:*)" "Bash(git push --no-verify -u origin:*)" \
-           "Bash(git checkout:*)" "Bash(gh pr create:*)" "Bash(gh auth status:*)"; do
+  for r in "Bash(git commit:*)" "Bash(${PLUGIN_ROOT}/scripts/confined-push.sh:*)" \
+           "Bash(git checkout -b:*)" "Bash(gh pr create:*)" "Bash(gh auth status:*)" "Bash(gh pr view:*)"; do
     grep -qF -- "$r" "$CLAUDE_ARGS_LOG" && ok "coding session allows $r" || bad "coding session lacks $r"
   done
   # Broad prefixes re-grant `git -C /elsewhere`, `git -c alias.x=!cmd`, `gh api -X POST`, `gh pr merge`.
-  for r in "Bash(git *)" "Bash(gh *)" "Bash(gh api" "Bash(gh pr merge" "Bash(git -"; do
+  # Raw push takes any refspec (HEAD:main --force); branch/stash/checkout act on refs the worktree
+  # shares with the user's own checkout.
+  for r in "Bash(git *)" "Bash(gh *)" "Bash(gh api" "Bash(gh pr merge" "Bash(git -" \
+           "Bash(git push" "Bash(git fetch" "Bash(git branch" "Bash(git stash" "Bash(git checkout:*)" "Bash(git switch:*)"; do
     grep -qF -- "$r" "$CLAUDE_ARGS_LOG" && bad "confined allowlist grants $r" || ok "confined allowlist omits $r"
   done
   grep -qF -- "Bash(spy *)" "$CLAUDE_ARGS_LOG" \
