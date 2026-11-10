@@ -115,8 +115,15 @@ remote_head() { git -C "$PROJECT_PATH" ls-remote origin "refs/heads/${BRANCH}" 2
 # ci_state — pass | fail | pending | none, for the PR's current head. Writes failing rows to $D/ci.fail.
 ci_state() {
   local rows
-  rows="$(with_timeout "$GH_TIMEOUT" gh pr checks "$PR" --repo "$REPO" --json name,bucket,link \
-           --jq '.[] | "\(.bucket)\t\(.name)\t\(.link)"' 2>/dev/null)"
+  # statusCheckRollup, not `gh pr checks --json`: that flag is missing from older gh (Ubuntu 2.45).
+  rows="$(with_timeout "$GH_TIMEOUT" gh pr view "$PR" --repo "$REPO" --json statusCheckRollup --jq '
+    .statusCheckRollup[]? |
+    (if .__typename == "StatusContext" then
+       ({"SUCCESS": "pass", "PENDING": "pending", "EXPECTED": "pending"}[.state // ""] // "fail")
+     elif (.status // "") != "COMPLETED" then "pending"
+     else ({"SUCCESS": "pass", "NEUTRAL": "pass", "SKIPPED": "skipping", "CANCELLED": "cancel"}[.conclusion // ""] // "fail")
+     end) as $b
+    | "\($b)\t\(.name // .context // "")\t\(.detailsUrl // .targetUrl // "")"' 2>/dev/null)"
   [ -n "$rows" ] || { echo none; return; }
   printf '%s\n' "$rows" | awk -F'\t' '$1=="fail" || $1=="cancel"' > "$D/ci.fail"
   if printf '%s\n' "$rows" | awk -F'\t' '$1=="pending"{f=1} END{exit !f}'; then echo pending

@@ -31,8 +31,9 @@ PD="$EA_AGENT_DIR/state/pr-pipeline/${ITEM%.md}"
 printf '#!/bin/bash\nprintf "%%s\\n" "$*" >> "$NOTIFY_LOG"\n' > "$TMP/bin/notify"
 printf '#!/bin/bash\necho 200\n' > "$TMP/bin/curl"
 
-# gh: PR #42 on acme/web. Head = the bare origin's branch tip. Checks per head sha from
-# $ST/checks.<sha>, else $ST/checks.default ("none" = no checks reported).
+# gh: PR #42 on acme/web. Head = the bare origin's branch tip. Check rows ("bucket\tname\tlink")
+# per head sha from $ST/checks.<sha>, else $ST/checks.default ("none" = no checks reported); they
+# are served as a statusCheckRollup and run through the caller's real --jq filter.
 cat > "$TMP/bin/gh" <<'EOF'
 #!/bin/bash
 printf '%s\n' "$*" >> "$ST/calls"
@@ -43,11 +44,16 @@ case "$1 $2" in
     case "$*" in
       *headRefOid*) head ;;
       *isDraft*)    cat "$ST/isdraft" ;;
+      *statusCheckRollup*)
+        f="$ST/checks.$(head)"; [ -f "$f" ] || f="$ST/checks.default"
+        while [ "$1" != --jq ]; do shift; done
+        { [ "$(cat "$f")" = none ] || cat "$f"; } | jq -Rn '{statusCheckRollup: [inputs | select(. != "") | split("\t") |
+            if .[0] == "status-fail" then {__typename: "StatusContext", context: .[1], state: "ERROR", targetUrl: .[2]}
+            else {__typename: "CheckRun", name: .[1], detailsUrl: .[2],
+                  status: (if .[0] == "pending" then "IN_PROGRESS" else "COMPLETED" end),
+                  conclusion: ({"pass": "SUCCESS", "fail": "FAILURE", "skipping": "SKIPPED"}[.[0]] // null)} end]}' \
+          | jq -r "$2" ;;
     esac ;;
-  "pr checks")
-    f="$ST/checks.$(head)"; [ -f "$f" ] || f="$ST/checks.default"
-    [ "$(cat "$f")" = none ] && { echo "no checks reported" >&2; exit 1; }
-    cat "$f" ;;
   "run view")  echo "log of run $3: expected 1 got 2" ;;
   "pr ready")  echo false > "$ST/isdraft" ;;
 esac
@@ -183,6 +189,14 @@ reset; write_config '["pr-ready"]' '{ mark_ready: true, ci: { fix_attempts: 0 } 
 printf 'fail\ttest\thttps://x\n' > "$ST/checks.default"
 eq "fix_attempts 0 stops on the first failure" 1 "$(run)"
 eq "no fix run" 0 "$(fix_runs)"
+
+reset; write_config '["pr-ready"]' '{ mark_ready: true, ci: { fix_attempts: 0 } }'
+printf 'pass\tlint\thttps://x\nskipping\tdeploy\thttps://x\n' > "$ST/checks.default"
+eq "skipped checks do not block a pass" 0 "$(run)"
+reset; write_config '["pr-ready"]' '{ mark_ready: true, ci: { fix_attempts: 0 } }'
+printf 'pass\tlint\thttps://x\nstatus-fail\tci/ext\thttps://x\n' > "$ST/checks.default"
+eq "a failed commit status is a failure" 1 "$(run)"
+grep -q 'ci/ext' "$PD/result" && ok "reason names the status context" || bad "result: $(cat "$PD/result")"
 
 reset; write_config '["pr-ready"]'
 echo none > "$ST/checks.default"
