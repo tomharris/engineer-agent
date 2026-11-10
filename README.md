@@ -856,8 +856,12 @@ Jira `implement-next` picks the next ticket by its `rules` and implements it. Dr
    today (default 1, local date).
 2. Picks one ticket and writes it to `drafts/` as a `ticket` item. Tickets the kind ladder treats as
    investigations (`investigation.jira_types`, default includes `Task`) are skipped.
-3. Unless `agent.autonomy.auto_execute` has **both** `implement` and `jira-claim`, pushes it with
-   Approve/Reject and stops. Approving claims the ticket and implements it.
+3. Pushes it with Approve/Reject and stops, unless `agent.autonomy.auto_execute` has **both**
+   `implement` and `jira-claim` **and** the ticket was created, and its summary and description
+   only ever edited, by accounts in the job's `trusted_authors`. Approving claims the ticket and
+   implements it. The trusted-authors check matters because the implementation runs your build
+   commands on files the model edits: without it, anyone who can file a matching ticket could get
+   code run on your machine.
 4. Otherwise claims it, implements it in the same confined worktree an approved ticket uses (it
    needs `exec.allowed_commands`), and opens a draft PR. On failure the claim is rolled back and the
    item stays in `drafts/` until you act on it.

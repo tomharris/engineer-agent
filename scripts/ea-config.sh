@@ -190,6 +190,7 @@ _emit_jobs() {
     esac
     _emit_list "projects.${slug}.job.${i}.days"  "${p}.days"
     _emit_list "projects.${slug}.job.${i}.watch" "${p}.watch"
+    _emit_list "projects.${slug}.job.${i}.trusted_authors" "${p}.trusted_authors"
     _emit_rules "$slug" "$i"
     i=$((i+1))
   done

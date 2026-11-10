@@ -127,6 +127,9 @@ jobs_validate_implement() {
     c="$(_jcfg "projects.${slug}.job.${idx}.${v}")"
     [ -z "$c" ] || [[ "$c" =~ ^[1-9][0-9]*$ ]] || { echo "guards.${v} '${c}' must be a positive integer"; return 1; }
   done
+  while IFS= read -r c; do
+    [ -z "$c" ] || [[ "$c" =~ ^[A-Za-z0-9:_-]+$ ]] || { echo "trusted_authors entry '${c}' is not a Jira accountId"; return 1; }
+  done < <(printf '%s\n' "$EA_JOBS_CFG" | awk -v p="projects.${slug}.job.${idx}.trusted_authors[]=" 'index($0,p)==1 {print substr($0,length(p)+1)}')
   [ "$(_jcfg "projects.${slug}.tracker")" = jira ] || { echo "jira:implement-next needs a project with tracker jira"; return 1; }
   while IFS= read -r c; do
     [[ "$c" =~ ^[A-Za-z0-9._/-]+$ ]] && ok=1

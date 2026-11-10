@@ -835,8 +835,11 @@ text can influence code *inside* the sandbox but never the *shape* of it:
    copy lingered.
 2. **Narrow allowlist.** Build/test commands come from `projects.<slug>.exec.allowed_commands`
    in config; the listener validates each against `^[A-Za-z0-9._/-]+$` and expands it to a
-   `Bash(<cmd> *)` rule, added to `Read/Edit/Write/Glob/Grep`, `Bash(git *)`, `Bash(gh *)`,
-   `Bash(mv *)`, and `notify.sh`. **Deny-by-default:** a project with no (valid) list has remote
+   `Bash(<cmd> *)` rule, added to `Read/Edit/Write/Glob/Grep`, enumerated `git` verbs
+   (`CONFINED_GIT_WRITE_RULES` — push only as `git push [--no-verify] -u origin`), `gh pr create`
+   plus read-only `gh` verbs, `Bash(mv *)`, and `notify.sh`. Never `Bash(git *)` / `Bash(gh *)`:
+   those also grant `git -C /elsewhere`, `git -c alias.x='!cmd'` (arbitrary exec), `gh api -X
+   POST` and `gh pr merge`. The QA run gets read-only `git`/`gh` only. **Deny-by-default:** a project with no (valid) list has remote
    ticket approval *refused* — the item stays in `drafts/`, a `⚠️ Failed` push tells the user to
    set the list, and no unconfined session ever runs. It is never `Bash(*)` / `bypassPermissions`.
 3. **Draft-PR review gate** (downstream, unchanged): the output is a draft PR the human reviews.
@@ -881,9 +884,12 @@ file and the check is `find -newer`, which also catches the update-in-place case
 filename snapshot would miss.
 
 **Honest limit — this is "medium," not airtight.** Claude Code `Bash()` rules are command-prefix
-matches, *not* cwd-scoped, so `Bash(git *)` also permits `git -C /elsewhere`. The worktree bounds
-the *default* target and the command *set* is curated, but that prefix-vs-path gap is the residual
-risk. Mitigating it: the command set is small and build-only, the source is an issue routed to the
+matches, *not* cwd-scoped, and the build commands run files the model can edit (a `Makefile`, test
+helpers, repo-tracked commit hooks), so ticket text that steers the model can run code as the user.
+`git diff/log/show --output=<path>` can also write a file anywhere. The worktree bounds the
+*default* target and the command *set* is curated, but that is the residual risk, and it is why the
+`implement-next` job needs trusted authorship to run without a human (see "Scheduled jobs").
+Mitigating it: the command set is small and build-only, the source is an issue routed to the
 user's own project, and the output is draft-only. `implement-ticket` is worktree-aware (Step 2: it
 creates the branch in place when already inside the repo checkout, and pushes before `gh pr
 create` so the headless run never hits an interactive push prompt).
@@ -945,7 +951,7 @@ inside the ticket text naming another issue be ignored — the same pre-expanded
 `cron-poll.sh` gives `${SLACK_BIN}`. And **MCP permission rules cannot be scoped to arguments**, so
 `addCommentToJiraIssue` is a capability over every issue the Atlassian token can reach and
 `Bash(gh issue comment:*)` over every repo `gh` is authed for; the prompt pin is the only scoping
-that exists. Same "medium, not airtight" admission as `Bash(git *)` vs `git -C /elsewhere` above.
+that exists. Same "medium, not airtight" admission as the implementation path's above.
 The transition verbs are stricter still: they are absent from the allowlist entirely unless
 `investigation.on_complete_status` is configured, so capability follows config.
 
@@ -1411,9 +1417,17 @@ Read-only: search + dev-panel reads, never an assign or transition. Four things 
 `jira-claim.sh` shares them. `ar_jira_init` sets globals: call it directly, not in `$(…)`.
 
 **`implement-next` (`job-jira-implement-next.sh`)** — things a reader will otherwise "fix" back:
-- **Two tiers to run unattended: `implement` AND `jira-claim`.** Either missing ⇒ the pick is
-  written to `drafts/` and pushed with Approve/Reject; the Approve tap then claims with
-  `--approved` and implements. `implement` alone must not claim.
+- **Unattended needs `implement` AND `jira-claim` AND trusted authorship.** The ticket's
+  `creator` (not `reporter`, which the creator can set to anyone) and the author of every
+  summary/description edit in its changelog must be in the job's `trusted_authors` (Jira
+  accountIds); empty list, truncated changelog or any other author ⇒ untrusted. Any condition
+  missing ⇒ the pick is written to `drafts/` with the reason and pushed with Approve/Reject; the
+  Approve tap then claims with `--approved` and implements. This is the control for the sandbox's
+  honest limit: the confined run can execute code as the user. It holds only because the check
+  and the queue item come from **one** fetch and the confined run has **no Jira access**, so the
+  model reads exactly the text that was checked. Keep both true: do not add a Jira verb or `curl`
+  to the implementation allowlist, and do not re-fetch the ticket after the check. Reasons name
+  accountIds only, never display names (attacker-chosen text reaching the push).
 - **The listener trusts `state/autopilot-items.tsv`, never frontmatter.** Queue files can be
   written by a drafting model that read untrusted text; `autopilot: true` there is display only.
   Only an item this job wrote (bash) to the ledger triggers a Jira claim on Approve.

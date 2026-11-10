@@ -6,8 +6,14 @@
 # Exit: 0 ok (including "guard skipped" and "nothing eligible"), 1 failed, 3 Jira unavailable.
 #
 # Sequence (spec "Run sequence"): guards → select → write drafts/ item → either push for Approve
-# (the listener then claims with --approved) or, with `implement` AND `jira-claim` in
-# auto_execute, claim → confined implementation → rollback on failure.
+# (the listener then claims with --approved) or claim → confined implementation → rollback.
+#
+# UNATTENDED needs `implement` AND `jira-claim` in auto_execute AND trusted authorship: the ticket's
+# creator and every summary/description edit in its changelog must be in the job's
+# trusted_authors. The confined run can execute code as the user (build commands run files the
+# model edits), so without that, anyone able to file a matching ticket could steer it. The check
+# and the queue item come from ONE fetch, and the confined run has no Jira access, so the text the
+# model sees is exactly the text that was checked. Anything short of it falls back to Approve.
 set -uo pipefail
 
 PLUGIN_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -72,7 +78,7 @@ esac
 IFS="	" read -r RULE KEY _ <<< "$pick"
 
 # --- 3. queue item --------------------------------------------------------------------------------
-code="$(jira_api "$TMPD/issue.json" GET "/issue/${KEY}?fields=summary,description,issuetype,components,labels,status,priority")"
+code="$(jira_api "$TMPD/issue.json" GET "/issue/${KEY}?fields=summary,description,issuetype,components,labels,status,priority,creator&expand=changelog")"
 [ "$code" = 200 ] || { err "could not read ${KEY} (HTTP ${code})"; exit 1; }
 # The key written to the queue is the API's, never one parsed from ticket text.
 [ "$(jq -r '.key // ""' "$TMPD/issue.json")" = "$KEY" ] || { err "issue response key mismatch for ${KEY}"; exit 1; }
@@ -111,11 +117,35 @@ echo 1 > "$ITEMS"
 log "picked ${KEY} (rule ${RULE}) -> drafts/${ITEM}"
 
 # --- 4. gate --------------------------------------------------------------------------------------
+# untrusted_reason — empty when every author of the text the model will read is trusted.
+# Account ids only: a display name is attacker-chosen text and must not reach the push.
+untrusted_reason() {
+  local trusted
+  trusted="$(_arcl "${P}.trusted_authors")"
+  [ -n "$trusted" ] || { echo "no trusted_authors configured"; return; }
+  jq -r --arg t "$trusted" '
+    ($t | split("\n") | map(select(. != ""))) as $ok
+    | (.fields.creator.accountId // "") as $c
+    | if ($ok | index($c)) == null then "created by \($c), not a trusted author"
+      elif (.changelog.total // 0) > (.changelog.histories // [] | length) then "changelog truncated; cannot verify edits"
+      else ([.changelog.histories[]?
+              | select(any(.items[]?; (.fieldId // .field) == "summary" or (.fieldId // .field) == "description"))
+              | (.author.accountId // "") as $a | select(($ok | index($a)) == null) | $a] | first)
+           | if . == null then empty else "summary/description edited by \(.), not a trusted author" end
+      end' "$TMPD/issue.json"
+}
+gate=""
 if ! jobs_autonomy_allows implement || ! jobs_autonomy_allows jira-claim; then
+  gate="autonomy tiers implement and jira-claim not both set"
+else
+  gate="$(untrusted_reason)"
+fi
+if [ -n "$gate" ]; then
+  printf '\nUnattended run not allowed: %s.\n' "$gate" >> "$DRAFT"
   "$NOTIFY" --title "Autopilot: ${KEY}" \
-    --message "Job ${JOB} (rule ${RULE}) picked ${KEY}. Approve to claim and implement it." \
+    --message "Job ${JOB} (rule ${RULE}) picked ${KEY}. Approve to claim and implement it. (${gate})" \
     --priority normal --item-id "$ITEM" --source-url "$URL" </dev/null >>"$LOG_FILE" 2>&1 || true
-  log "awaiting Approve for ${ITEM}"
+  log "awaiting Approve for ${ITEM}: ${gate}"
   exit 0
 fi
 

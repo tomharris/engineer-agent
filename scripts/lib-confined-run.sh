@@ -22,6 +22,30 @@
 # uniformly here so the guarantee does not depend on that accident.)
 NO_MEMORY_RULE="MEMORY: do NOT create or update memory files, and do NOT treat any pre-existing memory as evidence about this run — a wrong conclusion recorded once would otherwise be re-read and re-confirmed by every later run instead of being retested. If a tool or command appears unavailable, establish that fresh THIS run."
 
+# git/gh verbs for confined runs, enumerated rather than `Bash(git *)` / `Bash(gh *)`. The broad
+# prefixes also grant `git -C /elsewhere`, `git -c alias.x='!cmd' x` (arbitrary exec), `gh api -X
+# POST`, `gh pr merge` and `gh secret`. A rule is a command PREFIX, so `git push -u origin:*` also
+# pins the remote. Residual, accepted: `git diff/log/show --output=<path>` writes a file anywhere,
+# and repo-tracked hooks run on `git commit` — the same class as the build commands, which run
+# files the model can edit. That is why an UNATTENDED run additionally requires trusted authors
+# (job-jira-implement-next.sh), not just these rules.
+CONFINED_GIT_READ_RULES=(
+  "Bash(git status:*)" "Bash(git diff:*)" "Bash(git log:*)" "Bash(git show:*)"
+  "Bash(git rev-parse:*)" "Bash(git symbolic-ref:*)" "Bash(git show-ref:*)" "Bash(git ls-files:*)"
+  "Bash(git branch:*)" "Bash(git merge-base:*)"
+)
+CONFINED_GIT_WRITE_RULES=(
+  "${CONFINED_GIT_READ_RULES[@]}"
+  "Bash(git checkout:*)" "Bash(git switch:*)" "Bash(git add:*)" "Bash(git commit:*)"
+  "Bash(git restore:*)" "Bash(git rm:*)" "Bash(git mv:*)" "Bash(git stash:*)"
+  "Bash(git fetch origin:*)" "Bash(git ls-remote --exit-code --heads origin:*)"
+  "Bash(git push -u origin:*)" "Bash(git push --no-verify -u origin:*)"
+)
+CONFINED_GH_READ_RULES=(
+  "Bash(gh pr view:*)" "Bash(gh pr list:*)" "Bash(gh issue view:*)"
+  "Bash(gh auth status:*)" "Bash(gh --version:*)"
+)
+
 # In-flight markers: one file per running implementation, state/implement-inflight/<item>, holding
 # "<pid>\t<project>". Written by run_ticket_implementation whichever entry point called it, so the
 # implement-next job's max_in_flight guard also counts an Approve tap's run on the same project.
@@ -104,9 +128,10 @@ wt_base_desc() {
 #      each expanded to a Bash(<cmd> *) rule. DENY-BY-DEFAULT: no list => we refuse rather
 #      than fall back to an unconfined session. Never Bash(*) / bypassPermissions.
 #   3. (downstream) the output is a DRAFT PR the human reviews before merge.
-# Honest limit: Claude Code Bash() rules are command-prefix matches, not cwd-scoped, so
-# Bash(git *) also permits `git -C /elsewhere`. The worktree bounds the default target and
-# the command set is curated; that prefix-vs-path gap is why this is "medium," not airtight.
+# Honest limit: this is "medium," not airtight. Bash() rules are prefix matches, not
+# cwd-scoped, and the build commands run files the model can edit, so ticket text that steers
+# the model can run code as the user. git/gh are enumerated (CONFINED_GIT_*_RULES above); the
+# remaining gap is why an unattended run needs trusted authors.
 #
 # Returns 1 (refuses to start) when the project/path/allowlist can't be resolved — the item
 # then stays in drafts/ and the caller's drafts/ check emits the ⚠️ Failed ack with the
@@ -158,8 +183,9 @@ run_ticket_implementation() {
   # posts nowhere but GitHub, and only a DRAFT PR at that.
   local allowed_tools=(
     Read Edit Write Glob Grep
-    "Bash(git *)" "${build_rules[@]}"
-    "Bash(gh *)" "Bash(mv *)" "Bash(${PLUGIN_ROOT}/scripts/notify.sh *)"
+    "${CONFINED_GIT_WRITE_RULES[@]}" "${build_rules[@]}"
+    "${CONFINED_GH_READ_RULES[@]}" "Bash(gh pr create:*)" "Bash(echo:*)"
+    "Bash(mv *)" "Bash(${PLUGIN_ROOT}/scripts/notify.sh *)"
   )
   # Dispatch goes through execute-item, exactly like every other item type. This function's job
   # is the SANDBOX (worktree, build allowlist, budget, turn-notify env, QA follow-on, teardown,
@@ -306,7 +332,8 @@ run_qa_generation() {
   # (QA writes no code). gh is read-only in practice here (ticket / PR fetch).
   local allowed_tools=(
     Read Edit Write Glob Grep
-    "Bash(git *)" "Bash(gh *)" "Bash(curl *)" "Bash(mv *)"
+    "${CONFINED_GIT_READ_RULES[@]}" "${CONFINED_GH_READ_RULES[@]}" "Bash(echo:*)"
+    "Bash(curl *)" "Bash(mv *)"
     "mcp__atlassian__getJiraIssue"
   )
   local prompt="Generate a QA test plan for the engineer-agent ticket in queue item '${item}' (just implemented). \

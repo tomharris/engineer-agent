@@ -98,14 +98,19 @@ printf '%s' "$code"
 EOF
 chmod +x "$TMP/bin/curl"
 
-mkissue() {  # mkissue <KEY> <type>
-  jq -n --arg k "$1" --arg t "$2" '{id:"1", key:$k, fields:{summary:("Fix " + $k), description:"Do it.\n- [ ] works",
-    issuetype:{name:$t}, priority:{name:"High"}, components:[], labels:[], issuelinks:[],
+mkissue() {  # mkissue <KEY> <type> [creator] [changelog-json]
+  local cl='{"total":0,"histories":[]}'; [ -z "${4:-}" ] || cl="$4"
+  jq -n --arg k "$1" --arg t "$2" --arg c "${3:-acc-lead}" --argjson cl "$cl" \
+    '{id:"1", key:$k, changelog:$cl, fields:{summary:("Fix " + $k), description:"Do it.\n- [ ] works",
+    issuetype:{name:$t}, priority:{name:"High"}, components:[], labels:[], issuelinks:[], creator:{accountId:$c},
     created:"2025-11-01T10:00:00.000+0000", updated:"2025-11-01T10:00:00.000+0000"}}' > "$ST/$1.json"
   : > "$ST/$1.assignee"; echo "To Do" > "$ST/$1.status"
 }
 
-write_config() {  # write_config <auto_execute flow list> [daily_cap] [allowed_commands block]
+ALLOW='    exec:
+      allowed_commands:
+        - "make"'
+write_config() {  # write_config <auto_execute flow list> [daily_cap] [allowed_commands block] [trusted_authors]
   cat > "$EA_CONFIG_FILE" <<YAML
 agent:
   autonomy:
@@ -129,6 +134,7 @@ ${3-    exec:
         integration: jira
         action: implement-next
         every: 30m
+        trusted_authors: ${4-[acc-lead, acc-me]}
         guards: { daily_cap: ${2:-5}, max_in_flight: 1 }
         rules:
           - name: bugs
@@ -157,6 +163,8 @@ eq "no build allowlist refuses the job at parse time" \
   "jira:implement-next needs projects.bill.exec.allowed_commands (build/test commands for the confined run)" "$(valid)"
 write_config "[]" 0
 eq "daily_cap must be positive" "guards.daily_cap '0' must be a positive integer" "$(valid)"
+write_config "[]" 5 "${ALLOW}" '["acc lead"]'
+eq "a malformed trusted_authors entry is refused" "trusted_authors entry 'acc lead' is not a Jira accountId" "$(valid)"
 write_config "[]"
 eq "complete job is valid" "" "$(valid)"
 
@@ -221,6 +229,29 @@ run_job; eq "lost race exits ok" "0" "$?"
 eq "lost race: item moved to rejected/, nothing implemented" "1|0|0" \
   "$(ls "$Q/rejected" | grep -c ticket-BILL-1)|$(grep -c . "$CLAUDE_LOG")|$(ls "$Q/drafts" | wc -l | tr -d ' ')"
 eq "lost race: the other person's assignment is untouched" "acc-other" "$(cat "$ST/BILL-1.assignee")"
+
+echo "== trusted authorship (unattended)"
+untrusted_case() {  # untrusted_case <name> <expected reason fragment> [trusted_authors]
+  write_config "[implement, jira-claim]" 5 "$ALLOW" "${3-[acc-lead, acc-me]}"
+  run_job
+  eq "$1: nothing claimed or implemented" "0|0" "$(writes)|$(grep -c . "$CLAUDE_LOG")"
+  grep -q -- "--item-id" "$NOTIFY_LOG" && grep -qF "$2" "$NOTIFY_LOG" \
+    && ok "$1: pushed for Approve with the reason" || bad "$1: push ($(cat "$NOTIFY_LOG"))"
+  grep -qF "Unattended run not allowed: $2" "$Q/drafts/"*.md && ok "$1: reason shown at the gate" || bad "$1: reason in item"
+}
+reset; mkissue BILL-1 Bug acc-stranger
+untrusted_case "untrusted creator" "created by acc-stranger, not a trusted author"
+reset; mkissue BILL-1 Bug acc-lead '{"total":1,"histories":[{"author":{"accountId":"acc-stranger"},"items":[{"field":"description","fieldId":"description"}]}]}'
+untrusted_case "description edited by an untrusted account" "summary/description edited by acc-stranger, not a trusted author"
+reset; mkissue BILL-1 Bug acc-lead '{"total":150,"histories":[]}'
+untrusted_case "truncated changelog" "changelog truncated; cannot verify edits"
+reset
+untrusted_case "no trusted_authors" "no trusted_authors configured" "[]"
+reset; mkissue BILL-1 Bug acc-lead '{"total":2,"histories":[{"author":{"accountId":"acc-stranger"},"items":[{"field":"status","fieldId":"status"}]},{"author":{"accountId":"acc-me"},"items":[{"field":"summary","fieldId":"summary"}]}]}'
+write_config "[implement, jira-claim]"
+run_job
+eq "trusted text edits plus untrusted non-text edits still run unattended" "acc-me|In Progress|1" \
+  "$(state BILL-1)|$(ls "$Q/completed" | grep -c ticket-BILL-1)"
 
 echo "== max_in_flight"
 reset; write_config "[implement, jira-claim]"
