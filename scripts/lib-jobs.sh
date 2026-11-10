@@ -18,6 +18,8 @@ JOBS_DAYS="mon tue wed thu fri sat sun"
 JOBS_SLACK_WATCH_SUPPORTED="channels"
 
 _jobs_script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib-assign-rules.sh
+. "${_jobs_script_dir}/lib-assign-rules.sh"
 
 # jobs_now — epoch; EA_NOW overrides for tests.
 jobs_now() { printf '%s' "${EA_NOW:-$(date +%s)}"; }
@@ -75,6 +77,10 @@ jobs_validate() {
   [[ "$id" =~ ^[a-z0-9-]+$ ]] || { echo "id '${id}' must match ^[a-z0-9-]+\$"; return 1; }
   [ "$(printf '%s\n' "$all" | awk -F'|' -v s="$slug" -v i="$id" '$1==s && $3==i' | wc -l | tr -d ' ')" -eq 1 ] \
     || { echo "duplicate job id '${id}' in project ${slug}"; return 1; }
+  if [ "${integ}:${action}" = "jira:implement-next" ]; then
+    ar_validate "$slug" "$idx" || return 1
+    [ "$sup" = "1" ] || { echo "jira:implement-next does not run yet; check its rules with: jobs-ctl.sh preview ${slug}.${id}"; return 1; }
+  fi
   [ "$sup" = "1" ] || { echo "unsupported integration/action '${integ}:${action}'"; return 1; }
   secs="$(jobs_duration_seconds "$every")"
   [ -n "$secs" ] || { echo "every '${every}' must look like 30s, 5m, 2h or 1d"; return 1; }

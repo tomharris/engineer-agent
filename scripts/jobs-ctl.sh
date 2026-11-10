@@ -7,6 +7,8 @@
 #                                  honors validation, pause and lock)
 #   jobs-ctl.sh pause <key>        stop a job running until resumed
 #   jobs-ctl.sh resume <key>       clear a pause (manual or circuit-breaker) and its failure streak
+#   jobs-ctl.sh preview <key>      jira:implement-next only: fetch each rule's tickets and show which
+#                                  one would be picked and why each other one was skipped (read-only)
 # <key> is <project>.<id>.
 set -uo pipefail
 
@@ -58,8 +60,38 @@ cmd_list() {
   done <<< "$rows"
 }
 
+cmd_preview() {
+  local key="$1" row slug idx integ action reason rc out
+  row="$(jobs_enumerate | awk -F'|' -v k="$key" '($1 "." $3) == k { print; exit }')"
+  [ -n "$row" ] || die "no such job: $key"
+  IFS='|' read -r slug idx _ integ action _ <<< "$row"
+  [ "${integ}:${action}" = "jira:implement-next" ] || die "preview applies to jira:implement-next jobs only"
+  reason="$(ar_validate "$slug" "$idx")" || die "$key rules are invalid: $reason"
+  # shellcheck source=lib-secret.sh
+  . "${PLUGIN_ROOT}/scripts/lib-secret.sh"
+  # shellcheck source=lib-time.sh
+  . "${PLUGIN_ROOT}/scripts/lib-time.sh"
+  # shellcheck source=lib-queue.sh
+  . "${PLUGIN_ROOT}/scripts/lib-queue.sh"
+  # shellcheck source=lib-jira-api.sh
+  . "${PLUGIN_ROOT}/scripts/lib-jira-api.sh"
+  ar_jira_init || die "$AR_ERR"
+  TMPD="$(mktemp -d)"; trap 'rm -rf "$TMPD"' EXIT
+  out="$(AR_TRACE=1 AR_EVAL_ALL=1 ar_select "$slug" "$idx" 2>&1 >"$TMPD/pick")"; rc=$?
+  printf '%s\n' "$out"
+  case "$rc" in
+    0) printf 'would pick: %s (rule %s)\n' "$(cut -f2 "$TMPD/pick")" "$(cut -f1 "$TMPD/pick")" ;;
+    1) echo "would pick: nothing eligible" ;;
+    *) die "$(cat "$TMPD/pick")" ;;
+  esac
+}
+
 case "${1:-}" in
   list) cmd_list ;;
+  preview)
+    [ -n "${2:-}" ] || die "usage: jobs-ctl.sh preview <project>.<id>"
+    cmd_preview "$2"
+    ;;
   run)
     [ -n "${2:-}" ] || die "usage: jobs-ctl.sh run <project>.<id>"
     known_key "$2" || die "no such job: $2"

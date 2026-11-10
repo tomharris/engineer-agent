@@ -1,6 +1,6 @@
 ---
 description: "List, run, pause, or resume scheduled jobs (per-project, per-integration work on its own interval)"
-argument-hint: "[list | run <project>.<id> | pause <project>.<id> | resume <project>.<id>]"
+argument-hint: "[list | run <project>.<id> | pause <project>.<id> | resume <project>.<id> | preview <project>.<id>]"
 allowed-tools: ["Bash", "Read"]
 ---
 
@@ -23,6 +23,7 @@ ${CLAUDE_PLUGIN_ROOT}/scripts/jobs-ctl.sh list
 ${CLAUDE_PLUGIN_ROOT}/scripts/jobs-ctl.sh run <project>.<id>
 ${CLAUDE_PLUGIN_ROOT}/scripts/jobs-ctl.sh pause <project>.<id>
 ${CLAUDE_PLUGIN_ROOT}/scripts/jobs-ctl.sh resume <project>.<id>
+${CLAUDE_PLUGIN_ROOT}/scripts/jobs-ctl.sh preview <project>.<id>
 ```
 
 Print the output. **Do not recompute any of it.**
@@ -33,6 +34,9 @@ Print the output. **Do not recompute any of it.**
 - `run`: runs the job now in the foreground, ignoring `every` and `hours`/`days` but not pause,
   validation or the lock, and prints the receipt. A `slack` / `watch` run may start a drafting model
   session if it finds anything.
+- `preview`: `jira` / `implement-next` jobs only. Read-only: fetches each rule's tickets and prints
+  every verdict (`PICK`, `eligible`, or `skip` with the first failed predicate), then the ticket that
+  would be picked. These jobs do not run yet; `list` shows them as `invalid` with a pointer here.
 - `pause` / `resume`: `resume` also clears the failure streak. A job pauses itself after
   `guards.pause_after_failures` consecutive failed runs (default 3) and pushes one alert.
 

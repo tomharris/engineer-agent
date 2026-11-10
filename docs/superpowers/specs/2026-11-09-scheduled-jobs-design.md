@@ -334,9 +334,9 @@ Same shape as existing suites (`tests/run-all.sh`, mktemp sandbox, PATH shims fo
 
 ## Phasing
 
-1. Dispatcher, per-job state/receipts/locks/breaker, `install-jobs.sh`, `status` section,
+1. **Built.** Dispatcher, per-job state/receipts/locks/breaker, `install-jobs.sh`, `status` section,
    `exclusive` skip in `cron-poll.sh`. Slack `channels` watch as the first handler (parity).
-2. `lib-assign-rules.sh` + tests (no writes).
+2. **Built.** `lib-assign-rules.sh` + tests (no writes), plus read-only `jobs-ctl.sh preview`.
 3. `jira-claim.sh` + `jira-claim` tier.
 4. `lib-confined-run.sh` extraction, then `implement-next` + `implement` tier.
 5. spy `unreact`; shim `react`/`unreact`/`search`; `slack-react.sh` +

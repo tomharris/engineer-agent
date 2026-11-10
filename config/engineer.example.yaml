@@ -141,6 +141,7 @@ agent:
     api_token_env: ""                 # optional: name of an env var holding the token
     api_token_file: ""                # optional: path to a 0600 file containing it (Linux)
     # api_base: "/rest/api/2"         # v2 deliberately: v3 returns descriptions as ADF JSON
+    # story_points_field: "customfield_10016"  # per-instance; required by jobs rules using max_story_points
 
   # Slite REST access — ONLY used by the scripted collector (scripted_sources: ["slite"]).
   # Same credential rules as Jira above. Key: https://app.slite.com → Settings → API.
@@ -368,6 +369,34 @@ projects:
     #     budget_usd: 2.00               # optional; cap for the drafting run (default 2.00)
     #     guards:
     #       pause_after_failures: 3      # consecutive failed runs before the job pauses itself
+    #
+    #   # NOT RUNNABLE YET: rules are validated and can be dry-run with
+    #   # `scripts/jobs-ctl.sh preview <project>.jira-autopilot` (read-only).
+    #   - id: jira-autopilot
+    #     integration: jira
+    #     action: implement-next
+    #     every: 30m
+    #     rules:                         # ordered; first rule with an eligible ticket wins
+    #       - name: small-bugs           # ^[a-z0-9-]+$
+    #         jql: 'project = BILL AND type = Bug AND assignee is EMPTY ORDER BY rank'
+    #         require:                   # re-checked against the fetched ticket; unknown keys are errors
+    #           assignee: empty          # empty | me | any. Absent: empty if the JQL says
+    #                                    #   "assignee is EMPTY", else me. any is never inferred.
+    #           issue_types: [Bug]       # issue_types/priorities/statuses/components_any: case-insensitive
+    #           priorities: [Highest, High, Medium]
+    #           statuses: ["To Do"]
+    #           components_any: [api]
+    #           labels_any: []           # labels are case-sensitive
+    #           labels_none: [no-autopilot, needs-design, blocked]
+    #           max_story_points: 3      # needs agent.jira.story_points_field; no estimate fails
+    #           min_age: 2h              # since created
+    #           min_quiet: 30m           # since last updated
+    #           no_open_blockers: true   # no unresolved "is blocked by" link
+    #           no_linked_pr: true       # dev panel shows no PR or branch (unavailable => fails)
+    #           has_acceptance_criteria: true  # "acceptance criteria", a [ ] checklist, or an "AC:" line
+    #           min_description_chars: 200
+    #         claim: { assign: self, transition: "In Progress" }   # self | none
+    #         on_fail: { unassign: true, transition: "To Do" }
 
   # Example: project using GitHub Issues instead of Jira
   # my-app:

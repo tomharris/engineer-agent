@@ -188,8 +188,23 @@ _emit_jobs() {
     esac
     _emit_list "projects.${slug}.job.${i}.days"  "${p}.days"
     _emit_list "projects.${slug}.job.${i}.watch" "${p}.watch"
+    _emit_rules "$slug" "$i"
     i=$((i+1))
   done
+}
+
+# _emit_rules <slug> <idx> — the job's `rules` subtree copied verbatim (jobs[i].rules[j] ->
+# job.i.rule.j). Verbatim rather than curated so lib-assign-rules.sh can reject an unknown key: a
+# mistyped `requires:` must not silently become a rule with no predicates.
+_emit_rules() {
+  local slug="$1" i="$2"
+  printf 'projects.%s.job.%s.rule_count=%s\n' "$slug" "$i" "$(yaml_seq_len "projects.${slug}.jobs[${i}].rules")"
+  printf '%s\n' "$YAML_DUMP_CACHE" | awk -v src="projects.${slug}.jobs[${i}].rules[" -v dst="projects.${slug}.job.${i}.rule." '
+    index($0, src) == 1 {
+      rest = substr($0, length(src) + 1)
+      n = index(rest, "]")
+      print dst substr(rest, 1, n - 1) substr(rest, n + 1)
+    }'
 }
 
 cmd_projects() { yaml_keys projects; }
@@ -220,6 +235,7 @@ cmd_dump() {
   printf 'agent.jira.email=%s\n'           "$(_get agent.jira.email)"
   printf 'agent.jira.api_token_env=%s\n'   "$(_get agent.jira.api_token_env)"
   printf 'agent.jira.api_token_file=%s\n'  "$(_get agent.jira.api_token_file)"
+  printf 'agent.jira.story_points_field=%s\n' "$(_get agent.jira.story_points_field)"
   # API v2, not v3, and this is deliberate: v3 returns `description` as an Atlassian Document
   # Format object, which would mean reconstructing prose from a JSON tree in bash. v2 returns it as
   # text, which is what a queue item's ### Description needs. Both are supported on Jira Cloud.
