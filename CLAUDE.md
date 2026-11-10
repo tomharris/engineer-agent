@@ -77,6 +77,7 @@ of truth for this location — source it rather than hardcoding the path.
     ├── autopilot-items.tsv    — Queue items the implement-next job wrote (the only provenance the listener trusts for a Jira claim)
     ├── implement-inflight/    — One marker per running confined ticket implementation (<pid>\t<project>)
     ├── jira-account-id        — Cached Jira accountId per agent.jira.email
+    ├── github-login           — Cached gh login (github-issues implement-next)
     ├── watched-threads.tsv    — Slack threads answered via engineer-agent (channel, thread_ts, last_seen_ts, added_at, project) for the my-threads watch
     ├── slack-events.log       — Outcomes of scripts/slack-event.sh (status reactions, thread watches)
     ├── jobs.log               — Scheduled-jobs dispatcher log
@@ -99,7 +100,7 @@ shared tracker from flooding the queue (and exhausting the cron run's budget) on
 without having to pre-seed `seen_issues`.
 
 Two `agent` subsections drive autonomy (both optional):
-- `agent.autonomy.auto_execute` — a list of action tiers allowed to run **without** an approval gate. Supported: `draft-pr` (draft PRs merge nothing / request no review), and for the `implement-next` scheduled job `implement` (start the confined implementation without an Approve tap) and `jira-claim` (assign/transition its ticket without one); that job needs both to run unattended (see "Scheduled jobs"). `slack-react` adds/removes the `agent.slack.reactions` status emoji on a Slack item's message. Absent ⇒ empty ⇒ everything is gated.
+- `agent.autonomy.auto_execute` — a list of action tiers allowed to run **without** an approval gate. Supported: `draft-pr` (draft PRs merge nothing / request no review), and for the `implement-next` scheduled jobs `implement` (start the confined implementation without an Approve tap) and `jira-claim` / `github-claim` (assign/transition the Jira ticket, or assign the GitHub issue and set its Projects board status, without one); a job needs `implement` plus its tracker's claim tier to run unattended (see "Scheduled jobs"). `slack-react` adds/removes the `agent.slack.reactions` status emoji on a Slack item's message. Absent ⇒ empty ⇒ everything is gated.
 - `agent.notify.ntfy` — push-notification + remote-approval settings (`server`, `topic`, `command_topic`, `auth_token`). Absent ⇒ no notifications; the workflow is otherwise unchanged.
 - `agent.investigation` — which tickets deliver a **findings document** instead of code
   (`jira_types`, `github_labels`, `title_keywords`). Absent ⇒ shipped defaults apply, which include
@@ -1382,8 +1383,8 @@ resolved this by intuition each run; a script has to pick, which is how the ambi
 
 `projects.<slug>.jobs` gives one project's integration its own interval, **alongside** the global
 poll. Spec: `docs/superpowers/specs/2026-11-09-scheduled-jobs-design.md` (phased; phases 1–5 are built —
-dispatcher, `slack`/`watch` with `channels`/`mentions`/`my-threads`, status reactions, and
-`jira`/`implement-next`).
+dispatcher, `slack`/`watch` with `channels`/`mentions`/`my-threads`, status reactions,
+`jira`/`implement-next`, and `github-issues`/`implement-next` as phase 6a).
 
 ```
 jobs-tick.sh (every 60s; install-jobs.sh)
@@ -1392,6 +1393,8 @@ jobs-tick.sh (every 60s; install-jobs.sh)
       slack:watch          job-slack-watch.sh → poll-slack.sh --project --sources <watch> → manifest → jobs-draft.sh
       jira:implement-next  job-jira-implement-next.sh: guards → ar_select → drafts/ item
                            → push for Approve, or (implement + jira-claim) claim → confined run
+      github-issues:implement-next  job-github-implement-next.sh: same shape, gr_select,
+                           gh-claim.sh, tier github-claim
 ```
 
 Things a reader will otherwise "fix" back:
@@ -1502,6 +1505,31 @@ Read-only: search + dev-panel reads, never an assign or transition. Four things 
   status is still the one it moved to. A failed release pushes an urgent ntfy itself.
 - **Transitions resolve by name** (target status first, then transition name); a missing one is a
   warning, since workflows differ. The key must match the item's `source_id`.
+
+**GitHub `implement-next` (`job-github-implement-next.sh`, `lib-gh-assign-rules.sh`,
+`gh-claim.sh`)** mirrors the Jira path; the differences a reader will otherwise "fix" back:
+- **Repo containment is enforced in bash, twice.** `gr_eval` rejects any search hit outside the
+  project's `github.repos` (a rule's `query` can name any repo or org), and `gh-claim.sh` refuses a
+  key outside them. The query is config-authored; the containment is not left to it.
+- **"Status" is a Projects (v2) single-select field on the job's `board`, not labels** (user
+  decision). Claim adds the issue to the board if absent (`claimed_board_added`) and records
+  `claimed_project_status`; release moves it back only if it still has that status and nobody else
+  is assigned. A board without the named option is a warning, like a missing Jira transition.
+- **The GraphQL selection set is built per job** (`_gr_fields`): `issueType`, `blockedBy`,
+  linked-PR fields and `projectItems` are requested only when a rule uses them, so one unsupported
+  field (GHES) breaks only the rules that need it. Truncated `blockedBy` or cross-reference lists
+  read as `unknown` and fail the predicate.
+- **Trust covers title, body and labels** — the fields written into the queue item: the author,
+  every `userContentEdits` editor and every renamed/labeled/unlabeled actor must be in
+  `trusted_authors` (logins, compared case-insensitively). More than 100 of either history is
+  `truncated` ⇒ untrusted. Bots that label (`github-actions`) are editors.
+- **A GitHub multi-assignee race.** For `assignee: empty`, the post-claim re-read must show me as
+  the *only* assignee; otherwise the claim is lost, and only my own assignment is removed.
+- **A title that only a Form B judgment could classify is skipped**, not implemented: an unattended
+  pick never guesses the kind. `add-ticket --implement` is the override.
+- **The ledger names the tracker.** `autopilot-items.tsv` gained a fifth column (`jira` |
+  `github`; absent ⇒ `jira` for older rows) and `_autopilot_claim_cmd` picks the claim script from
+  it, never from the item.
 
 ## Tests
 

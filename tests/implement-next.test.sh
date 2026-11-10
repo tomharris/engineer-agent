@@ -181,7 +181,7 @@ ITEM="$(drafts)"
 case "$ITEM" in *-ticket-BILL-1.md) ok "first eligible ticket queued in drafts/" ;; *) bad "drafts/ holds [$ITEM]" ;; esac
 eq "item marked as an autopilot pick" "true|bill.auto|bugs|drafted" \
   "$(for k in autopilot autopilot_job autopilot_rule status; do awk -F': ' -v k=$k '$1==k {gsub(/"/,"",$2); printf "%s|", $2}' "$Q/drafts/$ITEM"; done | sed 's/|$//')"
-eq "ledger records the pick" "${ITEM}	bill.auto	bugs	BILL-1" "$(cat "$EA_AGENT_DIR/state/autopilot-items.tsv")"
+eq "ledger records the pick" "${ITEM}	bill.auto	bugs	BILL-1	jira" "$(cat "$EA_AGENT_DIR/state/autopilot-items.tsv")"
 grep -q -- "--item-id ${ITEM} --source-url https://example.atlassian.net/browse/BILL-1" "$NOTIFY_LOG" \
   && ok "Approve/Reject push sent" || bad "Approve/Reject push sent ($(cat "$NOTIFY_LOG"))"
 eq "nothing claimed in Jira" "0|To Do" "$(writes)|$(cat "$ST/BILL-1.status")"

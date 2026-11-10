@@ -395,16 +395,17 @@ ${NO_MEMORY_RULE} Be concise."
   return 0
 }
 
-# --- Autopilot (jira implement-next) ---------------------------------------------------------
-# state/autopilot-items.tsv: "<item>\t<job key>\t<rule>\t<ticket key>", one row per item the job
-# wrote. It is the ONLY provenance the listener honors: queue frontmatter can be written by a
-# drafting model that read untrusted text, so `autopilot: true` there never triggers a claim.
+# --- Autopilot (jira / github-issues implement-next) ------------------------------------------
+# state/autopilot-items.tsv: "<item>\t<job key>\t<rule>\t<ticket key>[\t<tracker>]", one row per
+# item a job wrote; tracker is `github` for github-issues jobs, absent (jira) for rows written
+# before it existed. It is the ONLY provenance the listener honors: queue frontmatter can be written
+# by a drafting model that read untrusted text, so `autopilot: true` there never triggers a claim.
 AUTOPILOT_LEDGER="${EA_AGENT_DIR}/state/autopilot-items.tsv"
-autopilot_record() { mkdir -p "$(dirname "$AUTOPILOT_LEDGER")"; printf '%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$4" >> "$AUTOPILOT_LEDGER"; }
-# autopilot_lookup <item> — prints "<job>\t<rule>\t<key>"; rc 1 if this item is not an autopilot pick.
+autopilot_record() { mkdir -p "$(dirname "$AUTOPILOT_LEDGER")"; printf '%s\t%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$4" "${5:-jira}" >> "$AUTOPILOT_LEDGER"; }
+# autopilot_lookup <item> — prints "<job>\t<rule>\t<key>\t<tracker>"; rc 1 if not an autopilot pick.
 autopilot_lookup() {
   [ -f "$AUTOPILOT_LEDGER" ] || return 1
-  awk -F'\t' -v i="$1" '$1==i {print $2 "\t" $3 "\t" $4; f=1; exit} END {exit !f}' "$AUTOPILOT_LEDGER"
+  awk -F'\t' -v i="$1" '$1==i {print $2 "\t" $3 "\t" $4 "\t" ($5 == "" ? "jira" : $5); f=1; exit} END {exit !f}' "$AUTOPILOT_LEDGER"
 }
 # autopilot_pending <job> — items this job picked that still sit in drafts/ awaiting a human.
 autopilot_pending() {
@@ -415,13 +416,19 @@ autopilot_pending() {
 }
 
 # _autopilot_claim_cmd <claim|release> <item> [--approved] — the run id is the item name: one claim
-# per item, and the listener and the job agree on it without sharing state.
+# per item, and the listener and the job agree on it without sharing state. The claim script is
+# chosen by the ledger's tracker column, never by the item.
 _autopilot_claim_cmd() {
-  local mode="$1" item="$2" row job rule key
+  local mode="$1" item="$2" row job rule key tracker script
   row="$(autopilot_lookup "$item")" || return 2
-  IFS="	" read -r job rule key <<< "$row"
+  IFS="	" read -r job rule key tracker <<< "$row"
+  case "$tracker" in
+    github) script=gh-claim.sh ;;
+    jira)   script=jira-claim.sh ;;
+    *)      return 2 ;;
+  esac
   shift 2
-  bash "${PLUGIN_ROOT}/scripts/jira-claim.sh" "$mode" --job "$job" --rule "$rule" --key "$key" \
+  bash "${PLUGIN_ROOT}/scripts/${script}" "$mode" --job "$job" --rule "$rule" --key "$key" \
     --item "${AGENT_DIR}/queue/drafts/${item}" --run-id "${item%.md}" "$@" >>"$LOG_FILE" 2>&1
 }
 autopilot_claim()   { _autopilot_claim_cmd claim "$@"; }

@@ -126,7 +126,7 @@ _source_state() {
 # --- Scheduled jobs (scripts/jobs-tick.sh) -----------------------------------------------------
 # The (integration:action) pairs the dispatcher has a handler for. Single source of truth: jobs
 # naming anything else are reported unsupported and never run, and never claim `exclusive`.
-JOBS_SUPPORTED="slack:watch jira:implement-next"
+JOBS_SUPPORTED="slack:watch jira:implement-next github-issues:implement-next"
 
 # Job integration name -> the source name used by _source_state / the receipt.
 _job_source() {
@@ -185,6 +185,7 @@ _emit_jobs() {
     printf 'projects.%s.job.%s.max_in_flight=%s\n' "$slug" "$i" "$(_get "${p}.guards.max_in_flight")"
     printf 'projects.%s.job.%s.daily_cap=%s\n'     "$slug" "$i" "$(_get "${p}.guards.daily_cap")"
     printf 'projects.%s.job.%s.thread_ttl=%s\n'    "$slug" "$i" "$(_get "${p}.thread_ttl")"
+    _emit_board "$slug" "$i"
     case " $JOBS_SUPPORTED " in
       *" ${integ}:${action} "*) printf 'projects.%s.job.%s.supported=1\n' "$slug" "$i" ;;
       *)                        printf 'projects.%s.job.%s.supported=0\n' "$slug" "$i" ;;
@@ -195,6 +196,13 @@ _emit_jobs() {
     _emit_rules "$slug" "$i"
     i=$((i+1))
   done
+}
+
+# _emit_board <slug> <idx> — the job's Projects (v2) board, verbatim (unknown keys reach the
+# validator, as with rules).
+_emit_board() {
+  printf '%s\n' "$YAML_DUMP_CACHE" | awk -v src="projects.$1.jobs[$2].board" -v dst="projects.$1.job.$2.board" '
+    index($0, src) == 1 && substr($0, length(src) + 1, 1) ~ /^[.{]$/ { print dst substr($0, length(src) + 1) }'
 }
 
 # _emit_rules <slug> <idx> — the job's `rules` subtree copied verbatim (jobs[i].rules[j] ->

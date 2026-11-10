@@ -366,7 +366,7 @@ When scheduled jobs are configured, `status` also lists them (see `/engineer-age
 Inspect and control scheduled jobs (see [Scheduled Jobs](#scheduled-jobs)). `list` (the default)
 shows each job's interval, state (`idle` / `running` / `paused` / `invalid`), last run and next due
 time. `run` runs one now, ignoring its interval and hours. `resume` clears a pause, including the
-automatic one after repeated failures. `preview` dry-runs a Jira `implement-next` job's rules
+automatic one after repeated failures. `preview` dry-runs a Jira or GitHub `implement-next` job's rules
 (read-only): it fetches each rule's tickets and shows which one would be picked and why each other
 one was skipped.
 
@@ -888,6 +888,25 @@ re-checked against every fetched ticket, the first rule with an eligible ticket 
 already in the queue (including completed or rejected) is never picked. See the commented
 `jira-autopilot` example in `config/engineer.example.yaml` for every predicate.
 
+GitHub `implement-next` (`integration: github-issues`) does the same for GitHub issues. Differences:
+
+- Each rule has a GitHub issue-search `query` instead of `jql` (`is:issue is:open` is appended, plus
+  a `repo:` for each `github.repos` unless the query names a repo, org or user). An issue outside the
+  project's `github.repos` is never picked.
+- Predicates: `assignee`, `labels_any`/`labels_none`, `milestones`, `issue_types`,
+  `project_statuses`, `min_age`/`min_quiet`, `no_open_blockers` (open "blocked by" dependencies),
+  `no_linked_pr` (closing PR, linked branch or open referencing PR), `has_acceptance_criteria`,
+  `min_body_chars`. See the commented `gh-autopilot` example.
+- "Status" means the issue's single-select field on a Projects (v2) `board` (owner, number,
+  `status_field`, default `Status`). `claim.project_status` adds the issue to the board if needed and
+  moves it; `on_fail.project_status` moves it back if nobody has moved it since. The `gh` token needs
+  the `project` scope for this.
+- The unattended tier is `github-claim`, and `trusted_authors` are GitHub logins: the issue's author
+  and every editor of its title, body or labels. A bot that labels issues (`github-actions`) counts.
+  An issue with more than 100 edits is treated as untrusted.
+- An issue whose title might be an investigation (a leading `Investigate`, `Research`, …) is skipped
+  rather than guessed; queue it with `add-ticket --implement` if it is code work.
+
 Claiming a ticket (assign to you, transition by status name) needs either a human Approve or
 `jira-claim` in `agent.autonomy.auto_execute`. The ticket is re-read before and after the assignment,
 and the run backs off if someone else got there first. On a failed implementation, `on_fail` undoes only
@@ -980,7 +999,7 @@ Claude Code's `Bash()` permissions match on command prefix, not working director
 
 As with cron, set `CLAUDE_BIN` to pick a specific Claude Code binary — e.g. `CLAUDE_BIN=/opt/claude/bin/claude scripts/install-listener.sh`. Since the supervised service does not inherit your shell environment, the installer bakes the install-time value into the systemd unit (`Environment=`) or launchd plist (`EnvironmentVariables`).
 
-**Hands-free draft PRs:** with `agent.autonomy.auto_execute: ["draft-pr"]`, draft-PR creation after a ticket is implemented runs without an approval gate — a draft PR merges nothing and requests no review, and you still review it on GitHub. Every other action (Slack posts, PR approve/request-changes, issue creation, non-draft PRs) always requires explicit approval. `implement` and `jira-claim` apply only to a Jira `implement-next` scheduled job, and `slack-react` adds status reactions to Slack messages (see [Scheduled Jobs](#scheduled-jobs)).
+**Hands-free draft PRs:** with `agent.autonomy.auto_execute: ["draft-pr"]`, draft-PR creation after a ticket is implemented runs without an approval gate — a draft PR merges nothing and requests no review, and you still review it on GitHub. Every other action (Slack posts, PR approve/request-changes, issue creation, non-draft PRs) always requires explicit approval. `implement` and `jira-claim` / `github-claim` apply only to a Jira / GitHub `implement-next` scheduled job, and `slack-react` adds status reactions to Slack messages (see [Scheduled Jobs](#scheduled-jobs)).
 
 ### Turn-completion pushes
 
@@ -1081,6 +1100,9 @@ scripts/
   lib-jira-api.sh              Jira REST helpers (credential on curl stdin)
   jira-claim.sh                Claim / release a Jira ticket for implement-next
   job-jira-implement-next.sh   The implement-next job handler
+  lib-gh-assign-rules.sh       GitHub implement-next rules: validation, predicates, selection, trust check
+  gh-claim.sh                  Claim / release a GitHub issue (assignee + Projects board status)
+  job-github-implement-next.sh The GitHub implement-next job handler
   lib-confined-run.sh          Confined headless ticket implementation (listener + implement-next)
   confined-push.sh             The only push a confined run may make: one prefixed branch, no force
   lib-poll-allowlist.sh        Read-only allowlist shared by the poll and job drafting

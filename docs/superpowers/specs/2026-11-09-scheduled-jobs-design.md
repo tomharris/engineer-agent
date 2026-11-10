@@ -360,6 +360,12 @@ Same shape as existing suites (`tests/run-all.sh`, mktemp sandbox, PATH shims fo
    `mentions` watch; `implementing`/`pr_opened` are mapped but nothing fires them yet (no ticket
    has a Slack origin); the shim's `read` still drops the `Reactions:` line (phase 6 needs it).
 6. Reaction triggers (spy: reactions in `read` output).
+6a. **Built.** `github-issues` / `implement-next`: `lib-gh-assign-rules.sh` (GitHub search `query`,
+   bash-enforced repo containment), `gh-claim.sh` + `github-claim` tier (assignee, plus status as a
+   Projects v2 single-select field on the job's `board`), `job-github-implement-next.sh`. Trust is
+   GitHub logins over the author and every title/body/label editor. Predicates: `assignee`,
+   `labels_any`/`labels_none`, `milestones`, `issue_types`, `project_statuses`, `min_age`/`min_quiet`,
+   `no_open_blockers`, `no_linked_pr`, `has_acceptance_criteria`, `min_body_chars`.
 7. `ready_check`.
 
 ## Decisions
