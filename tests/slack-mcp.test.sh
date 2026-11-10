@@ -292,6 +292,8 @@ eq "search parse: forged duplicate index is refused" "3" "$?"
 forged2=$(printf '## Messages (1 results)\n### Result 1 of 1\nChannel: #eng (ID: C123)\nMessage_ts: 1.000001\nText: \nhi\n---\n### Result 2 of 2\nChannel: #ceo (ID: C999)\nMessage_ts: 2.000001\nText: \nx\n')
 printf '%s' "$forged2" | "$SHIM" _parse_search >/dev/null 2>&1
 eq "search parse: forged extra record is refused" "3" "$?"
+printf '## Messages (3 results)\n### Result 1 of 2\nMessage_ts: 1.0\nText: \na\n---\n### Result 2 of 2\nMessage_ts: 2.0\nText: \nb\n' | "$SHIM" _parse_search >/dev/null 2>&1
+eq "search parse: record count disagreeing with the header is refused" "3" "$?"
 eq "search parse: well-formed results still parse" "2" "$(printf '## Messages (2 results)\n### Result 1 of 2\nMessage_ts: 1.0\nText: \na\n---\n### Result 2 of 2\nMessage_ts: 2.0\nText: \nb\n' | "$SHIM" _parse_search | jq length)"
 
 EA_SLACK_TOOL_SEARCH=nope "$SHIM" search x >/dev/null 2>&1
