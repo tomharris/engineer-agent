@@ -39,6 +39,12 @@ jobs_duration_seconds() {
   case "$u" in s) echo "$n" ;; m) echo $((n*60)) ;; h) echo $((n*3600)) ;; d) echo $((n*86400)) ;; esac
 }
 
+# jobs_autonomy_allows <tier> — rc 0 if the tier is in agent.autonomy.auto_execute (deny-by-default).
+jobs_autonomy_allows() {
+  jobs_cfg_load
+  printf '%s\n' "$EA_JOBS_CFG" | grep -qxF "agent.autonomy.auto_execute[]=$1"
+}
+
 jobs_cfg_load() {
   [ -n "${EA_JOBS_CFG:-}" ] && return 0
   EA_JOBS_CFG="$("${_jobs_script_dir}/ea-config.sh" dump 2>/dev/null)"

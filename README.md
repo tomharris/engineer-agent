@@ -849,11 +849,17 @@ watching, mentions and emoji reactions are specified in
 `docs/superpowers/specs/2026-11-09-scheduled-jobs-design.md` and not built yet.
 
 Jira `implement-next` is partly built: its assignment `rules` are validated (a job with bad rules is
-`invalid` in `/engineer-agent jobs`) and can be dry-run with `/engineer-agent jobs preview`, but the
-job does not run yet. Each rule's `jql` decides what is fetched; its `require` predicates are
+`invalid` in `/engineer-agent jobs`) and can be dry-run with `/engineer-agent jobs preview`, and the
+claim step (`scripts/jira-claim.sh`) exists, but the job does not run yet. Each rule's `jql` decides what is fetched; its `require` predicates are
 re-checked against every fetched ticket, the first rule with an eligible ticket wins, and a ticket
 already in the queue (including completed or rejected) is never picked. See the commented
 `jira-autopilot` example in `config/engineer.example.yaml` for every predicate.
+
+Claiming a ticket (assign to you, transition by status name) needs either a human Approve or
+`jira-claim` in `agent.autonomy.auto_execute`. The ticket is re-read before and after the assignment,
+and the run backs off if someone else got there first. On a failed implementation, `on_fail` undoes only
+what the run itself changed, and only if nobody has changed it since. If that rollback fails, you get
+an urgent push.
 
 How it behaves:
 
@@ -941,7 +947,7 @@ Claude Code's `Bash()` permissions match on command prefix, not working director
 
 As with cron, set `CLAUDE_BIN` to pick a specific Claude Code binary — e.g. `CLAUDE_BIN=/opt/claude/bin/claude scripts/install-listener.sh`. Since the supervised service does not inherit your shell environment, the installer bakes the install-time value into the systemd unit (`Environment=`) or launchd plist (`EnvironmentVariables`).
 
-**Hands-free draft PRs:** with `agent.autonomy.auto_execute: ["draft-pr"]`, draft-PR creation after a ticket is implemented runs without an approval gate — a draft PR merges nothing and requests no review, and you still review it on GitHub. Every other action (Slack posts, PR approve/request-changes, issue creation, non-draft PRs) always requires explicit approval.
+**Hands-free draft PRs:** with `agent.autonomy.auto_execute: ["draft-pr"]`, draft-PR creation after a ticket is implemented runs without an approval gate — a draft PR merges nothing and requests no review, and you still review it on GitHub. Every other action (Slack posts, PR approve/request-changes, issue creation, non-draft PRs) always requires explicit approval. The one other tier, `jira-claim`, applies only to a Jira `implement-next` scheduled job (see [Scheduled Jobs](#scheduled-jobs)).
 
 ### Turn-completion pushes
 
@@ -1039,6 +1045,7 @@ scripts/
   lib-jobs.sh                  Job config validation, due/window checks, per-job state
   lib-assign-rules.sh          Jira implement-next rules: validation, predicates, first-match selection
   lib-jira-api.sh              Jira REST helpers (credential on curl stdin)
+  jira-claim.sh                Claim / release a Jira ticket for implement-next
   lib-poll-allowlist.sh        Read-only allowlist shared by the poll and job drafting
   notify.sh                    Publish a push notification to ntfy
   turn-notify-hook.sh          Hook handler: FYI push at each implement-ticket turn end

@@ -38,6 +38,19 @@ _ar_in() { case " $2 " in *" $1 "*) return 0 ;; *) return 1 ;; esac; }
 
 ar_prefix() { printf 'projects.%s.job.%s.rule.%s' "$1" "$2" "$3"; }
 
+# ar_rule_prefix_by_name <slug> <idx> <name> — the rule's config prefix; rc 1 if no such rule.
+ar_rule_prefix_by_name() {
+  local n j p
+  jobs_cfg_load
+  n="$(_arc "projects.$1.job.$2.rule_count")"; j=0
+  while [ "$j" -lt "${n:-0}" ]; do
+    p="$(ar_prefix "$1" "$2" "$j")"
+    [ "$(_arc "$p.name")" = "$3" ] && { printf '%s' "$p"; return 0; }
+    j=$((j+1))
+  done
+  return 1
+}
+
 # ar_assignee_mode <rule-prefix> — explicit require.assignee, else `empty` only when the JQL itself
 # says `assignee is EMPTY`, else `me`. `any` is never inferred, so a rule cannot take a ticket
 # someone else holds by accident.

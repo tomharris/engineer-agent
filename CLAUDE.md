@@ -94,7 +94,7 @@ shared tracker from flooding the queue (and exhausting the cron run's budget) on
 without having to pre-seed `seen_issues`.
 
 Two `agent` subsections drive autonomy (both optional):
-- `agent.autonomy.auto_execute` — a list of action tiers allowed to run **without** an approval gate. Only `draft-pr` is supported (draft PRs merge nothing / request no review). Absent ⇒ empty ⇒ everything is gated.
+- `agent.autonomy.auto_execute` — a list of action tiers allowed to run **without** an approval gate. Supported: `draft-pr` (draft PRs merge nothing / request no review) and `jira-claim` (lets `scripts/jira-claim.sh` assign/transition a ticket for an `implement-next` job without an Approve tap; see "Scheduled jobs"). Absent ⇒ empty ⇒ everything is gated.
 - `agent.notify.ntfy` — push-notification + remote-approval settings (`server`, `topic`, `command_topic`, `auth_token`). Absent ⇒ no notifications; the workflow is otherwise unchanged.
 - `agent.investigation` — which tickets deliver a **findings document** instead of code
   (`jira_types`, `github_labels`, `title_keywords`). Absent ⇒ shipped defaults apply, which include
@@ -1123,7 +1123,9 @@ and re-asking Phase B would pay twice to re-litigate it.
   by an `--allowedTools` allowlist. The Jira credential is an API token whose scope is the account's
   own permissions, so this is the one place where "read-only" is a property of the *verbs used*
   rather than of the *capability held* — keep it that way: no collector may ever call
-  `POST /issue/{key}/comment` or a transition.
+  `POST /issue/{key}/comment` or a transition. `scripts/jira-claim.sh` does assign and transition,
+  and is deliberately **not** a collector: it runs only after selection, for one ticket, under the
+  `jira-claim` tier or after a human Approve, and is never in a model run's allowlist.
 - **Injection containment is stronger, not weaker.** The routing candidate set is computed from
   config alone and every tier can only narrow it, so a scripted route can only ever emit a slug the
   config already permits. The kind ladder's entire output alphabet is two fixed strings.
@@ -1352,9 +1354,10 @@ resolved this by intuition each run; a script has to pick, which is how the ambi
 ## Scheduled jobs
 
 `projects.<slug>.jobs` gives one project's integration its own interval, **alongside** the global
-poll. Spec: `docs/superpowers/specs/2026-11-09-scheduled-jobs-design.md` (phased; phases 1–2 are built —
-dispatcher + `slack`/`watch` with `watch: [channels]`, and `jira`/`implement-next` assignment rules,
-which validate and dry-run via `jobs-ctl.sh preview` but do not run yet).
+poll. Spec: `docs/superpowers/specs/2026-11-09-scheduled-jobs-design.md` (phased; phases 1–3 are built —
+dispatcher + `slack`/`watch` with `watch: [channels]`; `jira`/`implement-next` assignment rules,
+which validate and dry-run via `jobs-ctl.sh preview`; and `jira-claim.sh`. The job itself does not
+run yet).
 
 ```
 jobs-tick.sh (every 60s; install-jobs.sh)
@@ -1402,7 +1405,20 @@ Read-only: search + dev-panel reads, never an assign or transition. Four things 
   included, is never picked.
 
 `lib-jira-api.sh` holds the curl helpers `poll-jira.sh` used inline (credential on stdin), so
-`jira-claim.sh` (phase 3) shares them. `ar_jira_init` sets globals: call it directly, not in `$(…)`.
+`jira-claim.sh` shares them. `ar_jira_init` sets globals: call it directly, not in `$(…)`.
+
+**Claiming (`jira-claim.sh claim|release`)** writes to Jira, so its guards are the point:
+- **Refused (exit 4) unless `jira-claim` ∈ `auto_execute` or `--approved`** (a human Approve).
+- **Race checks on both sides of the write.** The rule's assignee mode is re-checked on a fresh GET
+  before assigning, and the assignee re-read after; losing either way exits 3 (skip). After a lost
+  race the caller must **not** release: the ticket is someone else's.
+- **Intent is recorded in the queue item before each write** (`claimed_by_run`, `claimed_assign`,
+  `claimed_transition`), so a crash mid-claim cannot leave a claim release refuses to undo.
+- **Release undoes only its own changes that nobody has touched since**: `claimed_by_run` must match;
+  it unassigns only if it assigned and the ticket is still mine; transitions back only if the
+  status is still the one it moved to. A failed release pushes an urgent ntfy itself.
+- **Transitions resolve by name** (target status first, then transition name); a missing one is a
+  warning, since workflows differ. The key must match the item's `source_id`.
 
 ## Tests
 

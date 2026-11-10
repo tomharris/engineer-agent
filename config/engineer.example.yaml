@@ -234,6 +234,8 @@ agent:
   # so it is safe to create automatically (you review it on GitHub and mark it ready).
   # Everything else (Slack posts, PR approve/request-changes, issue creation, non-draft PRs)
   # always requires approval. Leave the list empty to gate everything.
+  # "jira-claim" lets a jira implement-next job assign/transition its ticket without an Approve
+  # tap (deny-by-default; the job itself is not runnable yet).
   autonomy:
     auto_execute: ["draft-pr"]
 
