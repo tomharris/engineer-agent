@@ -392,6 +392,26 @@ projects:
     #     guards:
     #       pause_after_failures: 3      # consecutive failed runs before the job pauses itself
     #
+    #   # Reviews and QAs PRs requested in a channel ("CR/QA <PR url> <Jira url>"). Needs tiers
+    #   # slack-react, pr-comment, jira-comment, jira-transition, security-review.
+    #   - id: cr-qa
+    #     integration: slack
+    #     action: cr-qa
+    #     every: 5m
+    #     exclusive: true                # keep the global poll's status reactions off requests
+    #     channel: C0123456789
+    #     trusted_slack_users: [U0123ABCD]
+    #     trusted_authors: ["5b10ac8d82e05b22cc7d4ef5"]   # Jira account ids
+    #     transition: "Ready for Upload"
+    #     trigger_prefix: "CR/QA"        # default
+    #     reactions: { claim: eyes, approve: approve }   # defaults
+    #     security:
+    #       command: ~/.local/share/engineer-agent/adapters/security-review/review.sh
+    #       timeout: 30m
+    #     qa:
+    #       timeout: 30m                 # per attached QA script
+    #     guards: { daily_cap: 10, pause_after_failures: 2 }
+    #
     #   # Needs tracker jira and exec.allowed_commands. Dry-run its rules (read-only) with
     #   # `scripts/jobs-ctl.sh preview <project>.jira-autopilot`.
     #   - id: jira-autopilot

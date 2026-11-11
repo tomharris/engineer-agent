@@ -63,6 +63,10 @@ docs/architecture/          detailed design rationale (read before changing that
 - **Unattended `implement-next` needs `implement` + claim tier + trusted authorship**, checked from
   one fetch; the confined run gets no tracker access. The listener trusts
   `state/autopilot-items.tsv`, never frontmatter.
+- **`cr-qa` (`job-slack-cr-qa.sh`) keeps every external write in bash** behind `slack-react`,
+  `pr-comment`, `jira-comment`, `jira-transition` and `security-review`. QA scripts run only from
+  bash, from a nonce-checked run spec; model runs get `--setting-sources user --strict-mcp-config`
+  and a credential-free env, and see only trusted ticket text.
 - **`after_pr` (`pr-pipeline.sh`) keeps every external write in bash**: PR from the bash-recorded
   branch, checks, logs, `gh pr ready`, the security adapter, Slite note, PR/Jira comments, Jira transition and
   Slack announce are bash, each behind its own tier (`pr-ready`, `security-review`, `qa-publish`,

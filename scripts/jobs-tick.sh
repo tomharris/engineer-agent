@@ -64,6 +64,11 @@ job_body() {
         --errors "$w/errors" --items "$w/items" ${budget:+--budget "$budget"} >> "$LOG_FILE" 2>&1
       rc=$?
       [ "$rc" = 0 ] && items="$(cat "$w/items" 2>/dev/null || echo 0)" ;;
+    slack:cr-qa)
+      bash "${EA_JOB_HANDLER_SLACK_CR_QA:-${PLUGIN_ROOT}/scripts/job-slack-cr-qa.sh}" --job "$key" \
+        --errors "$w/errors" --items "$w/items" ${budget:+--budget "$budget"} >> "$LOG_FILE" 2>&1
+      rc=$?
+      [ "$rc" = 0 ] && items="$(cat "$w/items" 2>/dev/null || echo 0)" ;;
     github-issues:implement-next)
       bash "${EA_JOB_HANDLER_GITHUB_IMPLEMENT_NEXT:-${PLUGIN_ROOT}/scripts/job-github-implement-next.sh}" --job "$key" \
         --errors "$w/errors" --items "$w/items" ${budget:+--budget "$budget"} >> "$LOG_FILE" 2>&1

@@ -92,6 +92,8 @@ jobs_validate() {
     github-issues:implement-next)
       gr_validate "$slug" "$idx" || return 1
       jobs_validate_implement "$slug" "$idx" github-issues || return 1 ;;
+    slack:cr-qa)
+      jobs_validate_cr_qa "$slug" "$idx" || return 1 ;;
   esac
   [ "$sup" = "1" ] || { echo "unsupported integration/action '${integ}:${action}'"; return 1; }
   secs="$(jobs_duration_seconds "$every")"
@@ -156,6 +158,28 @@ jobs_validate_implement() {
   done < <(yaml_project_list "$slug" exec allowed_commands)
   [ "$ok" = 1 ] || { echo "${tracker}:implement-next needs projects.${slug}.exec.allowed_commands (build/test commands for the confined run)"; return 1; }
   jobs_validate_after_pr "$slug" "$idx"
+}
+
+# jobs_validate_cr_qa <slug> <idx> — the slack/cr-qa job (scripts/job-slack-cr-qa.sh). Unknown keys
+# under reactions/security/qa are errors, as for after_pr.
+jobs_validate_cr_qa() {
+  local p="projects.$1.job.$2" v
+  [ -n "$(_jcfg "$p.channel")" ] || { echo "cr-qa needs channel"; return 1; }
+  [ -n "$(_jcfgl "$p.trusted_slack_users")" ] || { echo "cr-qa needs trusted_slack_users"; return 1; }
+  [ -n "$(_jcfgl "$p.trusted_authors")" ] || { echo "cr-qa needs trusted_authors"; return 1; }
+  [ -n "$(_jcfg "$p.transition")" ] || { echo "cr-qa needs transition"; return 1; }
+  [ "$(_jcfg "projects.$1.tracker")" = jira ] || { echo "cr-qa needs projects.$1.tracker: jira"; return 1; }
+  [ -n "$(gr_project_repos "$1")" ] || { echo "cr-qa needs projects.$1.github.repos"; return 1; }
+  _ar_check_keys "$p.reactions" "claim approve" "reactions" || return 1
+  _ar_check_keys "$p.security" "command timeout" "security" || return 1
+  _ar_check_keys "$p.qa" "timeout" "qa" || return 1
+  v="$(_jcfg "$p.security.command")"
+  [ -n "$v" ] || { echo "cr-qa security.command is required"; return 1; }
+  case "$v" in /*|"~/"*) ;; *) echo "cr-qa security.command '${v}' must be an absolute or ~/ path"; return 1 ;; esac
+  for v in security.timeout qa.timeout; do
+    [ -z "$(_jcfg "$p.$v")" ] || [ -n "$(jobs_duration_seconds "$(_jcfg "$p.$v")")" ] \
+      || { echo "cr-qa ${v} '$(_jcfg "$p.$v")' must look like 30s, 5m, 2h or 1d"; return 1; }
+  done
 }
 
 # jobs_validate_after_pr <slug> <idx> — the optional after_pr block (scripts/pr-pipeline.sh).

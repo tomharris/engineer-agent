@@ -15,7 +15,7 @@ shared tracker from flooding the queue (and exhausting the cron run's budget) on
 without having to pre-seed `seen_issues`.
 
 Two `agent` subsections drive autonomy (both optional):
-- `agent.autonomy.auto_execute` — a list of action tiers allowed to run **without** an approval gate. Supported: `draft-pr` (draft PRs merge nothing / request no review), and for the `implement-next` scheduled jobs `implement` (start the confined implementation without an Approve tap) and `jira-claim` / `github-claim` (assign/transition the Jira ticket, or assign the GitHub issue and set its Projects board status, without one); a job needs `implement` plus its tracker's claim tier to run unattended (see "Scheduled jobs"). `pr-ready` lets the `after_pr` pipeline (`scripts/pr-pipeline.sh`) mark an autopilot PR ready for review once CI is green and the browser test passed. The pipeline's other stages each have their own tier: `security-review` (run the `security.command` adapter and fix what the PR introduced), `qa-publish` (QA plan, Slite note, PR and Jira comments), `jira-transition` (move the ticket after ready) and `slack-post` (the `announce` message). `slack-react` adds/removes the `agent.slack.reactions` status emoji on a Slack item's message. Absent ⇒ empty ⇒ everything is gated.
+- `agent.autonomy.auto_execute` — a list of action tiers allowed to run **without** an approval gate. Supported: `draft-pr` (draft PRs merge nothing / request no review), and for the `implement-next` scheduled jobs `implement` (start the confined implementation without an Approve tap) and `jira-claim` / `github-claim` (assign/transition the Jira ticket, or assign the GitHub issue and set its Projects board status, without one); a job needs `implement` plus its tracker's claim tier to run unattended (see "Scheduled jobs"). `pr-ready` lets the `after_pr` pipeline (`scripts/pr-pipeline.sh`) mark an autopilot PR ready for review once CI is green and the browser test passed. The pipeline's other stages each have their own tier: `security-review` (run the `security.command` adapter and fix what the PR introduced), `qa-publish` (QA plan, Slite note, PR and Jira comments), `jira-transition` (move the ticket after ready) and `slack-post` (the `announce` message). `slack-react` adds/removes the `agent.slack.reactions` status emoji on a Slack item's message. The `slack`/`cr-qa` job needs `slack-react` (claim/approve reactions), `pr-comment`, `jira-comment`, `jira-transition` and `security-review`. Absent ⇒ empty ⇒ everything is gated.
 - `agent.notify.ntfy` — push-notification + remote-approval settings (`server`, `topic`, `command_topic`, `auth_token`). Absent ⇒ no notifications; the workflow is otherwise unchanged.
 - `agent.investigation` — which tickets deliver a **findings document** instead of code
   (`jira_types`, `github_labels`, `title_keywords`). Absent ⇒ shipped defaults apply, which include
@@ -116,3 +116,13 @@ Routing itself lives in `references/routing-ladder.md` — see below.
 
 The `qa` subsection drives QA test plans: `base_url` and `console_command` (used during generation), plus optional documentation keys `document_to` (`"slite"` | empty — empty/absent disables) and `document_parent` (Slite channel/note id; empty ⇒ the user's private personal channel). When `document_to: slite`, a completed QA plan (review-queue Phase 3) is published to Slite as one note containing the full plan, the inlined `qa-test.sh` script, and the execution results — best-effort, never blocking completion.
 
+
+### `slack` / `cr-qa` job keys
+
+`channel` (required), `trusted_slack_users` (required, Slack user ids allowed to request),
+`trusted_authors` (required, Jira account ids whose ticket text, comments and attachments count),
+`transition` (required, target status on approve), `trigger_prefix` (default `CR/QA`),
+`reactions: {claim, approve}` (defaults `eyes`, `approve`), `security: {command, timeout}`
+(`command` required, absolute or `~/`), `qa: {timeout}` (per script, default `30m`), plus the usual
+`every`/`hours`/`days`/`exclusive`/`budget_usd`/`guards` (`daily_cap`, default 10). The project
+needs `tracker: jira`, `github.repos`, and `exec.allowed_commands` for the QA run.

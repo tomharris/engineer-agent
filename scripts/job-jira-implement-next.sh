@@ -27,6 +27,7 @@ PLUGIN_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 . "${PLUGIN_ROOT}/scripts/lib-jira-api.sh"
 . "${PLUGIN_ROOT}/scripts/lib-ticket-kind.sh"
 . "${PLUGIN_ROOT}/scripts/lib-confined-run.sh"
+. "${PLUGIN_ROOT}/scripts/lib-review.sh"
 
 JOB="" ERRORS="/dev/null" ITEMS="/dev/null" BUDGET=""
 while [ $# -gt 0 ]; do
@@ -120,21 +121,7 @@ log "picked ${KEY} (rule ${RULE}) -> drafts/${ITEM}"
 # --- 4. gate --------------------------------------------------------------------------------------
 # untrusted_reason — empty when every author of the text the model will read is trusted.
 # Account ids only: a display name is attacker-chosen text and must not reach the push.
-untrusted_reason() {
-  local trusted
-  trusted="$(_arcl "${P}.trusted_authors")"
-  [ -n "$trusted" ] || { echo "no trusted_authors configured"; return; }
-  jq -r --arg t "$trusted" '
-    ($t | split("\n") | map(select(. != ""))) as $ok
-    | (.fields.creator.accountId // "") as $c
-    | if ($ok | index($c)) == null then "created by \($c), not a trusted author"
-      elif (.changelog.total // 0) > (.changelog.histories // [] | length) then "changelog truncated; cannot verify edits"
-      else ([.changelog.histories[]?
-              | select(any(.items[]?; (.fieldId // .field) | IN("summary", "description", "labels", "components")))
-              | (.author.accountId // "") as $a | select(($ok | index($a)) == null) | $a] | first)
-           | if . == null then empty else "edited by \(.), not a trusted author" end
-      end' "$TMPD/issue.json"
-}
+untrusted_reason() { jira_untrusted_reason "$TMPD/issue.json" "$(_arcl "${P}.trusted_authors")"; }
 gate=""
 if ! jobs_autonomy_allows implement || ! jobs_autonomy_allows jira-claim; then
   gate="autonomy tiers implement and jira-claim not both set"

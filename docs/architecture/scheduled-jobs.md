@@ -15,6 +15,8 @@ jobs-tick.sh (every 60s; install-jobs.sh)
                            → push for Approve, or (implement + jira-claim) claim → confined run
       github-issues:implement-next  job-github-implement-next.sh: same shape, gr_select,
                            gh-claim.sh, tier github-claim
+      slack:cr-qa          job-slack-cr-qa.sh: tiers → Slack read → crqa_pick → ticket trust
+                           → ledger + claim reaction → review → QA → comment / approve
 ```
 
 Things a reader will otherwise "fix" back:
@@ -228,3 +230,47 @@ security → CI → browser → QA → ready → transition → announce. Things
   excluded; teammates' PRs for the ticket included, as the user asked), the ticket
   URL from `agent.jira.site` and the ledger key, never model text. The channel must be one of the
   project's `slack.channels`.
+
+## `slack` / `cr-qa` (`job-slack-cr-qa.sh`, `lib-cr-qa.sh`)
+
+Reviews and QAs other people's PRs on request. Spec:
+`docs/superpowers/specs/2026-11-11-cr-qa-job-design.md`. A message in `channel` is a request when
+it starts with `trigger_prefix` (default `CR/QA`), has no `reactions.claim` emoji (default `eyes`),
+was posted by a `trusted_slack_users` id, holds exactly one PR URL and one Jira browse URL, the PR is
+in one of the project's `github.repos`, and its ts is not in the job's ledger. One request per run,
+oldest first.
+
+Sequence: tiers (`slack-react`, `pr-comment`, `jira-comment`, `jira-transition`,
+`security-review`; any missing ⇒ error before anything is claimed) → ticket fetch +
+`jira_untrusted_reason` (untrusted ⇒ ledger `untrusted`, one ticket comment, no reaction, no model
+run) → ledger `claimed`, claim reaction → worktree of the PR head (`refs/pull/<n>/head`, checked
+against `headRefOid`) → review → QA → approve.
+
+Things a reader will otherwise "fix" back:
+
+- **The ledger (`state/jobs/<key>.requests.tsv`), not the reaction, is the dedup key.** The
+  connector's add-reaction succeeds when the emoji is already there and reactions don't say who
+  added them. A 👀 already present still means "someone else has it". On a stop the claim stays and
+  nothing else is added; a human re-requests with a new message.
+- **Pair it with `exclusive: true`.** The global poll's own "detected" status reaction defaults to
+  `eyes`; without exclusivity it would mark requests claimed before cr-qa sees them.
+- **Review.** One read-only model run (Read on the worktree and workdir only — `Read(...)` also
+  scopes Grep/Glob, so neither is granted bare) writes nonce-bearing findings; an unmet AC is
+  `high`. The `security.command` adapter runs as in `after_pr`, and only findings the PR introduced
+  count (`security_introduced`). Severity is case-insensitive; unknown or missing counts as `high`.
+  Anything `medium`+ ⇒ one PR comment, ledger `review-stopped`. A review that cannot complete is an
+  error, never a pass.
+- **QA scripts are run by bash, not the model.** A model-callable wrapper's log would be forgeable:
+  the QA run is allowed `exec.allowed_commands` (e.g. `uv`), which can run arbitrary code. So a plan
+  run writes a nonce-bearing run spec (`{runs: [{script, dir, argv}]}`); bash checks `argv[0]` is
+  allowlisted, `dir` resolves inside the worktree and the target path doesn't already exist (a PR
+  symlink there would redirect the copy), then runs it under `qa.timeout` with a minimal env and
+  records the exit code. A verify run then follows the written steps and judges each AC. Pass =
+  every attached script exited 0 by bash's record **and** every AC `pass`.
+- **Only trusted text and scripts.** Comments count only when a `trusted_authors` account wrote
+  and last edited them; attachments only when one uploaded them (`.py`/`.sh`, plain file names).
+- **Model runs start in an untrusted checkout.** `--setting-sources user --strict-mcp-config` keep
+  the PR's `.claude/` hooks/settings and `.mcp.json` from loading, and `env -i` keeps tracker,
+  GitHub and Slack credentials out of the run and of anything it executes.
+- **Script output stays local** (`out/<script>.log` in the run's temp dir, logged path in
+  `state/jobs.log`): it can hold secrets, so the Jira comment carries names and exit codes only.
