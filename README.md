@@ -888,6 +888,37 @@ re-checked against every fetched ticket, the first rule with an eligible ticket 
 already in the queue (including completed or rejected) is never picked. See the commented
 `jira-autopilot` example in `config/engineer.example.yaml` for every predicate.
 
+`slack` / `cr-qa` reviews and QAs other people's PRs on request. It watches `channel` for a
+message starting with `CR/QA` (configurable) from a `trusted_slack_users` id that links one PR in the
+project's `github.repos` and one Jira ticket, claims it with 👀, then:
+
+1. reviews the PR (a read-only model review with an acceptance-criteria check, plus your
+   `security.command` adapter); any Medium+ finding ⇒ one PR comment and stop;
+2. QAs it: follows the ticket's written QA steps and runs the `.py`/`.sh` scripts attached to the
+   ticket by `trusted_authors` (bash runs them, from a run plan the model writes); a failure ⇒ one
+   Jira comment and stop;
+3. on a pass, comments a QA summary on the ticket, reacts `:approve:` and moves the ticket to
+   `transition`.
+
+It needs the tiers `slack-react`, `pr-comment`, `jira-comment`, `jira-transition` and
+`security-review`, and should be `exclusive: true` so the global poll's status reactions don't land
+on requests first. A ticket written or edited by anyone outside `trusted_authors` is skipped with a
+comment before any model sees it.
+
+```yaml
+      - id: cr-qa
+        integration: slack
+        action: cr-qa
+        every: 5m
+        exclusive: true
+        channel: C0123456789
+        trusted_slack_users: [U0123ABCD]
+        trusted_authors: ["5b10ac8d82e05b22cc7d4ef5"]
+        transition: "Ready for Upload"
+        security:
+          command: ~/.local/share/engineer-agent/adapters/security-review/review.sh
+```
+
 GitHub `implement-next` (`integration: github-issues`) does the same for GitHub issues. Differences:
 
 - Each rule has a GitHub issue-search `query` instead of `jql` (`is:issue is:open` is appended, plus
@@ -1049,7 +1080,7 @@ Claude Code's `Bash()` permissions match on command prefix, not working director
 
 As with cron, set `CLAUDE_BIN` to pick a specific Claude Code binary — e.g. `CLAUDE_BIN=/opt/claude/bin/claude scripts/install-listener.sh`. Since the supervised service does not inherit your shell environment, the installer bakes the install-time value into the systemd unit (`Environment=`) or launchd plist (`EnvironmentVariables`).
 
-**Hands-free draft PRs:** with `agent.autonomy.auto_execute: ["draft-pr"]`, draft-PR creation after a ticket is implemented runs without an approval gate — a draft PR merges nothing and requests no review, and you still review it on GitHub. Every other action (Slack posts, PR approve/request-changes, issue creation, non-draft PRs) always requires explicit approval. `implement` and `jira-claim` / `github-claim` apply only to a Jira / GitHub `implement-next` scheduled job, `pr-ready` only to its `after_pr` pipeline, and `slack-react` adds status reactions to Slack messages (see [Scheduled Jobs](#scheduled-jobs)).
+**Hands-free draft PRs:** with `agent.autonomy.auto_execute: ["draft-pr"]`, draft-PR creation after a ticket is implemented runs without an approval gate — a draft PR merges nothing and requests no review, and you still review it on GitHub. Every other action (Slack posts, PR approve/request-changes, issue creation, non-draft PRs) always requires explicit approval. `implement` and `jira-claim` / `github-claim` apply only to a Jira / GitHub `implement-next` scheduled job, `pr-ready` only to its `after_pr` pipeline, and `slack-react` adds status reactions to Slack messages, and `pr-comment` / `jira-comment` let the `cr-qa` job post its review and QA comments (see [Scheduled Jobs](#scheduled-jobs)).
 
 ### Turn-completion pushes
 
@@ -1144,6 +1175,9 @@ scripts/
   jobs-ctl.sh                  List / run / pause / resume scheduled jobs
   jobs-draft.sh                Drafting run for a job's collected items
   job-slack-watch.sh           slack/watch job collector
+  job-slack-cr-qa.sh           slack/cr-qa job: review + QA a requested PR
+  lib-cr-qa.sh                 cr-qa request parsing, review, QA and comment helpers
+  lib-review.sh                Review helpers shared by pr-pipeline.sh, implement-next and cr-qa
   slack-event.sh               Slack status reactions + watched-thread registry for a queue item
   lib-jobs.sh                  Job config validation, due/window checks, per-job state
   lib-assign-rules.sh          Jira implement-next rules: validation, predicates, first-match selection

@@ -340,6 +340,57 @@ tick
 has "list says none" "No scheduled jobs configured." "$(bash "$CTL" list)"
 
 # --------------------------------------------------------------------------------------------
+echo "== 10b. slack/cr-qa: validation, dispatch, exclusivity =="
+export EA_JOB_HANDLER_SLACK_CR_QA="$TMP/handler"
+crqa_config() {  # crqa_config <line-to-drop-regex> [extra job lines]
+  cat <<YAML | grep -vE "${1:-^\$NONE}" > "$CFG"
+projects:
+  web:
+    path: "/tmp/web"
+    tracker: jira
+    github:
+      owner: acme
+      repos: [web]
+    slack:
+      channels: ["C0123456789"]
+    jobs:
+      - id: crqa
+        integration: slack
+        action: cr-qa
+        every: 5m
+        channel: C0123456789
+        trusted_slack_users: [U0TRUSTED]
+        trusted_authors: ["acc-tom"]
+        transition: "Ready for Upload"
+        security:
+          command: ~/bin/review.sh
+${2:-}
+YAML
+}
+reset_state; crqa_config
+tick
+eq "valid cr-qa job runs its handler" 1 "$(calls web.crqa)"
+[ -e "$STATE/web.crqa.invalid" ] && bad "valid job marked invalid: $(cat "$STATE/web.crqa.invalid")" || ok "no invalid file"
+inv() { reset_state; crqa_config "$1" "${2:-}"; tick; cat "$STATE/web.crqa.invalid" 2>/dev/null; }
+eq "needs channel" "cr-qa needs channel" "$(inv '^        channel:')"
+eq "needs trusted_slack_users" "cr-qa needs trusted_slack_users" "$(inv 'trusted_slack_users')"
+eq "needs trusted_authors" "cr-qa needs trusted_authors" "$(inv 'trusted_authors')"
+eq "needs transition" "cr-qa needs transition" "$(inv 'transition:')"
+eq "needs jira tracker" "cr-qa needs projects.web.tracker: jira" "$(inv 'tracker: jira')"
+eq "needs github repos" "cr-qa needs projects.web.github.repos" "$(inv 'repos: \[web\]')"
+eq "needs security.command" "cr-qa security.command is required" "$(inv 'command:')"
+eq "relative security.command" "cr-qa security.command 'bin/review.sh' must be an absolute or ~/ path" \
+  "$(reset_state; crqa_config '' ; sed -i.bak 's#~/bin/review.sh#bin/review.sh#' "$CFG"; tick; cat "$STATE/web.crqa.invalid")"
+has "unknown reactions key" "reactions" "$(inv '^\$NONE' '        reactions: { claim: eyes, aprove: approve }')"
+eq "invalid job did not run" 0 "$(calls web.crqa)"
+reset_state; crqa_config '' '        exclusive: true'
+eq "exclusive cr-qa owns the project's Slack source" "skipped:owned by scheduled job crqa" \
+  "$(bash "$REPO_ROOT/scripts/ea-config.sh" sources web | awk -F'\t' '$1=="slack"{print $2}')"
+mkdir -p "$STATE"; touch "$STATE/web.crqa.paused"
+eq "paused cr-qa gives the source back" "configured" \
+  "$(bash "$REPO_ROOT/scripts/ea-config.sh" sources web | awk -F'\t' '$1=="slack"{print $2}')"
+
+# --------------------------------------------------------------------------------------------
 echo "== 11. the real Slack collector: own channels only, own cutoff file =="
 if command -v jq >/dev/null 2>&1; then
   reset_state; unset EA_JOB_HANDLER_SLACK_WATCH

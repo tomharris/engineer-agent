@@ -57,3 +57,19 @@ jira_add_comment() {
   JIRA_HTTP="$(jira_api "$TMPD/comment.json" POST "/issue/$1/comment" "$(jq -Rsc '{body: .}' < "$2")")"
   [ "$JIRA_HTTP" = 201 ]
 }
+
+# jira_get_issue <key> <out> — the fields the cr-qa job reads, with the changelog for the
+# authorship check. rc 0 on 200; JIRA_HTTP holds the status.
+jira_get_issue() {
+  JIRA_HTTP="$(jira_api "$2" GET "/issue/$1?fields=summary,description,comment,attachment,creator&expand=changelog")"
+  [ "$JIRA_HTTP" = 200 ]
+}
+
+# jira_download_attachment <id> <out> — attachment bytes (≤1 MiB). The content endpoint redirects
+# to a signed media URL; curl does not resend the credential to another host. rc 0 on 200.
+jira_download_attachment() {
+  JIRA_HTTP="$(printf 'user = "%s:%s"\n' "$JIRA_EMAIL" "$JIRA_TOKEN" \
+    | curl -sS --config - -L --max-filesize 1048576 --max-time 60 -o "$2" -w '%{http_code}' \
+           "https://${JIRA_SITE}${JIRA_API_BASE}/attachment/content/$1" 2>"$TMPD/curlerr")"
+  [ "${JIRA_HTTP:-000}" = 200 ]
+}

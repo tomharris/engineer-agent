@@ -254,7 +254,7 @@ mcp_call_text() {
 #     (the line `=== THREAD REPLIES (N total) ===` separates parent from replies)
 #
 # parse_messages_text reads the blob on stdin and emits spy's JSON array
-# ({ts,user_id,user_name,text,reply_count,thread_ts}) so downstream skill logic is unchanged.
+# ({ts,user_id,user_name,text,reply_count,thread_ts}, plus reactions: [emoji names]) so downstream skill logic is unchanged.
 # awk splits on the block delimiters (blank lines cannot delimit — bodies contain them), pulls
 # identity from either the inline header or a From: line, strips trailing metadata, and captures
 # reply_count from a Thread: line. Fields are joined with US (0x1f) / GS (0x1e) control chars and
@@ -280,13 +280,14 @@ parse_messages_text() {
         ms = RSTART
         tail = substr(body, ms+1)
         if (tail ~ /^Thread: / && match(tail, /[0-9]+ repl/)) { rc = substr(tail, RSTART); sub(/ repl.*/, "", rc); reply_count = rc + 0 }
+        if (tail ~ /^Reactions: /) { reactions = substr(tail, 12); gsub(/ \([0-9]+\)/, "", reactions); gsub(/:/, "", reactions); gsub(/, */, ",", reactions) }
         body = substr(body, 1, ms-1); sub(/\n+$/,"",body)
       }
       thread_ts = (reply_count > 0) ? ts : ""
       # reply_count+0 forces a numeric string ("0"): an uninitialized awk var prints as "" with
       # %s, and a later tonumber on "" throws (surfacing as a misleading "Expected JSON value").
-      printf "%s%s%s%s%s%s%s%s%s%s%s%s", ts, US, uid, US, uname, US, (reply_count+0), US, thread_ts, US, body, GS
-      have=0; ts=""; uid=""; uname=""; body=""; reply_count=0; thread_ts=""
+      printf "%s%s%s%s%s%s%s%s%s%s%s%s%s%s", ts, US, uid, US, uname, US, (reply_count+0), US, thread_ts, US, reactions, US, body, GS
+      have=0; ts=""; uid=""; uname=""; body=""; reply_count=0; thread_ts=""; reactions=""
     }
     # Message-start delimiters. Channel header carries identity inline; thread delimiters do not
     # (a From: line follows).
@@ -305,7 +306,8 @@ parse_messages_text() {
     split("\u001e") | map(select(length>0)) | map(split("\u001f")) | map({
       ts: .[0], user_id: .[1], user_name: .[2],
       reply_count: (.[3]|tonumber? // 0), thread_ts: (if (.[4]//"")=="" then null else .[4] end),
-      text: (.[5] // "") })'
+      reactions: ((.[5] // "") | if . == "" then [] else split(",") end),
+      text: (.[6] // "") })'
 }
 
 # extract_result_text <raw> <field> — the connector wraps its text blob in a JSON object

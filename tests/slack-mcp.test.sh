@@ -82,7 +82,7 @@ case "$method" in
     case "$tool" in
       slack_read_channel)
         # Two messages: one with a Thread line (reply_count) + trailing Reactions/Files metadata.
-        inner=$(printf 'Channel: #general (C123)\n\n=== Message from Alice Smith <alice@x.com> (U111) at 2026-07-16 10:45:01 EDT === \nMessage TS: 1700000000.000100\nhello world\nsecond line\nReactions: +1 (3)\n\n=== Message from Bob Lee <bob@x.com> (U222) at 2026-07-16 10:40:00 EDT === \nMessage TS: 1700000000.000090\nquestion for the team?\nThread: 2 replies (latest: 2026-07-16 10:44:00 EDT)\nFiles: doc.pdf (ID: F1)')
+        inner=$(printf 'Channel: #general (C123)\n\n=== Message from Alice Smith <alice@x.com> (U111) at 2026-07-16 10:45:01 EDT === \nMessage TS: 1700000000.000100\nhello world\nsecond line\nReactions: eyes (1), approve (2), +1 (3)\n\n=== Message from Bob Lee <bob@x.com> (U222) at 2026-07-16 10:40:00 EDT === \nMessage TS: 1700000000.000090\nquestion for the team?\nThread: 2 replies (latest: 2026-07-16 10:44:00 EDT)\nFiles: doc.pdf (ID: F1)')
         sse "$(jq -nc --arg t "$inner" '{jsonrpc:"2.0",id:3,result:{content:[{type:"text",text:$t}]}}')" ;;
       slack_read_thread)
         inner=$(printf '=== THREAD PARENT MESSAGE ===\nFrom: Bob Lee <bob@x.com> (U222)\nTime: 2026-07-16 10:40:00 EDT\nMessage TS: 1700000000.000090\nquestion for the team?\n\n=== THREAD REPLIES (1 total) ===\n\n--- Reply 1 of 1 ---\nFrom: Alice Smith <alice@x.com> (U111)\nTime: 2026-07-16 10:44:00 EDT\nMessage TS: 1700000000.000200\nhere is the answer')
@@ -140,6 +140,8 @@ eq "read: msg0 user_id"      "U111"               "$(printf '%s' "$out" | jq -r 
 eq "read: msg0 user_name"    "Alice Smith"        "$(printf '%s' "$out" | jq -r '.[0].user_name')"
 eq "read: msg0 multiline text" "hello world"$'\n'"second line" "$(printf '%s' "$out" | jq -r '.[0].text')"
 eq "read: msg0 reactions stripped" "false"        "$(printf '%s' "$out" | jq -r '.[0].text|contains("Reactions")')"
+eq "read: msg0 reaction names" '["eyes","approve","+1"]' "$(printf '%s' "$out" | jq -c '.[0].reactions')"
+eq "read: msg1 no reactions" '[]' "$(printf '%s' "$out" | jq -c '.[1].reactions')"
 eq "read: msg1 reply_count"  "2"                  "$(printf '%s' "$out" | jq -r '.[1].reply_count')"
 eq "read: msg1 thread_ts"    "1700000000.000090"  "$(printf '%s' "$out" | jq -r '.[1].thread_ts')"
 eq "read: msg1 metadata stripped" "question for the team?" "$(printf '%s' "$out" | jq -r '.[1].text')"
@@ -150,6 +152,7 @@ eq "thread: count"           "2"                  "$(printf '%s' "$out" | jq -r 
 eq "thread: parent user_id"  "U222"               "$(printf '%s' "$out" | jq -r '.[0].user_id')"
 eq "thread: reply user_id"   "U111"               "$(printf '%s' "$out" | jq -r '.[1].user_id')"
 eq "thread: reply user_name" "Alice Smith"        "$(printf '%s' "$out" | jq -r '.[1].user_name')"
+eq "thread: parent no reactions" '[]' "$(printf '%s' "$out" | jq -c '.[0].reactions')"
 eq "thread: reply text"      "here is the answer" "$(printf '%s' "$out" | jq -r '.[1].text')"
 
 # 5. send: uses channel_id/message args; returns {ok,ts,channel}, ts recovered from permalink

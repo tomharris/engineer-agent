@@ -22,6 +22,7 @@ PLUGIN_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 . "${PLUGIN_ROOT}/scripts/lib-secret.sh"
 . "${PLUGIN_ROOT}/scripts/lib-jira-api.sh"
 . "${PLUGIN_ROOT}/scripts/lib-slite-api.sh"
+. "${PLUGIN_ROOT}/scripts/lib-review.sh"
 
 ITEM=""
 while [ $# -gt 0 ]; do
@@ -288,11 +289,6 @@ ${NO_MEMORY_RULE}"
 # --- QA -------------------------------------------------------------------------------------------
 # _section <file> <heading> — the body under "## <heading>" up to the next "## ".
 _section() { awk -v h="## $2" '$0 == h {f=1; next} /^## / {f=0} f' "$1"; }
-# _neutral — model text made inert for Markdown and Jira wiki: no link/markup brackets, no
-# scheme://… or www.… address. Applied to every line of model text that leaves this machine.
-_neutral() {
-  tr -d '[]()<>`|' | sed -E 's#[A-Za-z][A-Za-z0-9+.-]*://[^[:space:]]*#[link removed]#g; s#[Ww][Ww][Ww]\.[^[:space:]]*#[link removed]#g'
-}
 
 # qa_stage — one confined run writes the plan from the trust-checked queue item and the diff (it
 # never re-fetches the ticket and gets no tracker, gh or network verb). Success = the plan has its
@@ -429,17 +425,6 @@ qa_publish() {
 }
 
 # --- security (security.command adapter) -----------------------------------------------------------
-# security_introduced <findings.json> <changed-files> — the findings this PR introduced, as a JSON
-# array. Fails closed: any finding on a changed file (minus ./, :line, #Lnn) counts whatever the
-# adapter says, since its output is model text that read the diff; `introduced: true` adds
-# findings outside the diff.
-security_introduced() {
-  jq --rawfile ch "$2" '($ch | split("\n") | map(select(. != ""))) as $changed
-    | [.[] | select(
-        (.introduced == true)
-        or (((.file // "") | sub("^\\./"; "") | sub("#L?[0-9].*$"; "") | sub(":[0-9].*$"; "")) as $f
-            | $changed | index([$f]) != null))]' "$1"
-}
 
 pr_head() { with_timeout "$GH_TIMEOUT" gh pr view "$PR" --repo "$REPO" --json headRefOid --jq .headRefOid 2>/dev/null; }
 
