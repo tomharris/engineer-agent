@@ -918,8 +918,9 @@ or via Approve), `scripts/pr-pipeline.sh` runs detached:
 2. With `browser`, serves the final head from a fresh worktree (`setup`, then `serve` in the
    background, until `url` answers within `ready_timeout`) and runs a read-only Claude in Chrome
    session against it. It passes only on a final `VERDICT: pass <nonce>` line carrying the nonce
-   minted for that run. `url` must be `http://localhost[:port]`. The report is kept in
-   `state/pr-pipeline/<item>/browser-report.md`.
+   minted for that run. `url` must be `http://localhost[:port]`, and a `navigate` off its origin
+   fails the test. `chrome_device` pins a dedicated Chrome and also allows `javascript_tool` (to
+   measure computed styles). The report is kept in `state/pr-pipeline/<item>/browser-report.md`.
 3. With `mark_ready: true` and `pr-ready` in `agent.autonomy.auto_execute`, marks the PR ready for
    review (which requests reviews). Without the tier it pushes that the PR passed and leaves it draft.
 

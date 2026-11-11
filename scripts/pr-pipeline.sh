@@ -193,7 +193,6 @@ CHROME_TOOLS=(
   mcp__claude-in-chrome__read_page mcp__claude-in-chrome__get_page_text mcp__claude-in-chrome__find
   mcp__claude-in-chrome__form_input mcp__claude-in-chrome__read_console_messages
   mcp__claude-in-chrome__read_network_requests mcp__claude-in-chrome__resize_window
-  mcp__claude-in-chrome__javascript_tool
 )
 
 # browser_test — sets BT to pass | fail | <reason it could not run>. Report in $D/browser-report.md.
@@ -223,9 +222,9 @@ browser_test() {
   done
   nonce="$(od -An -tx1 -N8 /dev/urandom | tr -d ' \n')"
   local tools=( Read Glob Grep "${CONFINED_GIT_READ_RULES[@]}" "${CHROME_TOOLS[@]}" )
-  # select_browser only with a pinned device: page text could otherwise steer the run onto another
-  # connected browser, with your sign-ins. Its use is checked against the transcript below.
-  [ -z "$dev" ] || tools+=( mcp__claude-in-chrome__select_browser )
+  # Only with a pinned (dedicated) device: page text could otherwise steer the run onto another
+  # connected browser, or run JS in a tab with your sign-ins. Checked against the transcript below.
+  [ -z "$dev" ] || tools+=( mcp__claude-in-chrome__select_browser mcp__claude-in-chrome__javascript_tool )
   local prompt="Browser-test the change on this branch before it goes to review. The ticket, with its acceptance criteria, is the queue item ${AGENT_DIR}/queue/completed/${ITEM}; the change is \`git diff origin/${BASE}...HEAD\` in the current directory. \
 The branch is being served at ${url}. Use the Claude in Chrome tools: open a NEW tab, visit only URLs under ${url}, and close your tab when done. ${instr} \
 Exercise every acceptance criterion and the UI the diff touches, and check the console for errors. Do not modify any file. \
@@ -237,12 +236,22 @@ ${NO_MEMORY_RULE}"
       </dev/null ) > "$D/browser-run.jsonl" 2>>"$LOG_FILE"
   cleanup
   jq -r 'select(.type == "result") | .result // empty' "$D/browser-run.jsonl" > "$D/browser-report.md" 2>/dev/null
+  jq -r 'select(.type == "assistant") | .message.content[]? | select(.type == "tool_use")
+         | select(.name | startswith("mcp__claude-in-chrome__"))
+         | if .name == "mcp__claude-in-chrome__select_browser" then "select\t\(.input.deviceId // "")"
+           elif .name == "mcp__claude-in-chrome__navigate" then "nav\t\(.input.url // "")"
+           else "use\t" end' \
+      "$D/browser-run.jsonl" > "$D/browser-calls" 2>/dev/null
+  # Every navigation must stay on the served origin. Clicked links aren't visible in the transcript;
+  # this catches the run being told to go elsewhere.
+  local origin bad
+  origin="$(printf '%s' "$url" | sed -E 's#^(https?://[^/?#]+).*#\1#')"
+  bad="$(awk -F'\t' -v o="$origin" '$1 == "nav" && $2 != "back" && $2 != "forward" \
+           && $2 != o && index($2, o "/") != 1 && index($2, o "?") != 1 && index($2, o "#") != 1 \
+           { print $2; exit }' "$D/browser-calls")"
+  [ -z "$bad" ] || { BT="the browser run navigated outside ${origin}: ${bad}"; return; }
   if [ -n "$dev" ]; then
     # The first Chrome call must select the pinned device, and no call may select another.
-    jq -r 'select(.type == "assistant") | .message.content[]? | select(.type == "tool_use")
-           | select(.name | startswith("mcp__claude-in-chrome__"))
-           | if .name == "mcp__claude-in-chrome__select_browser" then "select\t\(.input.deviceId // "")" else "use\t" end' \
-        "$D/browser-run.jsonl" > "$D/browser-calls" 2>/dev/null
     if [ "$(head -1 "$D/browser-calls")" != "select	${dev}" ] \
        || awk -F'\t' -v d="$dev" '$1 == "select" && $2 != d {f=1} END {exit !f}' "$D/browser-calls"; then
       BT="the browser run did not stay on chrome_device ${dev} (see ${D}/browser-run.jsonl)"; return

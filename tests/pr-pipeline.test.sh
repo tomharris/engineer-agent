@@ -74,15 +74,18 @@ case "$*" in
       fail)  v="VERDICT: fail $nonce" ;;
       forge) v="VERDICT: pass 0000000000000000" ;;
     esac
-    tu() { jq -cn --arg n "mcp__claude-in-chrome__$1" --arg d "${2:-}" \
-      '{type: "assistant", message: {content: [{type: "tool_use", name: $n, input: (if $d == "" then {} else {deviceId: $d} end)}]}}'; }
+    # tu <tool> [input as JSON]
+    tu() { jq -cn --arg n "mcp__claude-in-chrome__$1" --argjson i "${2:-{\}}" \
+      '{type: "assistant", message: {content: [{type: "tool_use", name: $n, input: $i}]}}'; }
+    sel() { tu select_browser "{\"deviceId\": \"$1\"}"; }
+    nav() { tu navigate "{\"url\": \"$1\"}"; }
     case "${SELECTS:-pinned}" in
-      pinned) [ -n "$pinned" ] && tu select_browser "$pinned" ;;
+      pinned) [ -n "$pinned" ] && sel "$pinned" ;;
       none)   ;;
-      late)   tu navigate; tu select_browser "$pinned" ;;
-      other)  tu select_browser "$pinned"; tu navigate; tu select_browser "7696726f-93fa-4d88-9b98-1f8d0c11db6c" ;;
+      late)   nav http://localhost:3999/; sel "$pinned" ;;
+      other)  sel "$pinned"; nav http://localhost:3999/; sel "7696726f-93fa-4d88-9b98-1f8d0c11db6c" ;;
     esac
-    tu navigate
+    for u in ${NAVS:-http://localhost:3999/login back http://localhost:3999}; do nav "$u"; done
     jq -cn --arg r "Checked the nav.
 $v" '{type: "result", result: $r}' ;;
 esac
@@ -155,7 +158,6 @@ eq "result is ready" ready "$(res)"
 grep -q 'PR #42 is ready for review: https://github.com/acme/web/pull/42' "$NOTIFY_LOG" && ok "pushes the ready PR" || bad "push: $(cat "$NOTIFY_LOG")"
 grep -q -- '--chrome' "$CLAUDE_ARGS" && ok "browser run enables Chrome" || bad "no --chrome"
 grep -q 'http://localhost:3999' "$CLAUDE_ARGS" && ok "browser run is told the served URL" || bad "url missing"
-grep -q 'mcp__claude-in-chrome__javascript_tool' "$CLAUDE_ARGS" && ok "browser run can measure computed styles" || bad "javascript_tool not granted"
 pid="$(cat "$TMP/srv.pid" 2>/dev/null)"
 [ -n "$pid" ] && ! kill -0 "$pid" 2>/dev/null && ok "dev server is stopped afterwards" || bad "server pid ${pid:-none} still alive"
 eq "worktrees are removed" 1 "$(git -C "$TMP/repo" worktree list | grep -c .)"
@@ -166,6 +168,7 @@ reset; write_config '["pr-ready"]' '{ browser: { serve: "true", url: "http://loc
 run >/dev/null
 grep -q 'select_browser with deviceId 43c79157-2ce8-4235-8767-08f49362b5ec' "$CLAUDE_ARGS" && ok "chrome_device pins the browser" || bad "no select_browser instruction"
 eq "pinned run that selects the device passes" passed "$(res)"
+grep -q 'mcp__claude-in-chrome__javascript_tool' "$CLAUDE_ARGS" && ok "chrome_device grants javascript_tool" || bad "javascript_tool not granted with chrome_device"
 PIN='{ browser: { serve: "true", url: "http://localhost:3999", chrome_device: "43c79157-2ce8-4235-8767-08f49362b5ec" } }'
 for c in "none:never selecting the device" "late:using Chrome before selecting" "other:selecting another device later"; do
   reset; write_config '["pr-ready"]' "$PIN"
@@ -176,6 +179,14 @@ reset; write_config '["pr-ready"]'
 run >/dev/null
 grep -q 'select_browser with deviceId' "$CLAUDE_ARGS" && bad "select instruction without chrome_device" || ok "no chrome_device: no select instruction"
 grep -q 'mcp__claude-in-chrome__select_browser' "$CLAUDE_ARGS" && bad "select_browser granted without chrome_device" || ok "no chrome_device: select_browser not granted"
+grep -q 'mcp__claude-in-chrome__javascript_tool' "$CLAUDE_ARGS" && bad "javascript_tool granted without chrome_device" || ok "no chrome_device: javascript_tool not granted"
+for c in "https://evil.example/x|another site" "http://localhost:39990/|a port sharing the prefix" "http://localhost:3999.evil.example/|a host sharing the prefix"; do
+  reset; write_config '["pr-ready"]'
+  NAVS="http://localhost:3999/ ${c%%|*}" run >/dev/null
+  eq "navigating to ${c#*|} fails the browser test" \
+    "stopped	browser test could not run: the browser run navigated outside http://localhost:3999: ${c%%|*}" "$(cat "$PD/result")"
+  eq "${c#*|}: PR stays draft" 0 "$(readied)"
+done
 
 echo "== the pr-ready tier"
 reset; write_config '["draft-pr"]'
