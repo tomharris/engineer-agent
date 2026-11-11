@@ -192,6 +192,12 @@ EA_NOW=$((T0 + 300)) tick
 eq "due at exactly 5m" 2 "$(calls alpha.watch)"
 [ "$(rfield alpha.watch run_id)" != "$first_run" ] && ok "a new run_id per run" || bad "run_id was reused"
 
+# launchd execs the script, so its shebang's bash runs it (3.2 on macOS).
+reset_state; base_config
+"$TICK" --foreground
+eq "a tick run by its shebang runs the job" 1 "$(calls alpha.watch)"
+eq "and writes an ok receipt" ok "$(rfield alpha.watch status)"
+
 base_config "        hours: \"12-13\""
 reset_state
 tick

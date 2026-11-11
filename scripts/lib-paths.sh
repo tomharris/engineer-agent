@@ -390,3 +390,8 @@ ea_slack_bin() {
   fi
   SLACK_WS=(); [ -z "$3" ] || SLACK_WS=(-w "$3")
 }
+
+# self_pid — PID of the calling (sub)shell; call as "$(self_pid)". $BASHPID is bash 4+, and launchd
+# runs scripts with macOS's /bin/bash 3.2. The command substitution's child execs sh, whose parent
+# is the caller.
+self_pid() { exec sh -c 'echo "$PPID"'; }

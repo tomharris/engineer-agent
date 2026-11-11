@@ -56,7 +56,7 @@ CONFINED_GH_READ_RULES=(
 # implement-next job's max_in_flight guard also counts an Approve tap's run on the same project.
 # A marker whose pid is dead is stale (crashed run) and does not count.
 INFLIGHT_DIR="${EA_AGENT_DIR}/state/implement-inflight"
-inflight_begin() { mkdir -p "$INFLIGHT_DIR"; printf '%s\t%s\n' "$BASHPID" "$2" > "${INFLIGHT_DIR}/$1"; }
+inflight_begin() { mkdir -p "$INFLIGHT_DIR"; printf '%s\t%s\n' "$(self_pid)" "$2" > "${INFLIGHT_DIR}/$1"; }
 inflight_end()   { rm -f "${INFLIGHT_DIR}/$1"; }
 # inflight_count <project> — live implementations for this project; reclaims stale markers.
 inflight_count() {

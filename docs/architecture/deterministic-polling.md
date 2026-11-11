@@ -291,6 +291,10 @@ a guarantee about the interface, not about truth — validate the thresholds on 
   Anchor once, outside the group.
 - **Bash 3.2 has no `declare -A`, and `sed -i` needs `''` on BSD.** Under `#!/bin/bash` on macOS,
   `F[q]=x` indexes element 0 for every key; `sed -i 1d f` fails. Test stubs hit both.
+- **Bash 3.2 has no `$BASHPID`.** Under `set -u` it is an unbound-variable exit; in `jobs-tick.sh`'s
+  detached `run_job` subshell that died silently, so launchd ticks (which exec the shebang's
+  `/bin/bash`) never started a job while manual `bash jobs-tick.sh` (Homebrew bash 5) worked. Use
+  `$(self_pid)` from `lib-paths.sh`; tests exec the script by its shebang to catch this.
 - **Prepending fallback dirs to PATH shadows a caller's stubs.** The dispatcher scripts append
   `~/.local/bin`, `/opt/homebrew/bin` etc.; the installers set the real order.
 - **A bare statement before `else` is not portable awk.** `if (c) x = 1` on its own line followed by

@@ -254,6 +254,9 @@ eq "worktrees are removed" 1 "$(git -C "$TMP/repo" worktree list | grep -c .)"
 eq "no fix run when CI passes" 0 "$(fix_runs)"
 grep -qE 'Bash\(gh |Bash\(git push' "$CLAUDE_ARGS" && bad "a model run was granted gh or raw git push" || ok "model runs get no gh verbs or raw git push"
 
+reset; write_config '["pr-ready"]'
+eq "runs under macOS's bash 3.2" "0 ready" "$(/bin/bash "$PIPE" --item "$ITEM" >/dev/null 2>&1; echo "$? $(res)")"
+
 reset; write_config '["pr-ready"]' '{ browser: { serve: "true", url: "http://localhost:3999", chrome_device: "43c79157-2ce8-4235-8767-08f49362b5ec" } }'
 run >/dev/null
 grep -q 'select_browser with deviceId 43c79157-2ce8-4235-8767-08f49362b5ec' "$CLAUDE_ARGS" && ok "chrome_device pins the browser" || bad "no select_browser instruction"

@@ -100,10 +100,10 @@ run_job() {
   local slug="$1" id="$2" kind="$3:$4" budget="$5" pause_after="${6:-3}"
   local key run_id started w bpid wpid status items drafting outcome
   key="$(job_key "$slug" "$id")"
-  job_lock "$key" "$BASHPID" || { log "${key}: previous run still in progress; skipping"; return 0; }
+  job_lock "$key" "$(self_pid)" || { log "${key}: previous run still in progress; skipping"; return 0; }
   trap 'job_unlock "'"$key"'"' EXIT
   jobs_now > "$(job_path "$key" last-run)"
-  run_id="$(date -u +%Y%m%dT%H%M%SZ)-${BASHPID}"
+  run_id="$(date -u +%Y%m%dT%H%M%SZ)-$(self_pid)"
   started="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   w="$(job_path "$key" run)"; rm -rf "$w"; mkdir -p "$w"; : > "$w/errors"
   log "${key}: started run ${run_id}"
