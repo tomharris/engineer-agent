@@ -322,6 +322,8 @@ projects:
     # (cwd) before the session starts — and before each after_pr fix run. A worktree has only
     # tracked files, so this is where installed dependencies come from; EA_PROJECT_PATH is this
     # project's checkout. On macOS `cp -Rc` clones a directory near-instantly.
+    # It also runs on after_pr fix-run worktrees (the PR branch), so don't follow paths the branch
+    # could replace with a symlink.
     # `validate` (optional) is the ONE command the session must run green before it may report
     # the work complete. Its first word must be in allowed_commands, and it must be a single simple
     # command (no ; & | < > ` $). If the host has no runtime for the repo (e.g. no php), make it a

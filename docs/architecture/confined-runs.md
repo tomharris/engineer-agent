@@ -68,6 +68,11 @@ apostrophe in a PHP string, and failed every CI job. Two per-project settings cl
   worktree before `claude` starts (and before each `after_pr` fix run), with `EA_PROJECT_PATH`
   set to the user's checkout. Trusted config, the same class as `after_pr.browser.setup`.
   A failure is logged, the run proceeds, and the prompt says the setup failed.
+  On an `after_pr` fix run the worktree is the PR branch, whose content a confined run wrote, so
+  the setup string must treat the tree as untrusted: it runs unconfined, as the user. That adds no
+  capability the fix run lacks (its build rules already execute branch code), but the setup itself
+  must not follow paths the branch controls — e.g. refuse when a target such as `vendor` is a
+  symlink, which a branch can commit to redirect a copy outside the worktree.
 - **`exec.validate`** — the one command the run must run green on its final commit to report the
   work `complete` (`validation_prompt` puts it in the prompt; the skill's "Running checks"
   section covers projects without one). It is validated in bash like the allowlist: its first
