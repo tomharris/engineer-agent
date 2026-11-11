@@ -252,6 +252,10 @@ Things a reader will otherwise "fix" back:
   connector's add-reaction succeeds when the emoji is already there and reactions don't say who
   added them. A 👀 already present still means "someone else has it". On a stop the claim stays and
   nothing else is added; a human re-requests with a new message.
+- **The poster is re-verified by ts.** The connector's channel read is a text blob, and a message
+  body can imitate another message's `=== Message from … (U…)` header. Before anything else the
+  picked ts is read alone (its real header comes first); a different poster or request ⇒ ledger
+  `untrusted`, nothing claimed.
 - **Pair it with `exclusive: true`.** The global poll's own "detected" status reaction defaults to
   `eyes`; without exclusivity it would mark requests claimed before cr-qa sees them.
 - **Review.** One read-only model run (Read on the worktree and workdir only — `Read(...)` also
@@ -263,7 +267,8 @@ Things a reader will otherwise "fix" back:
 - **QA scripts are run by bash, not the model.** A model-callable wrapper's log would be forgeable:
   the QA run is allowed `exec.allowed_commands` (e.g. `uv`), which can run arbitrary code. So a plan
   run writes a nonce-bearing run spec (`{runs: [{script, dir, argv}]}`); bash checks `argv[0]` is
-  allowlisted, `dir` resolves inside the worktree and the target path doesn't already exist (a PR
+  allowlisted, argv names the script and has no option-like argument (anything starting with `-`;
+  a flag denylist misses bundled forms like `-cCODE`), `dir` resolves inside the worktree and the target path doesn't already exist (a PR
   symlink there would redirect the copy), then runs it under `qa.timeout` with a minimal env and
   records the exit code. A verify run then follows the written steps and judges each AC. Pass =
   every attached script exited 0 by bash's record **and** every AC `pass`.

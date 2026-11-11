@@ -157,9 +157,10 @@ crqa_exec_scripts() {
     [ "${#argv[@]}" -gt 0 ] && printf '%s\n' "$allowed" | grep -qxF -- "${argv[0]}" \
       || { echo "${name}: command '${argv[0]:-}' is not in exec.allowed_commands" >> "$w/qa.err"; bad=1; continue; }
     # The run spec is model output that read the PR: it may only run the downloaded script, so
-    # argv must name it and carry no inline-code flag.
+    # argv must name it and carry plain arguments only. No option at all: a denylist of inline-code
+    # flags misses bundled forms like -cCODE.
     if ! printf '%s\n' "${argv[@]}" | grep -qxF -- "$name" \
-       || printf '%s\n' "${argv[@]:1}" | grep -qxE -- '-c|-e|-m|-E|--eval|--command|-r|-x'; then
+       || printf '%s\n' "${argv[@]:1}" | grep -qvE '^[A-Za-z0-9_./=:+@][A-Za-z0-9_./=:+@-]*$'; then
       echo "${name}: the planned command does not just run the script" >> "$w/qa.err"; bad=1; continue
     fi
     if [ -e "$real/$name" ] || [ -L "$real/$name" ]; then

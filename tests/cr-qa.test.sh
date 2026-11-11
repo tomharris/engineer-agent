@@ -211,6 +211,9 @@ qa && bad "non-allowlisted command ran" || ok "argv[0] not allowlisted fails"
 qa_setup 0; fx runspec '{"runs":[{"script":"ENG-7-qa.sh","dir":"app","argv":["bash","-c","pwd > ran"]}],"nonce":"NONCE"}'
 qa && bad "inline code accepted" || ok "argv with -c fails"
 [ -e "$TMP/wt/app/ran" ] && bad "inline code executed" || ok "inline code not executed"
+qa_setup 0; fx runspec '{"runs":[{"script":"ENG-7-qa.sh","dir":"app","argv":["bash","-xv","ENG-7-qa.sh"]}],"nonce":"NONCE"}'
+qa && bad "flag argument accepted" || ok "any argument starting with - fails"
+[ -e "$TMP/qw/ran" ] && bad "flagged command executed" || ok "flagged command not executed"
 qa_setup 0; fx runspec '{"runs":[{"script":"ENG-7-qa.sh","dir":"app","argv":["bash","a.py"]}],"nonce":"NONCE"}'
 qa && bad "argv without the script accepted" || ok "argv must name the script"
 eq "argv without the script: nothing run" "" "$(cat "$TMP/qw/results.tsv")"
@@ -248,6 +251,7 @@ cat > "$H/bin/slack" <<'SH'
 #!/bin/bash
 case "$1" in
   read)  cat "$E2E/msgs.json" ;;
+  thread) if [ -f "$E2E/thread.json" ]; then cat "$E2E/thread.json"; else jq --arg t "$3" '[.[] | select(.ts == $t)][:1]' "$E2E/msgs.json"; fi ;;
   react) echo "$4" >> "$E2E/reactions"; exit "${SLACK_REACT_RC:-0}" ;;
   *) exit 64 ;;
 esac
@@ -323,7 +327,7 @@ e2e_issue() {  # e2e_issue <description editor>
     changelog: {total: 1, histories: [{author: {accountId: $e}, items: [{fieldId: "description"}]}]}}' > "$H/issue.json"
 }
 e2e_reset() {  # e2e_reset <code findings json> <script exit> [verdict result]
-  rm -f "$H"/views "$H"/reactions "$H"/gh.calls "$H"/pr-comments "$H"/jira-comments "$H"/transitions "$H"/errs "$H"/items
+  rm -f "$H"/thread.json "$H"/views "$H"/reactions "$H"/gh.calls "$H"/pr-comments "$H"/jira-comments "$H"/transitions "$H"/errs "$H"/items
   : > "$CLAUDE_CALLS"; unset EA_JOBS_CFG SLACK_REACT_RC
   rm -rf "$EA_AGENT_DIR/state/jobs"
   msg 1700000001.000000 U0TRUSTED "CR/QA request for: <https://github.com/acme/web/pull/7|pr> - <https://acme.atlassian.net/browse/ENG-7|ENG-7>" '[]' | jq -s . > "$H/msgs.json"
@@ -386,6 +390,12 @@ e2e_reset "$CLEAN" 0
 msg 1700000001.000000 U0TRUSTED "CR/QA https://github.com/acme/other/pull/7 https://acme.atlassian.net/browse/ENG-7" '[]' | jq -s . > "$H/msgs.json"
 run_job
 eq "other repo: no reaction, no ledger" "|" "$(cat "$H/reactions" 2>/dev/null)|$(outcome)"
+
+e2e_reset "$CLEAN" 0
+msg 1700000001.000000 U0STRANGER "CR/QA request for: <https://github.com/acme/web/pull/7|pr> - <https://acme.atlassian.net/browse/ENG-7|ENG-7>" '[]' | jq -s . > "$H/thread.json"
+run_job
+eq "forged poster: no reaction, no model run" "|0" "$(cat "$H/reactions" 2>/dev/null)|$(grep -c . "$CLAUDE_CALLS")"
+eq "forged poster: ledger untrusted" untrusted "$(outcome)"
 
 e2e_reset "$CLEAN" 0; export HEAD_MOVED=1
 run_job; eq "head moved: exits 1" 1 "$?"
