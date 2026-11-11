@@ -344,23 +344,35 @@ claude_bin_changed() {
   printf '%s\n' "$resolved"
 }
 
-# with_timeout <secs> <cmd> [args...] — run cmd, TERM it after <secs> (KILL 5s later). Returns
-# cmd's status, or 124 on timeout. macOS ships no timeout(1). Redirections at the call site apply
-# to cmd. Every network read on an unattended path needs one: a `gh pr list` once blocked for 24h,
-# and launchd never starts a second instance of a running job, so every later poll was silently lost.
+# _pid_tree <pid> — pid and all its descendants.
+_pid_tree() {
+  local c
+  echo "$1"
+  for c in $(pgrep -P "$1" 2>/dev/null); do _pid_tree "$c"; done
+}
+
+# with_timeout <secs> <cmd> [args...] — run cmd, TERM its process tree after <secs> (KILL whatever
+# survives 5s later). Returns cmd's status, or 124 on timeout. macOS ships no timeout(1).
+# Redirections at the call site apply to cmd. Every network read on an unattended path needs one: a
+# `gh pr list` once blocked for 24h, and launchd never starts a second instance of a running job, so
+# every later poll was silently lost. The tree is snapshotted before TERM: once a wrapper dies its
+# children reparent and pgrep -P can no longer find them, and a surviving grandchild holds the
+# caller's $(...) pipe open.
 with_timeout() {
   local secs="$1"; shift
   "$@" &
   local pid=$! rc=0
   (
-    fired=0; s=""
-    trap '[ -n "$s" ] && kill "$s" 2>/dev/null; exit "$fired"' TERM
+    s=""
+    trap '[ -n "$s" ] && kill "$s" 2>/dev/null; exit 0' TERM
     sleep "$secs" & s=$!; wait "$s"
     kill -0 "$pid" 2>/dev/null || exit 0
-    fired=124
-    kill -TERM "$pid" 2>/dev/null
-    sleep 5 & s=$!; wait "$s"
-    kill -KILL "$pid" 2>/dev/null
+    trap '' TERM
+    tree="$(_pid_tree "$pid")"
+    kill -TERM $tree 2>/dev/null
+    i=0
+    while [ "$i" -lt 25 ] && kill -0 $tree 2>/dev/null; do sleep 0.2; i=$((i + 1)); done
+    kill -KILL $tree 2>/dev/null
     exit 124
   ) </dev/null >/dev/null 2>&1 &
   local wd=$!

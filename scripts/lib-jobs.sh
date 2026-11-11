@@ -335,8 +335,8 @@ job_record_outcome() {
   fi
 }
 
-# jobs_kill_tree <pid> — TERM a process and every descendant (macOS has no timeout(1), and
-# with_timeout only signals its direct child, which would orphan a `claude` grandchild).
+# jobs_kill_tree <pid> — TERM a process and every descendant (killing only the parent would orphan
+# a `claude` grandchild).
 jobs_kill_tree() {
   local c
   for c in $(pgrep -P "$1" 2>/dev/null); do jobs_kill_tree "$c"; done

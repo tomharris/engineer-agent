@@ -182,6 +182,9 @@ polls thrash the same state/receipt files and each burns its full budget racing 
 >   `poll-slack.sh` runs under `with_timeout` (`lib-paths.sh`; macOS ships no `timeout(1)`),
 >   `EA_POLL_CMD_TIMEOUT` seconds, default 120. The curl-based collectors already carry
 >   `--max-time`.
+>   It TERMs the command's whole process tree (KILL after 5s): signalling only the direct child
+>   left a wrapper script's `curl`/`claude` grandchild running, holding a caller's `$(...)` open
+>   until it finished on its own.
 > - **Whole-run watchdog.** `cron-poll.sh` kills its own process tree after `EA_POLL_MAX_SECONDS`
 >   (default 3600) and pushes an urgent ntfy alert first, since a killed run never reaches the
 >   receipt check.
