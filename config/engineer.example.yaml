@@ -475,7 +475,9 @@ projects:
     #         ready_timeout: 3m
     #         instructions: "Log in as the seeded demo user (password in db/seeds.rb)."  # never a secret
     #         chrome_device: ""          # Claude in Chrome deviceId on THIS machine; without it the run
-    #                                    #   drives whichever browser was picked last (maybe another host)
+    #                                    #   drives whichever browser was picked last (maybe another host).
+    #                                    #   Setting it also allows javascript_tool: pin a dedicated
+    #                                    #   Chrome profile with no other sign-ins
 
   # Example: project using GitHub Issues instead of Jira
   # my-app:

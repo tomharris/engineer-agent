@@ -171,8 +171,13 @@ reader will otherwise "fix" back:
 - **CI first, then the browser,** so the browser tests the head that will be reviewed, including
   any fix commit.
 - **The browser run drives your real Chrome** (`--chrome`, your sign-ins). Its allowlist is Read/Grep,
-  git read and a fixed list of Chrome tools (no `javascript_tool`, uploads or browser switching).
-  Nothing enforces "only `url`" except the prompt and the extension's site permissions. The
+  git read and a fixed list of Chrome tools (no uploads). With `browser.chrome_device` set it also
+  gets `select_browser` and `javascript_tool` (to measure computed styles instead of judging
+  screenshots). Both are gated on the pin because page text could otherwise steer the run onto
+  another browser or run JS in a tab with your sign-ins; pin a dedicated Chrome with no other
+  sign-ins. Every `navigate` call in the transcript must stay on `url`'s origin (or be back/forward),
+  else the test fails. Clicked links don't appear in the transcript, so beyond that nothing
+  enforces "only `url`" except the prompt and the extension's site permissions. The
   validator requires a localhost `url` so the app under test is the branch, not a shared
   environment. This is why it runs only after the same trust gate as the implementation.
   Claude in Chrome drives the browser that was "picked last" across every connected device, so a
