@@ -37,6 +37,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "${SCRIPT_DIR}/lib-routing.sh"
 . "${SCRIPT_DIR}/lib-state.sh"
 . "${SCRIPT_DIR}/lib-secret.sh"
+. "${SCRIPT_DIR}/lib-slite-api.sh"
 # Routing Tier 3b as a typed Choice over the config-derived candidate set. Inert unless
 # agent.typesafe.routing.enabled is true AND a credential (plus curl and jq) resolves — see
 # rt_judge_enabled. Sourcing these costs nothing and opens nothing.
@@ -80,25 +81,10 @@ if rt_judge_enabled; then
   log "poll-slite: routing Tier 3b judged inline (min_confidence=$(rt_judge_min))"
 fi
 
-SLITE_BASE="$(cfg agent.slite.api_base)"; SLITE_BASE="${SLITE_BASE:-https://api.slite.com/v1}"
-SLITE_BASE="${SLITE_BASE%/}"
-SLITE_KEY="$(ea_secret_resolve "$(cfg agent.slite.api_key_env)" "$(cfg agent.slite.api_key_file)" \
-                               "$(ea_secret_service slite)" "")"
-if [ -z "$SLITE_KEY" ]; then
-  log "poll-slite: no Slite API key available (checked env/file/keychain); leaving Slite to the model"
+if ! slite_init "$(cfg agent.slite.api_base)" "$(cfg agent.slite.api_key_env)" "$(cfg agent.slite.api_key_file)"; then
+  log "poll-slite: ${SLITE_ERR}; leaving Slite to the model"
   exit 3
 fi
-
-# --- HTTP -------------------------------------------------------------------------------------
-# The key goes in a header supplied via `--config -` (stdin) rather than `-H` in argv, so it is not
-# visible in the process list of an unattended run. Writes the body to $1, prints the HTTP status.
-slite_api() {
-  local out="$1" path="$2" code
-  code="$(printf 'header = "x-slite-api-key: %s"\n' "$SLITE_KEY" \
-    | curl -sS --config - -o "$out" -w '%{http_code}' -H 'Accept: application/json' \
-           --max-time 60 --get "${SLITE_BASE}${path}" 2>"$TMPD/curlerr")"
-  printf '%s' "${code:-000}"
-}
 
 # urlenc <s> — percent-encode a query value. jq does this correctly (including UTF-8), and jq is
 # already a hard dependency of this script.

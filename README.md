@@ -912,20 +912,50 @@ GitHub `implement-next` (`integration: github-issues`) does the same for GitHub 
 **After the PR (`after_pr`, either tracker).** Once an autopilot pick has its draft PR (unattended
 or via Approve), `scripts/pr-pipeline.sh` runs detached:
 
-1. Waits for CI on the PR head (`ci.timeout`, default 30m). On failure it hands the failed steps'
+1. With `security` and the `security-review` tier, runs your security review adapter
+   (`security.command`, see below) on the PR. Every finding the PR **introduced** (any finding on a
+   changed file, whatever the adapter says, or one it marks `introduced: true`) goes to a confined
+   fix run, whatever its severity, then the review runs again, up to `security.fix_attempts`
+   (default 1) rounds. Other findings are skipped and counted in the
+   QA comment. Anything introduced that survives, an auth failure, or a head that moved during a
+   review stops the pipeline.
+
+   The plugin ships no reviewer. `security.command` is an executable you supply (absolute or `~/`
+   path) that wraps your team's tool: it is called as `<cmd> <owner/repo> <pr-number> <outdir>`,
+   must write `<outdir>/report.md` and `<outdir>/findings.json` (a JSON array of `{title, severity,
+   file, cwe?, impact?, evidence?, remediation?, introduced?}`; `file` may carry `:line`), and exits
+   0 on success, 3 when it needs you to log in, anything else on error.
+2. Waits for CI on the PR head (`ci.timeout`, default 30m). On failure it hands the failed steps'
    logs to up to `ci.fix_attempts` (default 1, max 3) confined fix runs: the same build allowlist and
    `confined-push.sh` as the implementation, no `gh`. A fix counts only if the remote branch moved.
-2. With `browser`, serves the final head from a fresh worktree (`setup`, then `serve` in the
+   Security and CI must pass on the **same** head: a CI fix is reviewed again, a security fix goes
+   through CI again.
+3. With `browser`, serves the final head from a fresh worktree (`setup`, then `serve` in the
    background, until `url` answers within `ready_timeout`) and runs a read-only Claude in Chrome
    session against it. It passes only on a final `VERDICT: pass <nonce>` line carrying the nonce
    minted for that run. `url` must be `http://localhost[:port]`, and a `navigate` off its origin
    fails the test. `chrome_device` pins a dedicated Chrome and also allows `javascript_tool` (to
    measure computed styles). The report is kept in `state/pr-pipeline/<item>/browser-report.md`.
-3. With `mark_ready: true` and `pr-ready` in `agent.autonomy.auto_execute`, marks the PR ready for
+4. With `qa` and the `qa-publish` tier, a confined run writes a QA plan from the queue item (the
+   text the trust check saw; the ticket is never re-fetched) and the diff. It can read only its
+   worktree, that item and the diff bash wrote, and write only the plan. Its scripted tests are a JSON list of HTTP checks
+   that bash runs with curl against the `browser` server (never model-written shell); without a
+   server they are "not executed". Manual items are listed and skipped. With `qa.document: true` the
+   plan goes to Slite under `projects.<slug>.qa.document_parent`. Bash then posts one comment (QA
+   summary with links stripped, check counts, skipped checks, the Slite link) on the PR and, for
+   Jira, on the ticket. A failed check stops after publishing.
+5. With `mark_ready: true` and `pr-ready` in `agent.autonomy.auto_execute`, marks the PR ready for
    review (which requests reviews). Without the tier it pushes that the PR passed and leaves it draft.
+   A `security` or `qa` block whose tier is missing also leaves it draft, with a push.
+6. After ready: `transition` (Jira jobs, `jira-transition` tier) moves the ticket by status or
+   transition name, and `announce.channel` (one of the project's `slack.channels`, `slack-post` tier)
+   posts `CR+QA: <PR urls> <ticket url>`: this PR first, then any other open, non-fork PR in
+   `github.repos` whose title or branch names the Jira key. Both texts are built by bash. A failure here pushes;
+   the PR is already in review.
 
-Any stop (CI still red, no checks, browser fail or no verdict, `max_runtime` exceeded, default 2h)
-pushes once, urgently, and leaves the PR in draft. The issue stays claimed: its PR exists.
+Any stop (CI still red, no checks, browser fail or no verdict, a security finding left, a QA
+failure, `max_runtime` exceeded, default 2h) pushes once, urgently, and leaves the PR in draft. The
+issue stays claimed: its PR exists.
 
 Claiming a ticket (assign to you, transition by status name) needs either a human Approve or
 `jira-claim` in `agent.autonomy.auto_execute`. The ticket is re-read before and after the assignment,
@@ -1124,7 +1154,9 @@ scripts/
   gh-claim.sh                  Claim / release a GitHub issue (assignee + Projects board status)
   job-github-implement-next.sh The GitHub implement-next job handler
   lib-confined-run.sh          Confined headless ticket implementation (listener + implement-next)
-  pr-pipeline.sh               implement-next after_pr: CI wait + confined fix, browser test, mark ready
+  pr-pipeline.sh               implement-next after_pr: security review + fix, CI wait + fix, browser
+                               test, QA + publish, mark ready, transition, Slack announce
+  lib-slite-api.sh             Slite REST (key on curl stdin), shared by poll-slite and pr-pipeline
   confined-push.sh             The only push a confined run may make: one prefixed branch, no force
   lib-poll-allowlist.sh        Read-only allowlist shared by the poll and job drafting
   notify.sh                    Publish a push notification to ntfy

@@ -63,9 +63,12 @@ docs/architecture/          detailed design rationale (read before changing that
 - **Unattended `implement-next` needs `implement` + claim tier + trusted authorship**, checked from
   one fetch; the confined run gets no tracker access. The listener trusts
   `state/autopilot-items.tsv`, never frontmatter.
-- **`after_pr` (`pr-pipeline.sh`) keeps GitHub in bash**: PR from the bash-recorded branch, checks,
-  logs and `gh pr ready` (needs `pr-ready`) are bash; fix and browser runs get no `gh` verb, and pass
-  only by side effect (branch moved; nonce-bearing verdict).
+- **`after_pr` (`pr-pipeline.sh`) keeps every external write in bash**: PR from the bash-recorded
+  branch, checks, logs, `gh pr ready`, the security adapter, Slite note, PR/Jira comments, Jira transition and
+  Slack announce are bash, each behind its own tier (`pr-ready`, `security-review`, `qa-publish`,
+  `jira-transition`, `slack-post`). Fix, browser and QA runs get no `gh`/tracker/network verb and
+  pass only by side effect (branch moved; nonce-bearing verdict or plan). QA never re-fetches the
+  ticket; its tests are data, not shell; model text leaves only via `_neutral`.
 
 ## Conventions
 

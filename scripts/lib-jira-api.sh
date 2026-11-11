@@ -36,3 +36,24 @@ jira_search() {
     '{jql: $jql, maxResults: $mx, fields: $f} + (if $tok == "" then {} else {nextPageToken: $tok} end)')"
   jira_api "$out" POST "/search/jql" "$body"
 }
+
+# jira_transition_by_name <key> <name> — by target status name, then transition name,
+# case-insensitively. rc 0 done, 4 no such transition from the current status, 1 API error
+# (JIRA_HTTP holds the status).
+jira_transition_by_name() {
+  local key="$1" id
+  JIRA_HTTP="$(jira_api "$TMPD/tr.json" GET "/issue/${key}/transitions")"
+  [ "$JIRA_HTTP" = 200 ] || return 1
+  id="$(jq -r --arg n "$2" '($n | ascii_downcase) as $n
+    | ([.transitions[]? | select((.to.name // "" | ascii_downcase) == $n)] + [.transitions[]? | select((.name // "" | ascii_downcase) == $n)])
+    | .[0].id // empty' "$TMPD/tr.json")"
+  [ -n "$id" ] || return 4
+  JIRA_HTTP="$(jira_api "$TMPD/trp.json" POST "/issue/${key}/transitions" "$(jq -nc --arg id "$id" '{transition: {id: $id}}')")"
+  [ "$JIRA_HTTP" = 204 ] || [ "$JIRA_HTTP" = 200 ]
+}
+
+# jira_add_comment <key> <body-file> — plain-text comment (API v2 body). rc 0 on 201.
+jira_add_comment() {
+  JIRA_HTTP="$(jira_api "$TMPD/comment.json" POST "/issue/$1/comment" "$(jq -Rsc '{body: .}' < "$2")")"
+  [ "$JIRA_HTTP" = 201 ]
+}

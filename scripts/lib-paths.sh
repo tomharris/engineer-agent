@@ -379,3 +379,14 @@ phase_a_error() {
   printf '%s: %s\n' "$1" "$2" | tr -d '"\\' | tr '\n' ' ' | sed 's/ *$//' >> "$EA_PHASE_A_ERRORS" 2>/dev/null || true
   printf '\n' >> "$EA_PHASE_A_ERRORS" 2>/dev/null || true
 }
+
+# ea_slack_bin <method> <bin> <workspace> — the Slack backend every posting script uses: SLACK_BIN
+# (slack-mcp.sh under mcp-proxy, else agent.slack.bin, default spy) and SLACK_WS (-w args or empty).
+ea_slack_bin() {
+  if [ "$1" = mcp-proxy ]; then
+    SLACK_BIN="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/slack-mcp.sh"
+  else
+    SLACK_BIN="${2:-spy}"
+  fi
+  SLACK_WS=(); [ -z "$3" ] || SLACK_WS=(-w "$3")
+}

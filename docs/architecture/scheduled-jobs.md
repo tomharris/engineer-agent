@@ -90,7 +90,8 @@ Read-only: search + dev-panel reads, never an assign or transition. Four things 
   honest limit: the confined run can execute code as the user. It holds only because the check
   and the queue item come from **one** fetch and the confined run has **no Jira access**, so the
   model reads exactly the text that was checked. Keep both true: do not add a Jira verb, `curl` or
-  a `gh` text read to the unattended allowlist, do not start QA from an unattended run, and do not
+  a `gh` text read to the unattended allowlist, do not start QA from the unattended implementation
+  run (QA belongs to `after_pr`, which reads only the queue item), and do not
   re-fetch the ticket after the check. Reasons name
   accountIds only, never display names (attacker-chosen text reaching the push).
 - **The listener trusts `state/autopilot-items.tsv`, never frontmatter.** Queue files can be
@@ -193,3 +194,37 @@ reader will otherwise "fix" back:
   pushes that the PR passed and leaves it draft. It never moves the board status.
 - **A stop leaves the claim.** Unlike a failed implementation, the PR exists, so `on_fail` does not
   apply.
+
+**`after_pr` handoff stages** (spec `docs/superpowers/specs/2026-11-10-after-pr-handoff-design.md`):
+security → CI → browser → QA → ready → transition → announce. Things a reader will otherwise
+"fix" back:
+- **Security runs before CI, and both must pass on one head.** A CI fix is re-reviewed and a
+  security fix re-runs CI, at most three passes. The adapter reviews the PR's head *at that moment*, so
+  a head that moved during a review stops the pipeline: the verdict belongs to another commit.
+- **The reviewer is a user-supplied adapter** (`security.command`, contract in README). The plugin
+  names no vendor and parses no vendor-specific title format; the adapter maps its tool's output
+  to `findings.json`.
+- **"Introduced" is deliberately biased toward fixing.** Any finding whose file (minus `./`,
+  `:line`, `#Lnn`) is in the diff counts, whatever the adapter says — reviewer output is model
+  text that read the diff, so a planted "pre-existing" claim must not skip it (fail closed; this
+  also fixes older issues in touched files). `introduced: true` adds findings outside the diff. Everything else is skipped by user decision (2026-11-10), even critical ones —
+  they are counted in the QA comment, not gated on.
+- **Every introduced finding is fixed, any severity.** Same user decision. `fix_attempts: 0` turns
+  the stage into a gate.
+- **The QA run's scripted tests are data.** A JSON list of `{method, path, body, expect_status,
+  expect_contains}` run by `qa_checks` with curl: allowlisted methods, a path that must start with
+  `/` and has no `..`, bodies on stdin (`@file` in a body is text). Model-written shell would run
+  unconfined with your environment, a bigger residual than `browser.serve`.
+- **The QA run reads only its worktree, its queue item and `change.diff`.** Whatever it reads can be
+  published. Bash writes the diff; the run gets no git verb (`git diff --no-index` reads any file),
+  no Glob/Grep (unscoped by path), no tracker, `gh` or network verb, and is told the queue item,
+  never the live ticket.
+- **Model text leaves only neutralized.** `_neutral` drops `[]()<>`, backticks and `|` (Markdown and
+  Jira wiki link syntax) and any `scheme://` or `www.` address; the summary is capped at 2000
+  bytes. The Slite note is rebuilt from validated parts, not uploaded as the plan file.
+- **A missing `security-review`/`qa-publish` tier holds the PR in draft**; a missing
+  `jira-transition`/`slack-post` tier only skips that step, since the PR is already in review.
+- **The announce text is bash's**: PR URLs rebuilt from `gh` numbers in `github.repos` (fork PRs
+  excluded; teammates' PRs for the ticket included, as the user asked), the ticket
+  URL from `agent.jira.site` and the ledger key, never model text. The channel must be one of the
+  project's `slack.channels`.

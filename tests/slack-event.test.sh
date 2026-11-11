@@ -108,6 +108,13 @@ eq "rows past 30 days are dropped" "0" "$(grep -c '^C9' "$W")"
 reset; config '[]'; item drafts a.md
 bash "$EV" drafted a.md; eq "only posted registers a thread" "0" "$(cat "$W" 2>/dev/null | grep -c .)"
 
+echo "== ea_slack_bin"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+eq "mcp-proxy uses the plugin's slack-mcp.sh" "$REPO_ROOT/scripts/slack-mcp.sh|-w|ws1" \
+  "$( . "$REPO_ROOT/scripts/lib-paths.sh"; ea_slack_bin mcp-proxy ignored ws1; printf '%s|%s' "$SLACK_BIN" "$(IFS='|'; echo "${SLACK_WS[*]}")" )"
+eq "otherwise agent.slack.bin, default spy, no workspace" "spy|" \
+  "$( . "$REPO_ROOT/scripts/lib-paths.sh"; ea_slack_bin spy "" ""; printf '%s|%s' "$SLACK_BIN" "${SLACK_WS[*]-}" )"
+
 echo
 echo "Passed: $PASS  Failed: $FAIL"
 [ "$FAIL" -eq 0 ]
