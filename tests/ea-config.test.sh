@@ -164,6 +164,43 @@ for key in jira_types github_labels title_keywords; do
   eq "example matches script: $key" "$want" "$have"
 done
 
+echo "== dump cache: reused while its inputs are unchanged, rebuilt when any changes"
+C="$TMP/cache-agent"; mkdir -p "$C/state/jobs"
+cat > "$C/engineer.yaml" <<'YAML'
+agent:
+  branch_prefix: "aaaa"
+projects:
+  web:
+    path: "/tmp/web"
+    slack:
+      channels: ["C1"]
+    jobs:
+      - id: watch
+        integration: slack
+        action: watch
+        every: 5m
+        exclusive: true
+YAML
+dump() { EA_AGENT_DIR="$C" bash "$EA" dump; }
+first="$(dump)"
+# awk shim counting spawns: a cache hit must not re-run the per-key lookups.
+mkdir -p "$TMP/awkbin"; REAL_AWK="$(command -v awk)"
+printf '#!/bin/bash\necho x >> "%s/awk.count"\nexec "%s" "$@"\n' "$TMP" "$REAL_AWK" > "$TMP/awkbin/awk"; chmod +x "$TMP/awkbin/awk"
+: > "$TMP/awk.count"; second="$(PATH="$TMP/awkbin:$PATH" dump)"
+eq "a repeated dump is identical" "$first" "$second"
+n="$(grep -c . "$TMP/awk.count")"
+[ "$n" -le 5 ] && ok "a repeated dump reuses the cache (${n} awk runs)" || bad "a repeated dump re-ran ${n} awk lookups"
+sed -i.bak 's/aaaa/bbbb/' "$C/engineer.yaml"
+eq "a same-size config edit is picked up" "bbbb" "$(dump | awk -F= '$1=="agent.branch_prefix"{print $2}')"
+before="$(dump | grep -c 'skipped:owned by scheduled job watch')"
+touch "$C/state/jobs/web.watch.paused"
+eq "pausing the exclusive job is picked up" "$((before > 0 ? 0 : 1))|$before" "$(dump | grep -c 'skipped:owned by scheduled job watch')|$before"
+rm -f "$C/state/jobs/web.watch.paused"
+eq "EA_JOBS_IGNORE_EXCLUSIVE is part of the key" 0 "$(EA_JOBS_IGNORE_EXCLUSIVE=1 EA_AGENT_DIR="$C" bash "$EA" dump | grep -c 'skipped:owned by scheduled job watch')"
+chmod 500 "$C/state"; rm -rf "$C/state/config-dump.cache" 2>/dev/null
+eq "an unwritable state dir still dumps" "bbbb" "$(dump 2>/dev/null | awk -F= '$1=="agent.branch_prefix"{print $2}')"
+chmod 700 "$C/state"
+
 echo
 echo "Passed: $PASS  Failed: $FAIL"
 [ "$FAIL" -eq 0 ]
