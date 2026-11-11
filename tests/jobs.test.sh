@@ -377,6 +377,8 @@ reset_state; crqa_config
 tick
 eq "valid cr-qa job runs its handler" 1 "$(calls web.crqa)"
 [ -e "$STATE/web.crqa.invalid" ] && bad "valid job marked invalid: $(cat "$STATE/web.crqa.invalid")" || ok "no invalid file"
+list_out="$(bash "$CTL" list 2>&1)"
+printf '%s' "$list_out" | grep -qE 'invalid|unbound' && bad "jobs-ctl list misreports a valid cr-qa job: $list_out" || ok "jobs-ctl list shows the cr-qa job as valid"
 inv() { reset_state; crqa_config "$1" "${2:-}"; tick; cat "$STATE/web.crqa.invalid" 2>/dev/null; }
 eq "needs channel" "cr-qa needs channel" "$(inv '^        channel:')"
 eq "needs trusted_slack_users" "cr-qa needs trusted_slack_users" "$(inv 'trusted_slack_users')"
