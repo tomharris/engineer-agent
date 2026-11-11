@@ -128,6 +128,8 @@ projects:
     exec:                                 # optional — only for remote (ntfy) ticket approval
       allowed_commands: ["bin/rails", "bin/rspec", "bin/srb", "bundle"]  # build/test allowlist for the
                                           # confined headless coding session; omit ⇒ remote ticket approval refused
+      worktree_setup: ""                  # optional shell run in each run worktree first (installs deps)
+      validate: ""                        # optional check command the run must pass to report complete
     investigation:                        # optional — overrides agent.investigation for this project
       jira_types: ["Spike", "Decision"]   #   (REPLACES the list, so you can narrow it — e.g. drop Task)
       on_complete_status: ""              # Jira status to move the ticket to after a successful
@@ -1063,6 +1065,8 @@ By default the listener caps each headless approval at **$2.00**, **$8.00** for 
 
 - The listener creates a throwaway **git worktree** of the target repo and runs the session inside it, so your real checkout is never touched. The worktree is removed when the run finishes; the branch and draft PR persist.
 - The build/test commands that session may run come from a per-project allowlist, **`projects.<slug>.exec.allowed_commands`** — each becomes a `Bash(<cmd> *)` permission (e.g. `["bin/rails", "bin/rspec", "bin/srb", "bundle"]` for a Rails repo). This is the security boundary for code driven off issue text, so keep it to build/test tools only.
+- A fresh worktree has only tracked files — no `vendor/`, `node_modules/` or generated files — so the project's checks often cannot run in it. **`exec.worktree_setup`** is a shell string the listener runs (plain bash, before the session, `EA_PROJECT_PATH` = your checkout) to provide them, e.g. `cp -Rc "$EA_PROJECT_PATH/vendor" vendor`. **`exec.validate`** is the one check command the session must run green on its final commit to report the work `complete`; otherwise it reports `partial`. When the host has no runtime for the repo, point `validate` at a script that runs the checks in Docker with the worktree mounted (not `docker compose exec` into a running container — that tests your checkout, not the run's). Both also apply to `after_pr` CI fix runs.
+- The worktree's base is the remote's default branch (`git ls-remote --symref origin HEAD`), not your checkout's `origin/HEAD`, and only `origin/<base>` is ever checked out.
 - **Deny-by-default:** a project with no `exec.allowed_commands` has remote ticket approval *refused* — you get a `⚠️ Failed` push telling you to configure it, and you implement the ticket interactively instead. Nothing runs unconfined. (The interactive terminal path never consults this list — you're present to approve.)
 - **QA test plan (best-effort):** after the draft PR ships, and only if the project has a `qa.base_url` configured, the listener runs a *second, separate* confined session that drafts a `qa-test-plan` for the new branch (you get a 🧪 FYI push and review it in the terminal with `/engineer-agent review-queue qa`). It's decoupled — if QA generation fails or `qa` isn't configured, the ticket still reports ✅ Done; a shipped PR is never re-flagged as failed. That session's allowlist adds `curl` (to run the generated scripts) and a Jira read verb but drops the build commands — QA writes no code.
 

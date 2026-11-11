@@ -203,7 +203,8 @@ projects:
       repos: ${3-["web"]}
     exec:
       allowed_commands:
-        - "make"
+        - "make"${EXEC_EXTRA:+
+$EXEC_EXTRA}
     slack:
       channels: ["C1", "C2"]${PROJ_EXTRA:+
 $PROJ_EXTRA}
@@ -573,6 +574,15 @@ grep -q 'FAILED CHECK: cihub build (https://ci.example/p/9): Code and migrations
 grep -q 'confined-push.sh:\*' "$CLAUDE_ARGS" && ok "fix run may push only via confined-push" || bad "no confined-push rule"
 grep -q 'Bash(make \*)' "$CLAUDE_ARGS" && ok "fix run gets the project's build rules" || bad "no build rules"
 eq "PR is marked ready after the fix" 1 "$(readied)"
+
+# The fix run's worktree gets the same setup and check command as the implementation run.
+reset; EXEC_EXTRA="      worktree_setup: 'pwd > $TMP/setup.cwd'
+      validate: \"make check\"" write_config '["pr-ready"]'
+printf 'fail\ttest\thttps://github.com/acme/web/actions/runs/77/job/5\n' > "$ST/checks.$(git --git-dir="$ORIGIN" rev-parse "refs/heads/$BR")"
+rm -f "$TMP/setup.cwd"; run >/dev/null
+case "$(cat "$TMP/setup.cwd" 2>/dev/null)" in "$EA_AGENT_DIR/worktrees/"*-pr-*) ok "worktree_setup ran in the fix run's worktree" ;;
+  *) bad "worktree_setup cwd: $(cat "$TMP/setup.cwd" 2>/dev/null)" ;; esac
+grep -qF 'check command is `make check`' "$CLAUDE_ARGS" && ok "fix run is handed the validate command" || bad "validate command missing from fix run"
 
 reset; write_config '["pr-ready"]'
 printf 'fail\ttest\thttps://github.com/acme/web/actions/runs/77/job/5\n' > "$ST/checks.default"

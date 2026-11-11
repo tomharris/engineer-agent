@@ -150,6 +150,27 @@ Drive the work from the queue item:
   in its own PR (database migrations commonly do), keep it out of this branch: the PR's CI rejects
   the mix. Record it as `deferred` and list it under Remaining Work for the human.
 
+#### Running checks
+
+"Tests pass" means you ran the project's checks on this branch and saw them pass. How to run them:
+
+1. **The run prompt names a check command** (`exec.validate`): run exactly that, from the worktree
+   root, after your changes and again on your final commit. It is the definition of done.
+2. **Otherwise, use the repo's own entry points** (its CLAUDE.md / AGENTS.md, Makefile,
+   package scripts) for syntax/lint, static analysis and the unit tests that cover your change.
+3. **If the host has no runtime for the language** (e.g. `php` is not on PATH), run the check in
+   Docker with **this worktree mounted**: a repo target that does `docker run -v "$(CURDIR)":…`
+   (run from the worktree root), or `docker run --rm -v "$PWD":<app dir> -w <app dir> <image> <cmd>`
+   with the image the repo's tooling uses. **Never `docker compose exec`/`docker exec` into a
+   long-running container**: it mounts the user's own checkout, not this worktree, so it tests
+   the wrong code and passes for the wrong reason. If dependencies are missing (no `vendor/`,
+   `node_modules/`), say so; do not work around it by testing another checkout.
+
+Report only checks you actually ran, with their real summary lines. A check you could not run is
+not a pass: say which ones and why, and set the result to `partial`. Never claim a check ran
+without its output (a `php -l` "pass" reported without running `php` shipped a parse error that
+failed every CI job).
+
 Stop when the acceptance criteria are met and tests pass, or when you have made your best iterations
 and something genuinely blocks completion (record that as partial in the next step — do not loop
 forever or fabricate completion).
@@ -160,10 +181,11 @@ Before gathering results or opening any PR, review the complete branch diff with
 one quick, deliberate pass, not an open-ended loop (on the headless path this shares the
 ticket's budget cap).
 
-Resolve the base branch the same way the listener does, then diff against it:
+Use the base branch the run prompt names (the listener resolves it from the remote). Without
+one, fall back to `origin/HEAD`, which can be stale (it is set at clone time), then diff:
 
 ```bash
-base="$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD | sed 's@^origin/@@')"
+base="${base:-$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD | sed 's@^origin/@@')}"
 base="${base:-main}"
 git diff "origin/${base}...HEAD" || git diff "${base}...HEAD"
 ```
@@ -195,8 +217,10 @@ clean pass |`. This is what makes the review auditable at the approval gate and 
 When the iterative implementation finishes (acceptance criteria met, or blocked/partial):
 
 1. Check the outcome:
-   - If the acceptance criteria are met and tests pass: implementation is complete
-   - If you stopped blocked or out of iterations: implementation may be partial
+   - If the acceptance criteria are met and the checks ran and passed (see "Running checks"):
+     implementation is complete
+   - If any check could not run, or you stopped blocked or out of iterations: implementation is
+     partial
 
 2. Gather results:
    - Run `git diff --stat` to list changed files
@@ -287,16 +311,16 @@ Then the **Intent block** from Step 1, then the changes summary and test results
 **Findings & Disposition** ledger from the Implementation Result (when non-empty). This makes
 the PR self-contained as an intent + integrate record — a reviewer can see where the work came
 from, the goal, the definition of done, and how each finding was resolved without opening the
-ticket. Create the PR based on tracker type:
+ticket. Create the PR based on tracker type (`{base}` is the base branch from Step 4):
 
 **If tracker is `github-issues`:**
 ```bash
-gh pr create --repo {owner}/{repo} --title "#{number}: {title}" --body "{'Closes #{number}'; Intent block; changes summary; test results; Findings & Disposition ledger}" --head "{branch_prefix}/issue-{number}-{slug}" --base main --draft
+gh pr create --repo {owner}/{repo} --title "#{number}: {title}" --body "{'Closes #{number}'; Intent block; changes summary; test results; Findings & Disposition ledger}" --head "{branch_prefix}/issue-{number}-{slug}" --base "{base}" --draft
 ```
 
 **If tracker is `jira`:**
 ```bash
-gh pr create --repo {owner}/{repo} --title "{ticket_key}: {title}" --body "{'**Ticket:** [{ticket_key}]({source_url})'; Intent block; changes summary; test results; Findings & Disposition ledger}" --head "{branch_prefix}/{ticket_key}" --base main --draft
+gh pr create --repo {owner}/{repo} --title "{ticket_key}: {title}" --body "{'**Ticket:** [{ticket_key}]({source_url})'; Intent block; changes summary; test results; Findings & Disposition ledger}" --head "{branch_prefix}/{ticket_key}" --base "{base}" --draft
 ```
 
 ### 7. Update Queue Item

@@ -317,8 +317,20 @@ projects:
     # remote ticket approval is *refused* rather than run unconfined — you'll get a "⚠️ Failed"
     # push telling you to configure it, and you implement the ticket interactively instead.
     # (The interactive terminal path never uses this list — a human is present to approve.)
+    #
+    # `worktree_setup` (optional) is a shell string run from plain bash in each fresh run worktree
+    # (cwd) before the session starts — and before each after_pr fix run. A worktree has only
+    # tracked files, so this is where installed dependencies come from; EA_PROJECT_PATH is this
+    # project's checkout. On macOS `cp -Rc` clones a directory near-instantly.
+    # `validate` (optional) is the ONE command the session must run green before it may report
+    # the work complete. Its first word must be in allowed_commands, and it must be a single simple
+    # command (no ; & | < > ` $). If the host has no runtime for the repo (e.g. no php), make it a
+    # script that runs the checks in Docker with the worktree mounted — never `docker compose exec`
+    # into a running container, which serves your own checkout instead of the run's worktree.
     exec:
       allowed_commands: ["bin/rails", "bin/rspec", "bin/srb", "bundle"]  # e.g. Rails; adjust per repo
+      # worktree_setup: 'cp -Rc "$EA_PROJECT_PATH/node_modules" node_modules'
+      # validate: "bin/rails test"
     # Investigation deliverable — OPTIONAL. Overrides agent.investigation.* for this project (per
     # key, REPLACING the list rather than merging), and says what happens to the ticket after the
     # findings comment is posted. Omit the whole block and the global lists apply with no transition.

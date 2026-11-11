@@ -107,10 +107,19 @@ project_build_rules() {
 # detaching at a days-old release commit while the log still reported a reassuring "base main".
 # So the outcome is recorded and every site that reports the base names the sha and the
 # staleness (see wt_base_desc).
+#
+# The base is the REMOTE's default branch (`ls-remote --symref origin HEAD`), not the local
+# origin/HEAD: that symref is set at clone time and is never updated by a plain fetch. Observed:
+# a checkout whose origin/HEAD still named a long-deleted `stage` branch, so the fetch failed and
+# the old fallback detached at a LOCAL `stage` branch 22 months behind master. The local symref
+# is used only when the remote can't be asked, and only `origin/<base>` is ever checked out —
+# never a local branch of the same name, which nothing keeps current.
 create_run_worktree() {
   local project_path="$1" item="$2"
   WT_STALE=0
-  WT_BASE="$(git -C "$project_path" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null | sed 's@^origin/@@')"
+  WT_BASE="$(with_timeout 30 git -C "$project_path" ls-remote --symref origin HEAD 2>/dev/null \
+    | awk '$1=="ref:" { sub(/^refs\/heads\//,"",$2); print $2; exit }')"
+  [ -n "$WT_BASE" ] || WT_BASE="$(git -C "$project_path" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null | sed 's@^origin/@@')"
   WT_BASE="${WT_BASE:-main}"
   WT_PATH="${AGENT_DIR}/worktrees/${item%.md}-$(date +%s)"
   mkdir -p "$(dirname "$WT_PATH")"
@@ -119,13 +128,76 @@ create_run_worktree() {
     log "WARN: git fetch origin ${WT_BASE} failed for ${item} — proceeding from the LOCAL origin/${WT_BASE} ref, which may be behind"
   fi
   if ! git -C "$project_path" worktree add --detach "$WT_PATH" "origin/${WT_BASE}" >>"$LOG_FILE" 2>&1; then
-    if ! git -C "$project_path" worktree add --detach "$WT_PATH" "$WT_BASE" >>"$LOG_FILE" 2>&1; then
-      return 1
-    fi
+    log "WARN: origin/${WT_BASE} is not available in ${project_path}; refusing to fall back to a local branch"
+    return 1
   fi
   WT_BASE_SHA="$(git -C "$WT_PATH" rev-parse --short HEAD 2>/dev/null)"
   WT_BASE_SHA="${WT_BASE_SHA:-unknown}"
   return 0
+}
+
+# prepare_run_worktree <project> <worktree> — runs projects.<slug>.exec.worktree_setup (a shell
+# string, trusted config like after_pr.browser.setup) in a fresh run worktree, from plain bash
+# before claude starts. A worktree has only tracked files: no vendor/, node_modules/ or other
+# installed dependencies, so the project's checks cannot run in it until something provides
+# them (e.g. `cp -Rc "$EA_PROJECT_PATH/vendor" vendor`, an APFS clone of the user's checkout).
+# EA_PROJECT_PATH is the project's checkout. Sets WT_SETUP to none | ok | failed; a failure is
+# logged and the run proceeds, and the prompt tells the model its checks may not run.
+prepare_run_worktree() {
+  local project="$1" wt="$2" setup project_path
+  WT_SETUP=none
+  setup="$(yaml_project_subscalar "$project" exec worktree_setup)"
+  [ -n "$setup" ] || return 0
+  project_path="$(yaml_project_scalar "$project" path)"
+  if ( cd "$wt" && export EA_PROJECT_PATH="$project_path" \
+         && with_timeout "${EA_WORKTREE_SETUP_TIMEOUT:-900}" bash -c "$setup" ) </dev/null >>"$LOG_FILE" 2>&1; then
+    WT_SETUP=ok
+    log "exec.worktree_setup done in ${wt}"
+  else
+    WT_SETUP=failed
+    log "WARN: exec.worktree_setup failed in ${wt} for project ${project}; the run's checks may not run"
+  fi
+  return 0
+}
+
+# project_validate_command <project> — sets VALIDATE_CMD to projects.<slug>.exec.validate, the
+# one command a code-writing run must run green before it may report its work complete. It is
+# put in the prompt, not run here, so it must be runnable under the run's allowlist: its first
+# word must be one of exec.allowed_commands, and it must be ONE simple command (no ; & | < > `
+# $ or newline), because a Bash(<cmd> *) rule is matched per subcommand and a denied command in
+# a headless run stalls silently. An invalid entry is logged and dropped.
+project_validate_command() {
+  local project="$1" cmd first c allowed=0
+  VALIDATE_CMD=""
+  cmd="$(yaml_project_subscalar "$project" exec validate)"
+  [ -n "$cmd" ] || return 0
+  if [[ "$cmd" == *[\;\&\|\<\>\`\$]* ]] || [ "$(printf '%s\n' "$cmd" | wc -l | tr -d ' ')" != 1 ]; then
+    log "WARN: ignoring exec.validate for project '${project}': it must be one simple command"
+    return 0
+  fi
+  first="${cmd%% *}"
+  while IFS= read -r c; do
+    [ "$c" = "$first" ] && allowed=1
+  done < <(yaml_project_list "$project" exec allowed_commands)
+  if [ "$allowed" != 1 ]; then
+    log "WARN: ignoring exec.validate for project '${project}': '${first}' is not in exec.allowed_commands"
+    return 0
+  fi
+  VALIDATE_CMD="$cmd"
+}
+
+# validation_prompt — the prompt clause that makes the project's checks part of "done", from
+# VALIDATE_CMD and WT_SETUP. Without it a run with no runnable checks reported `complete` on a
+# `php -l` claim and shipped a parse error that failed every CI job.
+validation_prompt() {
+  local s=""
+  [ "${WT_SETUP:-none}" = failed ] && s="NOTE: the project's worktree setup (exec.worktree_setup) FAILED, so its dependencies may be missing here. "
+  if [ -n "${VALIDATE_CMD:-}" ]; then
+    s="${s}VALIDATION: the project's check command is \`${VALIDATE_CMD}\`. Run it exactly as written from this worktree root after your changes, and fix what it reports (it runs the project's own toolchain, in Docker where the host has none). You may report the work complete only if that command ran and exited 0 on your final commit; put its final summary lines in Test Results. If it cannot run, say why and report the work as partial."
+  else
+    s="${s}VALIDATION: this project configures no check command (exec.validate). Run the project's checks as the implement-ticket skill's 'Running checks' section describes. Never report a check you did not run, and report the work as partial if you could run none."
+  fi
+  printf '%s' "$s"
 }
 
 # How the base is named in every log line: the branch, the commit actually checked out, and
@@ -191,7 +263,9 @@ run_ticket_implementation() {
     return 1
   fi
   base="$WT_BASE"; wt="$WT_PATH"
-  log "implementing ticket ${item} in isolated worktree ${wt} (project ${project}, base $(wt_base_desc)); build tools: ${build_rules[*]}"
+  prepare_run_worktree "$project" "$wt"
+  project_validate_command "$project"
+  log "implementing ticket ${item} in isolated worktree ${wt} (project ${project}, base $(wt_base_desc)); build tools: ${build_rules[*]}; validate: ${VALIDATE_CMD:-none}"
   inflight_begin "$item" "$project"
 
   # Confined tool set: file edits + git + the narrow build rules + gh (draft PR) + mv
@@ -218,7 +292,8 @@ run_ticket_implementation() {
   # notify.sh FYI on top of the listener's own outcome ack.
   local prompt="Execute the approved engineer-agent queue item '${item}' (decision: approve). \
 Read ${PLUGIN_ROOT}/skills/execute-item/SKILL.md and follow it with item='${item}' and decision='approve'. Its ticket case probes for the ticket branch and, when the branch does not exist yet, implements the ticket by following ${PLUGIN_ROOT}/skills/implement-ticket/SKILL.md before opening a DRAFT pull request. \
-The current working directory is an isolated git worktree of the target repo, checked out on a detached HEAD at the base branch. Create the ticket branch HERE and stay inside this worktree — do not cd elsewhere. Self-review the branch diff and fix findings BEFORE opening any PR. \
+The current working directory is an isolated git worktree of the target repo, checked out on a detached HEAD at the base branch '${base}' (origin/${base}; use it as the base for diffs and the PR). Create the ticket branch HERE and stay inside this worktree — do not cd elsewhere. Self-review the branch diff and fix findings BEFORE opening any PR. \
+$(validation_prompt) \
 PUSH ONLY with: ${PLUGIN_ROOT}/scripts/confined-push.sh --no-verify (from the ticket branch). Plain git push is not permitted in this run and will be denied; this replaces the push commands in the skill files. \
 Read config from ${EA_CONFIG_FILE}. \
 To finalize the queue item, WRITE the completed record to ${AGENT_DIR}/queue/completed/${item} (status: completed). You do NOT need to delete the drafts/ original — the listener reconciles that afterward; do not spend effort trying to remove it. \

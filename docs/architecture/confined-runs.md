@@ -51,6 +51,35 @@ text can influence code *inside* the sandbox but never the *shape* of it:
    set the list, and no unconfined session ever runs. It is never `Bash(*)` / `bypassPermissions`.
 3. **Draft-PR review gate** (downstream, unchanged): the output is a draft PR the human reviews.
 
+**Which base, and what the worktree is missing.** The base is the *remote's* default branch
+(`git ls-remote --symref origin HEAD`); the checkout's own `origin/HEAD` is only a fallback when
+the remote can't be asked, because that symref is set at clone time and a plain fetch never
+updates it. And only `origin/<base>` is checked out: the old fallback to a local branch of the
+same name is gone. Observed 2026-11-11: a `main` checkout's `origin/HEAD` still named a deleted
+`stage` branch, the fetch failed, and two autopilot runs detached at a local `stage` 22 months
+behind `master` (one rebuilt its branch on `origin/master` by itself; the log said `base stage`).
+
+A worktree has only tracked files, so a repo whose checks need installed dependencies or
+generated files cannot run them there. The same day a run on `main` (PHP; no `php` on the host,
+no `vendor/` in the worktree) reported `complete` with "`php -l` only", shipped an unescaped
+apostrophe in a PHP string, and failed every CI job. Two per-project settings close that:
+
+- **`exec.worktree_setup`** — a shell string the listener runs from plain bash in the fresh
+  worktree before `claude` starts (and before each `after_pr` fix run), with `EA_PROJECT_PATH`
+  set to the user's checkout. Trusted config, the same class as `after_pr.browser.setup`.
+  A failure is logged, the run proceeds, and the prompt says the setup failed.
+- **`exec.validate`** — the one command the run must run green on its final commit to report the
+  work `complete` (`validation_prompt` puts it in the prompt; the skill's "Running checks"
+  section covers projects without one). It is validated in bash like the allowlist: its first
+  word must be an `exec.allowed_commands` entry, and it must be one simple command (no
+  `;` `&` `|` `<` `>` `$`, backtick or newline), since a `Bash(<cmd> *)` rule is matched per subcommand and a denied
+  command in a headless run stalls silently. An invalid value is logged and dropped.
+
+When the host has no runtime, the check must run in Docker **with the worktree mounted**
+(`docker run -v "$PWD":…`, or a repo target that mounts `$(CURDIR)`). `docker compose exec` into a
+long-running dev container is wrong in a confined run: that container mounts the user's own
+checkout, so it tests different code and can pass for the wrong reason.
+
 When `agent.notify.turn_completions` is on, this run is also handed `EA_TURN_NOTIFY=1` and
 `EA_TURN_NOTIFY_LABEL=<item>` as an **inline `env` on that one process** — resolved in plain bash
 alongside the worktree and the allowlist, for the same reason. Being inline rather than exported
