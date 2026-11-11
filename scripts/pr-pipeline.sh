@@ -106,11 +106,16 @@ cleanup() {
   fi
 }
 inflight_begin "${ITEM%.md}.pipeline" "$SLUG"
-trap '[ -z "$WATCHDOG" ] || jobs_kill_tree "$WATCHDOG"; cleanup; inflight_end "${ITEM%.md}.pipeline"; rm -rf "$D/lock"' EXIT
+# .done is set before the watchdog is killed: jobs_kill_tree TERMs the watchdog's sleep first, and
+# without the marker the watchdog would go on to TERM us mid-exit, overwriting the real result
+# with "exceeded after_pr.max_runtime".
+rm -f "$D/.done"
+trap 'touch "$D/.done"; [ -z "$WATCHDOG" ] || jobs_kill_tree "$WATCHDOG"; cleanup; inflight_end "${ITEM%.md}.pipeline"; rm -rf "$D/lock"' EXIT
 # The watchdog kills our children too: a TERM trap waits for the foreground command to finish.
 trap 'cleanup; stop "exceeded after_pr.max_runtime"' TERM
 MAX="$(jobs_duration_seconds "$(_arc "$P.max_runtime")")"; MAX="${MAX:-7200}"
 ( me="$(self_pid)"; sleep "$MAX"
+  [ -e "$D/.done" ] && exit 0
   kill -TERM "$$" 2>/dev/null
   for c in $(pgrep -P "$$" 2>/dev/null); do [ "$c" = "$me" ] || jobs_kill_tree "$c"; done
 ) </dev/null >/dev/null 2>&1 &
