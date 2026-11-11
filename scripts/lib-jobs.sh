@@ -164,6 +164,7 @@ jobs_validate_implement() {
 # under reactions/security/qa are errors, as for after_pr.
 jobs_validate_cr_qa() {
   local p="projects.$1.job.$2" v
+  jobs_cfg_load   # callers may have enumerated in a subshell (jobs-ctl list)
   [ -n "$(_jcfg "$p.channel")" ] || { echo "cr-qa needs channel"; return 1; }
   [ -n "$(_jcfgl "$p.trusted_slack_users")" ] || { echo "cr-qa needs trusted_slack_users"; return 1; }
   [ -n "$(_jcfgl "$p.trusted_authors")" ] || { echo "cr-qa needs trusted_authors"; return 1; }
