@@ -142,7 +142,7 @@ ci_state() {
      elif (.status // "") != "COMPLETED" then "pending"
      else ({"SUCCESS": "pass", "NEUTRAL": "pass", "SKIPPED": "skipping", "CANCELLED": "cancel"}[.conclusion // ""] // "fail")
      end) as $b
-    | "\($b)\t\(.name // .context // "")\t\(.detailsUrl // .targetUrl // "")"' 2>/dev/null)"
+    | "\($b)\t\(.name // .context // "")\t\(.detailsUrl // .targetUrl // "")\t\((.description // "") | gsub("[\t\n]"; " "))"' 2>/dev/null)"
   [ -n "$rows" ] || { echo none; return; }
   printf '%s\n' "$rows" | awk -F'\t' '$1=="fail" || $1=="cancel"' > "$D/ci.fail"
   if printf '%s\n' "$rows" | awk -F'\t' '$1=="pending"{f=1} END{exit !f}'; then echo pending
@@ -168,12 +168,13 @@ ci_wait() {
   done
 }
 
-# ci_logs — failing checks and the tail of each failed Actions run's log, into $D/ci-failure.log.
+# ci_logs — failing checks (with a commit status's description, the only log a non-Actions CI
+# exposes to gh) and the tail of each failed Actions run's log, into $D/ci-failure.log.
 ci_logs() {
-  local name link run
+  local name link desc run
   : > "$D/ci-failure.log"
-  while IFS="	" read -r _ name link; do
-    printf '=== FAILED CHECK: %s (%s)\n' "$name" "$link" >> "$D/ci-failure.log"
+  while IFS="	" read -r _ name link desc; do
+    printf '=== FAILED CHECK: %s (%s)%s\n' "$name" "$link" "${desc:+: $desc}" >> "$D/ci-failure.log"
   done < "$D/ci.fail"
   sed -nE 's#.*/actions/runs/([0-9]+).*#\1#p' "$D/ci.fail" | sort -u | while IFS= read -r run; do
     printf '\n=== LOG (failed steps) for run %s\n' "$run" >> "$D/ci-failure.log"
