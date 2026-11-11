@@ -226,7 +226,7 @@ reset() {
   printf '%s\tweb.auto\tready\tacme/web#7\tgithub\n' "$ITEM" > "$EA_AGENT_DIR/state/autopilot-items.tsv"
   printf -- '---\ntype: ticket\n---\nFix nav. AC: links work.\n' > "$Q/completed/$ITEM"
   echo "$BR" > "$PD/branch"
-  printf '42\thttps://github.com/acme/web/pull/42\ttrue\n' > "$ST/prlist"
+  printf '42\thttps://github.com/acme/web/pull/42\ttrue\tmain\n' > "$ST/prlist"
   echo true > "$ST/isdraft"
   printf 'pass\tlint\thttps://github.com/acme/web/actions/runs/11/job/1\n' > "$ST/checks.default"
   ( cd "$TMP/repo" && git push -q -f origin "$(git rev-parse "$BR"):refs/heads/$BR" )
@@ -327,6 +327,17 @@ eq "and recorded as skipped" 2 "$(jq length "$PD/security/skipped.json")"
 reset; write_config '["pr-ready", "security-review"]' "$SEC"
 echo '[{"title":"[Pre-existing] y","severity":"high","file":"./a.txt:4","introduced":false}]' > "$ST/secrev.1.json"
 run >/dev/null; eq "a finding on a changed file is fixed whatever the adapter claims" 1 "$(sec_fix_runs)"
+
+# The base is the PR's own base branch, not the checkout's origin/HEAD, which can name a branch
+# that no longer exists upstream.
+reset; write_config '["pr-ready", "security-review"]' "$SEC"
+git -C "$TMP/repo" symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/stage
+eq "a stale origin/HEAD does not stop the diff" "0|ready" "$(run)|$(res)"
+git -C "$TMP/repo" remote set-head origin main >/dev/null
+
+reset; write_config '["pr-ready", "security-review"]' "$SEC"
+printf '42\thttps://github.com/acme/web/pull/42\ttrue\t-x\n' > "$ST/prlist"
+eq "an unsafe PR base stops" "1|stopped	unreadable PR base '-x'" "$(run)|$(cat "$PD/result")"
 
 reset; write_config '["pr-ready", "security-review"]' "$SEC"
 echo '[{"title":"z","severity":"low","file":"a.txt:9"}]' > "$ST/secrev.1.json"
@@ -630,7 +641,7 @@ rm -f "$Q/completed/$ITEM"
 eq "an item not in completed/ is refused" 2 "$(run)"
 
 reset; write_config '["pr-ready"]'
-printf '42\thttps://x/1\ttrue\n43\thttps://x/2\ttrue\n' > "$ST/prlist"
+printf '42\thttps://x/1\ttrue\tmain\n43\thttps://x/2\ttrue\tmain\n' > "$ST/prlist"
 eq "two open PRs for the branch stops" 1 "$(run)"
 eq "nothing marked ready" 0 "$(readied)"
 

@@ -74,10 +74,13 @@ fi
 echo "$$" > "$D/lock/pid"
 
 pr="$(with_timeout "$GH_TIMEOUT" gh pr list --repo "$REPO" --head "$BRANCH" --state open \
-       --json number,url,isDraft --jq '.[] | "\(.number)\t\(.url)\t\(.isDraft)"' 2>>"$LOG_FILE")"
+       --json number,url,isDraft,baseRefName --jq '.[] | "\(.number)\t\(.url)\t\(.isDraft)\t\(.baseRefName)"' 2>>"$LOG_FILE")"
 [ "$(printf '%s' "$pr" | grep -c .)" = 1 ] || stop "expected one open PR for ${BRANCH}, found $(printf '%s' "$pr" | grep -c .)"
-IFS="	" read -r PR PR_URL PR_DRAFT <<< "$pr"
+IFS="	" read -r PR PR_URL PR_DRAFT BASE <<< "$pr"
 [[ "$PR" =~ ^[0-9]+$ ]] || stop "unreadable PR number"
+# The PR's own base, not origin/HEAD: a checkout's origin/HEAD is set at clone time and can name a
+# branch since deleted upstream.
+[[ "$BASE" =~ ^[A-Za-z0-9._][A-Za-z0-9._/-]*$ ]] || stop "unreadable PR base '${BASE}'"
 case "$PR_URL" in "https://github.com/${REPO}/pull/${PR}") ;; *) PR_URL="https://github.com/${REPO}/pull/${PR}" ;; esac
 log "PR #${PR} (${BRANCH}) in ${REPO}"
 # The ticket comes from the bash-written ledger; its URL is built here, never read from a model.
@@ -91,8 +94,6 @@ case "$TRACKER" in
     TICKET_URL="https://github.com/${KEY%%#*}/issues/${KEY##*#}" ;;
 esac
 
-BASE="$(git -C "$PROJECT_PATH" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null | sed 's@^origin/@@')"
-BASE="${BASE:-main}"
 BUDGET="$(_arc "$P.budget_usd")"; BUDGET="${BUDGET:-3.00}"
 
 # --- watchdog + cleanup ---------------------------------------------------------------------------
