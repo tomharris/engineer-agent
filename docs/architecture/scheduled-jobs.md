@@ -253,9 +253,10 @@ Things a reader will otherwise "fix" back:
   added them. A 👀 already present still means "someone else has it". On a stop the claim stays and
   nothing else is added; a human re-requests with a new message.
 - **The poster is re-verified by ts.** The connector's channel read is a text blob, and a message
-  body can imitate another message's `=== Message from … (U…)` header. Before anything else the
-  picked ts is read alone (its real header comes first); a different poster or request ⇒ ledger
-  `untrusted`, nothing claimed.
+  body can imitate another message's `=== Message from … (U…)` header, so it only nominates a ts.
+  That message is read alone (its real header comes first) and the job acts on what that read
+  says; if it is not a trusted request for this project the ts is marked `untrusted` (safe: no
+  trusted request lives there), so a forged header can neither inject nor suppress a request.
 - **Pair it with `exclusive: true`.** The global poll's own "detected" status reaction defaults to
   `eyes`; without exclusivity it would mark requests claimed before cr-qa sees them.
 - **Review.** One read-only model run (Read on the worktree and workdir only — `Read(...)` also

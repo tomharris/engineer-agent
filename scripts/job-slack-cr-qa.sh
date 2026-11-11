@@ -86,18 +86,22 @@ log "picked ${PR_URL} (${KEY}) from ${TS}"
 mkdir -p "$JOBS_STATE_DIR"
 
 # The channel read is parsed from a text blob, where a message body can imitate another message's
-# header. Re-read this one message by its ts (its real header comes first) and require the same
-# trusted poster and the same request before acting on it.
+# header. It only nominates a ts: re-read that message alone (its real header comes first) and act
+# on what that read says. If the real message is not a trusted request for this project, the ts
+# is marked untrusted — safe, since no trusted request lives at that ts.
 with_timeout "$GH_TIMEOUT" "$SLACK_BIN" thread "$CHANNEL" "$TS" --json ${SLACK_WS[@]+"${SLACK_WS[@]}"} > "$TMPD/thread.json" 2>>"$LOG_FILE" \
   || { err "Slack read of ${TS} failed"; exit 3; }
 poster="$(jq -r --arg t "$TS" '.[0] | select(.ts == $t) | .user_id // empty' "$TMPD/thread.json" 2>/dev/null)"
 again="$(jq -r --arg t "$TS" '.[0] | select(.ts == $t) | .text // empty' "$TMPD/thread.json" 2>/dev/null)"
+verified="$(crqa_parse "$again")"
 if ! _arcl "$P.trusted_slack_users" | grep -qxF -- "$poster" \
-   || [ "$(crqa_parse "$again" | cut -f1,4)" != "$(printf '%s\t%s' "$PR_URL" "$KEY")" ]; then
+   || [ -z "$verified" ] || ! gr_project_repos "$SLUG" | grep -qxF -- "$(printf '%s' "$verified" | cut -f2)" \
+   || [ "$(printf '%s' "$again" | sed -E 's/^[[:space:]]+//' | cut -c1-${#PREFIX})" != "$PREFIX" ]; then
   crqa_ledger_set "$LEDGER" "$TS" "$PR_URL" "$KEY" untrusted
   log "request ${TS} did not verify (poster ${poster:-unknown}); skipped"
   exit 0
 fi
+IFS="	" read -r PR_URL REPO PR KEY _ <<< "$verified"
 
 # --- ticket trust (before any reaction or model run) ------------------------------------------------
 ar_jira_init || { err "Jira unavailable: ${AR_ERR}"; exit 3; }
