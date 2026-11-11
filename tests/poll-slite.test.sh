@@ -63,6 +63,7 @@ cat >> "$CURL_STDIN"
 code=200
 case "$url" in
   *"/search-notes"*) cat "$SEARCH_JSON" > "$out"; code="$(cat "$SEARCH_CODE")" ;;
+  */notes) echo '{"id":"n1","url":"https://x.slite.com/app/docs/n1"}' > "$out" ;;
   *"/notes/"*)
     id="${url##*/notes/}"
     if [ -f "$NOTES_DIR/$id.json" ]; then cat "$NOTES_DIR/$id.json" > "$out"; else echo '{}' > "$out"; code=404; fi ;;
@@ -275,6 +276,19 @@ run >/dev/null
 : > "$TMP/manifest"; set_hits '[]'
 run >/dev/null
 if grep -q "^resume	.*slite:n14" "$TMP/manifest"; then ok "stranded item re-emitted (self-healing)"; else bad "an undrafted incoming/ item is invisible to every approval path"; fi
+
+echo "== lib-slite-api"
+: > "$CURL_ARGV"; : > "$CURL_STDIN"
+code="$( . "$REPO_ROOT/scripts/lib-slite-api.sh"; TMPD="$TMP"; SLITE_BASE=https://api.slite.com/v1 SLITE_KEY=k3y
+         slite_api "$TMP/note.json" /notes POST '{"title":"T"}' )"
+eq "slite_api POST returns the status" 200 "$code"
+eq "and writes the response" n1 "$(jq -r .id "$TMP/note.json")"
+grep -q -- "-X POST" "$CURL_ARGV" && grep -q -- '--data-binary {"title":"T"}' "$CURL_ARGV" && ok "POST sends the body" || bad "argv: $(cat "$CURL_ARGV")"
+grep -q k3y "$CURL_ARGV" && bad "Slite key in argv" || ok "Slite key not in argv"
+grep -q 'x-slite-api-key: k3y' "$CURL_STDIN" && ok "Slite key on stdin" || bad "stdin: $(cat "$CURL_STDIN")"
+( . "$REPO_ROOT/scripts/lib-secret.sh"; . "$REPO_ROOT/scripts/lib-slite-api.sh"; unset SLITE_KEY; export EA_T_SK=fromenv
+  slite_init "" EA_T_SK ""; printf '%s|%s' "$SLITE_BASE" "$SLITE_KEY" ) > "$TMP/si"
+eq "slite_init defaults the base and resolves the key" "https://api.slite.com/v1|fromenv" "$(cat "$TMP/si")"
 
 echo
 echo "Passed: $PASS  Failed: $FAIL"

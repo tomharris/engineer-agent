@@ -41,7 +41,12 @@ text can influence code *inside* the sandbox but never the *shape* of it:
    absent; only `checkout -b`/`switch -c` create a branch. An **unattended** run
    (`implement-next` without an Approve) also loses `gh issue view` / `gh pr view` / `gh pr list`
    — they read text the trust check never saw — and gets no QA follow-on, whose Jira read and
-   `curl` sit outside that check. The QA run gets read-only `git`/`gh` only. **Deny-by-default:** a project with no (valid) list has remote
+   `curl` sit outside that check. The QA run gets read-only `git`/`gh` only. Unattended QA happens
+   later, in `after_pr` (`pr-pipeline.sh`): a separate confined run over the same queue item, never
+   a re-fetch, with Read scoped to its worktree, that item and a bash-written diff, no
+   git/tracker/`gh`/network verb, and
+   output that bash validates (nonce, JSON checks run by a fixed curl harness) and neutralizes
+   before anything is published. **Deny-by-default:** a project with no (valid) list has remote
    ticket approval *refused* — the item stays in `drafts/`, a `⚠️ Failed` push tells the user to
    set the list, and no unconfined session ever runs. It is never `Bash(*)` / `bypassPermissions`.
 3. **Draft-PR review gate** (downstream, unchanged): the output is a draft PR the human reviews.

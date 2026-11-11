@@ -163,13 +163,16 @@ jobs_validate_implement() {
 jobs_validate_after_pr() {
   local p="projects.$1.job.$2.after_pr" k v
   [ -n "$(_ar_children "$p")" ] || return 0
-  _ar_check_keys "$p" "budget_usd max_runtime mark_ready ci browser" "after_pr" || return 1
+  _ar_check_keys "$p" "budget_usd max_runtime mark_ready ci browser security qa transition announce" "after_pr" || return 1
   _ar_check_keys "$p.ci" "timeout fix_attempts" "after_pr.ci" || return 1
   _ar_check_keys "$p.browser" "setup serve url ready_timeout instructions chrome_device" "after_pr.browser" || return 1
+  _ar_check_keys "$p.security" "command fix_attempts timeout" "after_pr.security" || return 1
+  _ar_check_keys "$p.qa" "document" "after_pr.qa" || return 1
+  _ar_check_keys "$p.announce" "channel" "after_pr.announce" || return 1
   [ -n "$(gr_project_repos "$1")" ] || { echo "after_pr needs projects.$1.github.owner and github.repos"; return 1; }
   v="$(_arc "$p.budget_usd")"
   [ -z "$v" ] || [[ "$v" =~ ^[0-9]+(\.[0-9]+)?$ ]] || { echo "after_pr.budget_usd '${v}' must be a number"; return 1; }
-  for k in max_runtime ci.timeout browser.ready_timeout; do
+  for k in max_runtime ci.timeout browser.ready_timeout security.timeout; do
     v="$(_arc "$p.$k")"
     [ -z "$v" ] || [ -n "$(jobs_duration_seconds "$v")" ] || { echo "after_pr.${k} '${v}' must look like 30m or 2h"; return 1; }
   done
@@ -177,6 +180,25 @@ jobs_validate_after_pr() {
   [ -z "$v" ] || [[ "$v" =~ ^[0-3]$ ]] || { echo "after_pr.ci.fix_attempts '${v}' must be 0-3"; return 1; }
   v="$(_arc "$p.mark_ready")"
   _ar_bool "$v" || { echo "after_pr.mark_ready '${v}' must be true or false"; return 1; }
+  if [ -n "$(_ar_children "$p.security")" ]; then
+    v="$(_arc "$p.security.command")"
+    [ -n "$v" ] || { echo "after_pr.security.command is required"; return 1; }
+    case "$v" in /*|"~/"*) ;; *) echo "after_pr.security.command '${v}' must be an absolute or ~/ path"; return 1 ;; esac
+  fi
+  v="$(_arc "$p.security.fix_attempts")"
+  [ -z "$v" ] || [[ "$v" =~ ^[0-3]$ ]] || { echo "after_pr.security.fix_attempts '${v}' must be 0-3"; return 1; }
+  v="$(_arc "$p.qa.document")"
+  _ar_bool "$v" || { echo "after_pr.qa.document '${v}' must be true or false"; return 1; }
+  if [ "$v" = true ] && { [ "$(_arc "projects.$1.qa.document_to")" != slite ] || [ -z "$(_arc "projects.$1.qa.document_parent")" ]; }; then
+    echo "after_pr.qa.document needs projects.$1.qa.document_to: slite and document_parent"; return 1
+  fi
+  if [ -n "$(_arc "$p.transition")" ] && [ "$(_arc "projects.$1.job.$2.integration")" != jira ]; then
+    echo "after_pr.transition needs a jira job"; return 1
+  fi
+  v="$(_arc "$p.announce.channel")"
+  if [ -n "$v" ] && ! _arcl "projects.$1.slack.channels" | grep -qxF -- "$v"; then
+    echo "after_pr.announce.channel '${v}' is not one of projects.$1.slack.channels"; return 1
+  fi
   if [ -n "$(_ar_children "$p.browser")" ]; then
     [ -n "$(_arc "$p.browser.serve")" ] || { echo "after_pr.browser.serve is required"; return 1; }
     [[ "$(_arc "$p.browser.url")" =~ ^https?://(localhost|127\.0\.0\.1)(:[0-9]+)?(/|$) ]] \

@@ -29,7 +29,7 @@ _ar_children() {
   printf '%s\n' "$EA_JOBS_CFG" | awk -v p="$1." '
     index($0, p) == 1 {
       r = substr($0, length(p) + 1)
-      sub(/(\[\]=.*|\[\]#empty$|\{\}$|=.*|\[[0-9]+\].*|\..*)$/, "", r)
+      sub(/(\[\]=.*|\[\]#empty|\{\}|=.*|\[[0-9]+\].*|\..*)$/, "", r)
       if (r != "" && !(r in s)) { s[r] = 1; print r }
     }'
 }

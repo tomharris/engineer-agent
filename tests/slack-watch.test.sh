@@ -44,7 +44,7 @@ out=""; prev=""
 for a in "$@"; do case "$prev" in -o) out="$a" ;; esac; prev="$a"; done
 printf '%s\n' "$*" >> "$CURL_ARGV"; cat >/dev/null
 cat "$ANSWERS" > "$out"; printf '%s' "$(head -1 "$TS_CODE")"
-[ "$(grep -c . "$TS_CODE")" -gt 1 ] && sed -i 1d "$TS_CODE"
+[ "$(grep -c . "$TS_CODE")" -gt 1 ] && { tail -n +2 "$TS_CODE" > "$TS_CODE.n"; mv "$TS_CODE.n" "$TS_CODE"; }
 exit 0
 EOF
 chmod +x "$TMP/bin/curl"

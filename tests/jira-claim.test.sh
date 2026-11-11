@@ -56,6 +56,7 @@ case "$method $path" in
     code=204; echo '' > "$out"
     id="$(printf '%s' "$body" | jq -r '.transition.id')"
     jq -r --arg id "$id" '.transitions[] | select(.id == $id) | .to.name' "$ST/transitions.json" > "$ST/status" ;;
+  "POST /issue/"*"/comment") code="$(cat "$ST/comment.code" 2>/dev/null || echo 201)"; echo '{"id":"9"}' > "$out" ;;
   *) echo '{}' > "$out"; code=404 ;;
 esac
 printf '%s' "$code"
@@ -213,6 +214,19 @@ run claim bugs run-1; rm -f "$ST/put.code"; : > "$REQ_LOG"
 run release bugs run-1; eq "release after a failed assign is a clean no-op" "0|0|To Do" "$?|$(writes)|$(cat "$ST/status")"
 
 echo "== secrets"
+echo "== lib-jira-api helpers"
+lib() { ( . "$REPO_ROOT/scripts/lib-jira-api.sh"; JIRA_SITE=example.atlassian.net JIRA_API_BASE=/rest/api/2
+          JIRA_EMAIL=me@x JIRA_TOKEN=s3cr3t-token TMPD="$TMP"; "$@" ) }
+reset "" "To Do"; printf 'line one\nline "two"\n' > "$TMP/c.txt"
+lib jira_add_comment ENG-1 "$TMP/c.txt"; eq "jira_add_comment succeeds on 201" 0 "$?"
+eq "comment posted as a JSON body" 'POST /issue/ENG-1/comment {"body":"line one\nline \"two\"\n"}' "$(cat "$REQ_LOG")"
+echo 500 > "$ST/comment.code"
+lib jira_add_comment ENG-1 "$TMP/c.txt"; eq "jira_add_comment fails on a non-201" 1 "$?"
+rm -f "$ST/comment.code"
+lib jira_transition_by_name ENG-1 "in progress"; eq "transition by target status name" "0|In Progress" "$?|$(cat "$ST/status")"
+lib jira_transition_by_name ENG-1 "Stop"; eq "transition by transition name" "0|To Do" "$?|$(cat "$ST/status")"
+lib jira_transition_by_name ENG-1 "Code Review"; eq "a missing transition is rc 4" 4 "$?"
+
 if grep -q "s3cr3t-token" "$ARGV_LOG"; then bad "token appeared in curl argv"; else ok "token never in curl argv"; fi
 
 echo

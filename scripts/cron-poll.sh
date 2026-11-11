@@ -10,7 +10,7 @@ LOG_FILE="${AGENT_DIR}/state/cron-poll.log"
 # cron runs with a minimal PATH that usually omits ~/.local/bin (where the claude
 # CLI is commonly installed), causing "claude: command not found". Make sure it's
 # findable regardless of how the script is invoked.
-export PATH="${HOME}/.local/bin:${HOME}/bin:/usr/local/bin:/opt/homebrew/bin:${PATH}"
+export PATH="${PATH}:${HOME}/.local/bin:${HOME}/bin:/usr/local/bin:/opt/homebrew/bin"   # appended: a caller's PATH (the installers', a test's stubs) wins
 # CLAUDE_BIN can be set in the environment to select a specific Claude Code binary
 # (e.g. a version shim or non-standard install path); otherwise discover it on PATH.
 CLAUDE_BIN="${CLAUDE_BIN:-$(command -v claude || echo "${HOME}/.local/bin/claude")}"

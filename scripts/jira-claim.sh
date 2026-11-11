@@ -81,18 +81,12 @@ _assign() {
   [ "$code" = 204 ] || [ "$code" = 200 ] || { log "assign ${KEY} failed (HTTP ${code})"; return 1; }
 }
 
-# _transition <name> — by target status name, then transition name, case-insensitively.
-# rc 0 done, 4 no such transition from the current status, 1 API error.
+# _transition <name> — rc 0 done, 4 no such transition, 1 API error (logged).
 _transition() {
-  local code id
-  code="$(jira_api "$TMPD/tr.json" GET "/issue/${KEY}/transitions")"
-  [ "$code" = 200 ] || { log "GET ${KEY} transitions failed (HTTP ${code})"; return 1; }
-  id="$(jq -r --arg n "$1" '($n | ascii_downcase) as $n
-    | ([.transitions[]? | select((.to.name // "" | ascii_downcase) == $n)] + [.transitions[]? | select((.name // "" | ascii_downcase) == $n)])
-    | .[0].id // empty' "$TMPD/tr.json")"
-  [ -n "$id" ] || return 4
-  code="$(jira_api "$TMPD/trp.json" POST "/issue/${KEY}/transitions" "$(jq -nc --arg id "$id" '{transition: {id: $id}}')")"
-  [ "$code" = 204 ] || [ "$code" = 200 ] || { log "transition ${KEY} to '$1' failed (HTTP ${code})"; return 1; }
+  local rc
+  jira_transition_by_name "$KEY" "$1"; rc=$?
+  [ "$rc" = 1 ] && log "transition ${KEY} to '$1' failed (HTTP ${JIRA_HTTP})"
+  return "$rc"
 }
 
 _lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }

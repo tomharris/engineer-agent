@@ -73,14 +73,9 @@ for e in detected drafted implementing pr_opened; do
   [ -n "$o" ] && [ "$o" != "$emoji" ] && [[ "$o" =~ $EMOJI_RE ]] && old+=("$o")
 done
 
-if [ "$(cfg agent.slack.method)" = "mcp-proxy" ]; then
-  BIN="${SCRIPT_DIR}/slack-mcp.sh"
-else
-  BIN="$(cfg agent.slack.bin)"; BIN="${BIN:-spy}"
-fi
-ws=(); w="$(cfg "projects.${PROJECT}.slack.workspace")"; [ -z "$w" ] && w="$(cfg agent.slack.workspace)"
-[ -n "$w" ] && ws=(-w "$w")
-slack() { with_timeout "${EA_POLL_CMD_TIMEOUT:-120}" "$BIN" "$@" --json ${ws[@]+"${ws[@]}"} >/dev/null 2>>"$LOG"; }
+w="$(cfg "projects.${PROJECT}.slack.workspace")"; [ -z "$w" ] && w="$(cfg agent.slack.workspace)"
+ea_slack_bin "$(cfg agent.slack.method)" "$(cfg agent.slack.bin)" "$w"
+slack() { with_timeout "${EA_POLL_CMD_TIMEOUT:-120}" "$SLACK_BIN" "$@" --json ${SLACK_WS[@]+"${SLACK_WS[@]}"} >/dev/null 2>>"$LOG"; }
 
 slack react "$CH" "$TS" "$emoji"; rc=$?
 case "$rc" in

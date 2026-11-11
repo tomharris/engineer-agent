@@ -314,6 +314,8 @@ cmd_dump() {
     printf 'projects.%s.slack.ignore_bots=%s\n' "$slug" "${v:-true}"
     _emit_list "projects.${slug}.slack.channels" "projects.${slug}.slack.channels"
     _emit_list "projects.${slug}.slack.keywords" "projects.${slug}.slack.keywords"
+    printf 'projects.%s.qa.document_to=%s\n'     "$slug" "$(_get "projects.${slug}.qa.document_to")"
+    printf 'projects.%s.qa.document_parent=%s\n' "$slug" "$(_get "projects.${slug}.qa.document_parent")"
 
     # --- Jira sources, with the backward-compat normalization applied ONCE -------------------
     # poll-jira step 3 states this rule in prose: `jira.sources` (array) is used as-is, and the

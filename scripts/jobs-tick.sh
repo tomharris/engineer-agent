@@ -29,7 +29,7 @@ PLUGIN_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 . "${PLUGIN_ROOT}/scripts/lib-paths.sh"
 # shellcheck source=lib-jobs.sh
 . "${PLUGIN_ROOT}/scripts/lib-jobs.sh"
-export PATH="${HOME}/.local/bin:${HOME}/bin:/usr/local/bin:/opt/homebrew/bin:${PATH}"
+export PATH="${PATH}:${HOME}/.local/bin:${HOME}/bin:/usr/local/bin:/opt/homebrew/bin"   # appended: a caller's PATH (the installers', a test's stubs) wins
 
 ONLY=""; FORCE=0; FOREGROUND="${EA_JOBS_FOREGROUND:-0}"
 while [ $# -gt 0 ]; do
