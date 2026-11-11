@@ -32,18 +32,12 @@ TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 export EA_AGENT_DIR="$TMP/agent"
 mkdir -p "$EA_AGENT_DIR"/queue/{incoming,drafts,completed,rejected} "$EA_AGENT_DIR/state" "$TMP/bin"
 
-# HOME is redirected into the sandbox, and the `gh` stub goes in $HOME/.local/bin -- NOT in a
-# dir merely prepended to PATH here. cron-poll.sh:13 does
-#   export PATH="${HOME}/.local/bin:${HOME}/bin:/usr/local/bin:/opt/homebrew/bin:${PATH}"
-# so any real binary in those four dirs SHADOWS a stub that only sits at the front of the
-# inherited PATH. With a real gh installed (/opt/homebrew/bin/gh on a homebrew Mac) this test
-# was calling the LIVE GitHub API: the collector logged "GraphQL: Could not resolve to a
-# Repository with the name 'acme/only'", found 0 issues, and every assertion in section 3
-# failed -- while still passing anywhere gh is absent, e.g. CI. Putting the stub in the dir
-# cron-poll.sh prepends FIRST makes it win by construction on any machine.
+# HOME is redirected into the sandbox and the `gh` stub sits in $HOME/.local/bin, placed FIRST on
+# PATH. A real gh later on PATH (/opt/homebrew/bin/gh) must never shadow it: that once sent this
+# test to the live GitHub API, failing only on machines with gh installed.
 export HOME="$TMP/home"
 mkdir -p "$HOME/.local/bin"
-export PATH="$TMP/bin:$PATH"
+export PATH="$HOME/.local/bin:$TMP/bin:$PATH"
 export GH_FIXTURE="$TMP/fixture"; : > "$GH_FIXTURE"
 export CLAUDE_CALLS="$TMP/claude.calls"; : > "$CLAUDE_CALLS"
 export PROMPT_CAPTURE="$TMP/last-prompt.txt"

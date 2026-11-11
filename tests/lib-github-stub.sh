@@ -14,11 +14,11 @@ gh_stub_install() {
 #!/bin/bash
 [ "$1" = api ] || exit 1
 shift
-method=GET; path=""; query=""; declare -A F=()
+method=GET; path=""; query=""
 while [ $# -gt 0 ]; do
   case "$1" in
     -X) method="$2"; shift 2 ;;
-    -f|-F) k="${2%%=*}"; k="${k%\[\]}"; v="${2#*=}"; [ "$k" = query ] && query="$v" || F[$k]="$v"; shift 2 ;;
+    -f|-F) k="${2%%=*}"; k="${k%\[\]}"; v="${2#*=}"; [ "$k" = query ] && query="$v" || printf -v "F_$k" "%s" "$v"; shift 2 ;;
     --jq) jqf="$2"; shift 2 ;;
     *) path="$1"; shift ;;
   esac
@@ -37,20 +37,20 @@ if [ "$path" = graphql ]; then
   case "$query" in
     *"search(query"*)
       [ -f "$ST/search_fail" ] && { echo '{"errors":[{"message":"boom"}]}'; exit 1; }
-      printf '%s\n' "${F[q]}" >> "$ST/queries"
+      printf '%s\n' "${F_q}" >> "$ST/queries"
       for n in $(cat "$ST/search"); do node "$n"; done | jq -s '{data: {search: {nodes: .}}}' ;;
     *"repositoryOwner"*)
       echo '{"data":{"repositoryOwner":{"projectV2":{"id":"PVT_1","field":{"id":"F_1","options":[{"id":"o1","name":"Todo"},{"id":"o2","name":"In Progress"},{"id":"o3","name":"Ready"}]}}}}}' ;;
     *"addProjectV2ItemById"*)
-      n="${F[c]#I_}"; echo Todo > "$ST/$n.status"; echo "ADD $n" >> "$REQ_LOG"
+      n="${F_c#I_}"; echo Todo > "$ST/$n.status"; echo "ADD $n" >> "$REQ_LOG"
       jq -n --arg n "$n" '{data: {addProjectV2ItemById: {item: {id: "PI_\($n)"}}}}' ;;
     *"updateProjectV2ItemFieldValue"*)
-      n="${F[i]#PI_}"; opt_name "${F[o]}" > "$ST/$n.status"; echo "STATUS $n $(cat "$ST/$n.status")" >> "$REQ_LOG"
+      n="${F_i#PI_}"; opt_name "${F_o}" > "$ST/$n.status"; echo "STATUS $n $(cat "$ST/$n.status")" >> "$REQ_LOG"
       echo '{"data":{"updateProjectV2ItemFieldValue":{"projectV2Item":{"id":"x"}}}}' ;;
     *"node(id"*)
-      node "${F[id]#I_}" | jq '{data: {node: {projectItems: (.projectItems | .nodes |= map(.project = {id: .project.id}))}}}' ;;
+      node "${F_id#I_}" | jq '{data: {node: {projectItems: (.projectItems | .nodes |= map(.project = {id: .project.id}))}}}' ;;
     *"repository(owner"*)
-      node "${F[n]}" | jq '{data: {repository: {issue: .}}}' ;;
+      node "${F_n}" | jq '{data: {repository: {issue: .}}}' ;;
     *) echo '{"errors":[{"message":"unknown query"}]}'; exit 1 ;;
   esac
   exit 0
@@ -61,12 +61,12 @@ case "$method $path" in
     jq -n --arg a "$(cat "$ST/$n.assignees")" --arg st "$(cat "$ST/$n.state" | tr '[:upper:]' '[:lower:]')" --arg n "$n" \
       '{state: $st, node_id: "I_\($n)", assignees: ($a | split(",") | map(select(. != "")) | map({login: .}))}' ;;
   "POST repos/acme/web/issues/"*"/assignees")
-    echo "ASSIGN $n ${F[assignees]}" >> "$REQ_LOG"
+    echo "ASSIGN $n ${F_assignees}" >> "$REQ_LOG"
     a="$(cat "$ST/$n.assignees")"; [ -f "$ST/race_on_assign" ] && a="${a:+$a,}other"
-    echo "${a:+$a,}${F[assignees]}" > "$ST/$n.assignees"; echo '{}' ;;
+    echo "${a:+$a,}${F_assignees}" > "$ST/$n.assignees"; echo '{}' ;;
   "DELETE repos/acme/web/issues/"*"/assignees")
-    echo "UNASSIGN $n ${F[assignees]}" >> "$REQ_LOG"
-    tr ',' '\n' < "$ST/$n.assignees" | grep -vxF "${F[assignees]}" | paste -sd, - > "$ST/$n.assignees.tmp"
+    echo "UNASSIGN $n ${F_assignees}" >> "$REQ_LOG"
+    tr ',' '\n' < "$ST/$n.assignees" | grep -vxF "${F_assignees}" | paste -sd, - > "$ST/$n.assignees.tmp"
     mv "$ST/$n.assignees.tmp" "$ST/$n.assignees"; echo '{}' ;;
   *) echo '{"message":"Not Found"}'; exit 1 ;;
 esac

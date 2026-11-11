@@ -35,7 +35,7 @@ while [ $# -gt 0 ]; do
 done
 [ -s "$MANIFEST" ] && [ -n "$JOB" ] || { echo "usage: jobs-draft.sh --manifest <file> --job <key>" >&2; exit 2; }
 
-export PATH="${HOME}/.local/bin:${HOME}/bin:/usr/local/bin:/opt/homebrew/bin:${PATH}"
+export PATH="${PATH}:${HOME}/.local/bin:${HOME}/bin:/usr/local/bin:/opt/homebrew/bin"   # appended: a caller's PATH (the installers', a test's stubs) wins
 CLAUDE_BIN="${CLAUDE_BIN:-$(command -v claude || echo "${HOME}/.local/bin/claude")}"
 
 LOCK_FILE="${AGENT_DIR}/state/cron-poll.lock"

@@ -286,6 +286,13 @@ a guarantee about the interface, not about truth — validate the thresholds on 
   single-quoted string, so an apostrophe in a *comment* terminates it and the file stops parsing.
   That is why the existing code writes `\047` for a literal quote. A comment reading "the
   sequence's parent" is a syntax error.
+- **No `$` inside an alternation that is itself anchored.** macOS awk (20200816) never matches
+  `(a|b$|c)$`; `_ar_children` used one and reported every nested `after_pr` map as an unknown key.
+  Anchor once, outside the group.
+- **Bash 3.2 has no `declare -A`, and `sed -i` needs `''` on BSD.** Under `#!/bin/bash` on macOS,
+  `F[q]=x` indexes element 0 for every key; `sed -i 1d f` fails. Test stubs hit both.
+- **Prepending fallback dirs to PATH shadows a caller's stubs.** The dispatcher scripts append
+  `~/.local/bin`, `/opt/homebrew/bin` etc.; the installers set the real order.
 - **A bare statement before `else` is not portable awk.** `if (c) x = 1` on its own line followed by
   `else` is rejected by BSD awk (which is what macOS LaunchAgents run). Brace every arm.
 - **`"maxResults":1` is a substring of `"maxResults":100`.** A test stub dispatching on the former
