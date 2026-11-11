@@ -192,10 +192,13 @@ yaml_dump() {
         if (item ~ /^[A-Za-z0-9_.-]+:([ \t]|$)/) {
           # Braces on every arm: a bare statement followed by a newline and `else` is rejected by
           # some awks (BSD awk on macOS among them), and this file must parse identically there.
-          if (seq_path != "" && ind == seq_indent) {
-            owner = seq_path
+          # Open sequences form a stack: a "- key:" item at a shallower indent than a nested
+          # sequence (jobs[0].rules) belongs to an enclosing one (jobs), not to nothing.
+          while (sq_n > 0 && sq_ind[sq_n] > ind) sq_n--
+          if (sq_n > 0 && sq_ind[sq_n] == ind) {
+            owner = sq_path[sq_n]
           } else if (list_path != "" && ind >= list_indent) {
-            owner = list_path; seq_path = list_path; seq_indent = ind; seq_n[owner] = 0
+            owner = list_path; sq_n++; sq_path[sq_n] = list_path; sq_ind[sq_n] = ind; seq_n[owner] = 0
           } else {
             next
           }
@@ -220,7 +223,7 @@ yaml_dump() {
       # A key at or above the indent of the open sequence CLOSES it. Without this, a later block
       # sequence introduced at the same depth under a different key would keep appending to the
       # index space of the previous one (statuses items landing inside sources[2], say).
-      if (!in_seq_item && seq_path != "" && ind <= seq_indent) seq_path = ""
+      if (!in_seq_item) { while (sq_n > 0 && ind <= sq_ind[sq_n]) sq_n-- }
       in_seq_item = 0
 
       ci = index(content, ":")

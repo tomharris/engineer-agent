@@ -291,6 +291,10 @@ a guarantee about the interface, not about truth — validate the thresholds on 
   Anchor once, outside the group.
 - **Bash 3.2 has no `declare -A`, and `sed -i` needs `''` on BSD.** Under `#!/bin/bash` on macOS,
   `F[q]=x` indexes element 0 for every key; `sed -i 1d f` fails. Test stubs hit both.
+- **Nested block sequences need a stack in `lib-yaml.sh`.** With one "open sequence" slot, a
+  `- id:` job item after a job whose `rules:` held `- name:` items lost its owner: the parser
+  dropped the dash line and folded the second job's keys into the first (`job_count` 1, days
+  doubled). The parser now keeps a stack of open sequences.
 - **Bash 3.2 has no `$BASHPID`.** Under `set -u` it is an unbound-variable exit; in `jobs-tick.sh`'s
   detached `run_job` subshell that died silently, so launchd ticks (which exec the shebang's
   `/bin/bash`) never started a job while manual `bash jobs-tick.sh` (Homebrew bash 5) worked. Use

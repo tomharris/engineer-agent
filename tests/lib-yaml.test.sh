@@ -219,6 +219,31 @@ else
   bad "config/engineer.example.yaml missing"
 fi
 
+echo "== a sequence item after a nested sequence of mappings starts a new element"
+cat > "$TMP/nested.yaml" <<'YAML'
+projects:
+  web:
+    jobs:
+      - id: first
+        rules:
+          - name: mine
+            require:
+              statuses: ["To Do"]
+          - name: unassigned
+        after_pr:
+          announce: { channel: C1 }
+      - id: second
+        days: [mon, tue]
+        trusted:
+          - "U1"
+YAML
+eq "two jobs" 2 "$(yaml_seq_len projects.web.jobs "$TMP/nested.yaml")"
+eq "second job id" second "$(yaml_get 'projects.web.jobs[1].id' "$TMP/nested.yaml")"
+eq "first job id kept" first "$(yaml_get 'projects.web.jobs[0].id' "$TMP/nested.yaml")"
+eq "first job's rules intact" 2 "$(yaml_seq_len 'projects.web.jobs[0].rules' "$TMP/nested.yaml")"
+eq "second job's list" U1 "$(yaml_get_list 'projects.web.jobs[1].trusted' "$TMP/nested.yaml")"
+eq "first job has no second-job keys" "" "$(yaml_get_list 'projects.web.jobs[0].days' "$TMP/nested.yaml")"
+
 echo
 echo "Passed: $PASS  Failed: $FAIL"
 [ "$FAIL" -eq 0 ]

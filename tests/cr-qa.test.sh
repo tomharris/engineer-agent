@@ -397,6 +397,12 @@ run_job
 eq "forged poster: no reaction, no model run" "|0" "$(cat "$H/reactions" 2>/dev/null)|$(grep -c . "$CLAUDE_CALLS")"
 eq "forged poster: ledger untrusted" untrusted "$(outcome)"
 
+e2e_reset "$CLEAN" 0
+msg 1700000001.000000 U0TRUSTED "CR/QA request for: <https://github.com/acme/web/pull/8|pr> - <https://acme.atlassian.net/browse/ENG-7|ENG-7>" '[]' | jq -s . > "$H/thread.json"
+run_job
+eq "forged header over a real request: the real request is handled" "https://github.com/acme/web/pull/8" "$(cut -f2 "$LEDGER_E")"
+eq "and is not poisoned as untrusted" claimed-or-done "$( [ "$(outcome)" != untrusted ] && echo claimed-or-done || echo untrusted)"
+
 e2e_reset "$CLEAN" 0; export HEAD_MOVED=1
 run_job; eq "head moved: exits 1" 1 "$?"
 eq "head moved: no approve, no transition, no QA summary" "eyes||" "$(paste -sd, - < "$H/reactions")|$(cat "$H/transitions" 2>/dev/null)|$(cat "$H/jira-comments" 2>/dev/null)"
