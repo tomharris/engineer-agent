@@ -109,7 +109,7 @@ trap '[ -z "$WATCHDOG" ] || jobs_kill_tree "$WATCHDOG"; cleanup; inflight_end "$
 # The watchdog kills our children too: a TERM trap waits for the foreground command to finish.
 trap 'cleanup; stop "exceeded after_pr.max_runtime"' TERM
 MAX="$(jobs_duration_seconds "$(_arc "$P.max_runtime")")"; MAX="${MAX:-7200}"
-( me="$BASHPID"; sleep "$MAX"
+( me="$(self_pid)"; sleep "$MAX"
   kill -TERM "$$" 2>/dev/null
   for c in $(pgrep -P "$$" 2>/dev/null); do [ "$c" = "$me" ] || jobs_kill_tree "$c"; done
 ) </dev/null >/dev/null 2>&1 &
