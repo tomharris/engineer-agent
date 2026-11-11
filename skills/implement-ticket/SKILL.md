@@ -141,6 +141,14 @@ Drive the work from the queue item:
 - Implement the changes; write or update tests to cover the new behavior; run the test suite after
   each change and fix what it surfaces; follow the patterns and conventions in the repo's CLAUDE.md;
   keep changes focused on the ticket scope — do not refactor unrelated code.
+- **Generated files you cannot generate.** When the repo says a file must come from a command
+  (a migration scaffold, codegen, a lockfile) and that command cannot run here (no docker, no
+  vendor), do not hand-write the file or invent what the command would produce (a timestamp, a
+  hash). Leave it out, record it as `deferred` in the ledger, and say in the PR body which command
+  the human must run.
+- **Changes the repo requires in a separate PR.** When the repo's rules say a kind of change ships
+  in its own PR (database migrations commonly do), keep it out of this branch: the PR's CI rejects
+  the mix. Record it as `deferred` and list it under Remaining Work for the human.
 
 Stop when the acceptance criteria are met and tests pass, or when you have made your best iterations
 and something genuinely blocks completion (record that as partial in the next step — do not loop

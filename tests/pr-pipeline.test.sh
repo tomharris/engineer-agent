@@ -74,7 +74,7 @@ echo "# report round $n" > "$3/report.md"
 EOF
 
 # gh: PR #42 on acme/web. Head = the bare origin's branch tip. Check rows ("bucket\tname\tlink")
-# per head sha from $ST/checks.<sha>, else $ST/checks.default ("none" = no checks reported); they
+# (a status-fail row may add \tdescription) per head sha from $ST/checks.<sha>, else $ST/checks.default ("none" = no checks reported); they
 # are served as a statusCheckRollup and run through the caller's real --jq filter.
 cat > "$TMP/bin/gh" <<'EOF'
 #!/bin/bash
@@ -96,7 +96,7 @@ case "$1 $2" in
         f="$ST/checks.$(head)"; [ -f "$f" ] || f="$ST/checks.default"
         while [ "$1" != --jq ]; do shift; done
         { [ "$(cat "$f")" = none ] || cat "$f"; } | jq -Rn '{statusCheckRollup: [inputs | select(. != "") | split("\t") |
-            if .[0] == "status-fail" then {__typename: "StatusContext", context: .[1], state: "ERROR", targetUrl: .[2]}
+            if .[0] == "status-fail" then {__typename: "StatusContext", context: .[1], state: "ERROR", targetUrl: .[2], description: .[3]}
             else {__typename: "CheckRun", name: .[1], detailsUrl: .[2],
                   status: (if .[0] == "pending" then "IN_PROGRESS" else "COMPLETED" end),
                   conclusion: ({"pass": "SUCCESS", "fail": "FAILURE", "skipping": "SKIPPED"}[.[0]] // null)} end]}' \
@@ -552,6 +552,13 @@ eq "exits 0 after a successful fix" 0 "$(run)"
 eq "one fix run" 1 "$(fix_runs)"
 grep -q 'log of run 77: expected 1 got 2' "$PD/ci-failure.log" && ok "failed run log handed to the fix run" || bad "log: $(cat "$PD/ci-failure.log")"
 grep -q 'FAILED CHECK: test' "$PD/ci-failure.log" && ok "failing check named" || bad "check name missing"
+
+reset; write_config '["pr-ready"]'
+printf 'status-fail\tcihub build\thttps://ci.example/p/9\tCode and migrations cannot share a PR.\n' \
+  > "$ST/checks.$(git --git-dir="$ORIGIN" rev-parse "refs/heads/$BR")"
+run >/dev/null
+grep -q 'FAILED CHECK: cihub build (https://ci.example/p/9): Code and migrations cannot share a PR.' "$PD/ci-failure.log" \
+  && ok "a commit status's description is handed to the fix run" || bad "log: $(cat "$PD/ci-failure.log")"
 grep -q 'confined-push.sh:\*' "$CLAUDE_ARGS" && ok "fix run may push only via confined-push" || bad "no confined-push rule"
 grep -q 'Bash(make \*)' "$CLAUDE_ARGS" && ok "fix run gets the project's build rules" || bad "no build rules"
 eq "PR is marked ready after the fix" 1 "$(readied)"
