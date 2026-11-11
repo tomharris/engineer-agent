@@ -229,7 +229,7 @@ _emit_rules() {
 
 cmd_projects() { yaml_keys projects; }
 
-cmd_dump() {
+_dump_uncached() {
   local slug w
 
   # --- agent-level, with the defaults the skills currently state in prose -------------------
@@ -377,6 +377,26 @@ cmd_dump() {
     done
     _emit_jobs "$slug"
   done < <(yaml_keys projects)
+}
+
+# cmd_dump — the dump, cached in state/config-dump.cache. Building it costs one awk lookup per key
+# (~1s on a small config, several on a large one) and every job tick and handler loads it. The key
+# covers every input: the config text, the code that renders it, which jobs are paused
+# (_exclusive_owner) and EA_JOBS_IGNORE_EXCLUSIVE. An unwritable state dir just skips caching.
+cmd_dump() {
+  local key cache="${EA_AGENT_DIR}/state/config-dump.cache" tmp
+  key="$( { cat "$EA_CONFIG_FILE" "${SCRIPT_DIR}/ea-config.sh" "${SCRIPT_DIR}/lib-yaml.sh" "${SCRIPT_DIR}/lib-paths.sh"
+            printf 'ignore-exclusive=%s\n' "${EA_JOBS_IGNORE_EXCLUSIVE:-}"
+            ls "${EA_AGENT_DIR}/state/jobs" 2>/dev/null | grep '\.paused$'; } 2>/dev/null | cksum)"
+  if [ -f "$cache" ] && [ "$(head -1 "$cache" 2>/dev/null)" = "#key ${key}" ]; then
+    tail -n +2 "$cache"; return 0
+  fi
+  tmp="${cache}.$$"
+  if { printf '#key %s\n' "$key"; _dump_uncached; } > "$tmp" 2>/dev/null; then
+    mv -f "$tmp" "$cache" 2>/dev/null && { tail -n +2 "$cache"; return 0; }
+  fi
+  rm -f "$tmp" 2>/dev/null
+  _dump_uncached
 }
 
 cmd_sources() {

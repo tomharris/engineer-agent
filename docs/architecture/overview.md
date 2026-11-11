@@ -79,6 +79,7 @@ of truth for this location — source it rather than hardcoding the path.
     ├── watched-threads.tsv    — Slack threads answered via engineer-agent (channel, thread_ts, last_seen_ts, added_at, project) for the my-threads watch
     ├── slack-events.log       — Outcomes of scripts/slack-event.sh (status reactions, thread watches)
     ├── jobs.log               — Scheduled-jobs dispatcher log
+    ├── config-dump.cache      — `ea-config.sh dump` output, keyed by a checksum of the config, the rendering scripts, paused jobs and EA_JOBS_IGNORE_EXCLUSIVE (safe to delete)
     ├── turn-notify/           — One marker per session armed for turn-completion pushes (<session_id>)
     └── turn-notify.log        — Turn-completion hook diagnostics (only when EA_TURN_NOTIFY_DEBUG=1)
 ```
