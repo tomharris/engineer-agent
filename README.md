@@ -895,7 +895,8 @@ message starting with `CR/QA` (configurable) from a `trusted_slack_users` id tha
 project's `github.repos` and one Jira ticket, claims it with 👀, then:
 
 1. reviews the PR (a read-only model review with an acceptance-criteria check, plus your
-   `security.command` adapter); any Medium+ finding ⇒ one PR comment and stop;
+   `security.command` adapter); any Medium+ finding ⇒ one PR comment and stop. A finding that
+   contradicts the ticket (see the AC guard under `after_pr`) doesn't block; the comment lists it;
 2. QAs it: follows the ticket's written QA steps and runs the `.py`/`.sh` scripts attached to the
    ticket by `trusted_authors` (bash runs them, from a run plan the model writes); a failure ⇒ one
    Jira comment and stop;
@@ -950,7 +951,12 @@ or via Approve), `scripts/pr-pipeline.sh` runs detached:
    changed file, whatever the adapter says, or one it marks `introduced: true`) goes to a confined
    fix run, whatever its severity, then the review runs again, up to `security.fix_attempts`
    (default 1) rounds. `security.review_last_fix: false` skips the re-review after the last fix
-   attempt, so that fix goes on to CI unreviewed. Other findings are skipped and counted in the
+   attempt, so that fix goes on to CI unreviewed. **AC guard:** a finding whose fix would undo
+   something the ticket explicitly requires is not fixed; a small read-only judge run names it,
+   and it is skipped only if the judge quotes one whole requirement (a list item, paragraph or
+   complete sentence) word for word from the ticket text the autopilot recorded at pick time (only
+   after the trusted-author check passed), and the finding is `medium` or `low`. Skipped findings are listed in the QA comment. Without that ticket text (an Approve
+   pick), or on any unusable verdict, every finding is fixed as before. Other findings are skipped and counted in the
    QA comment. Anything introduced that survives, an auth failure, or a head that moved during a
    review stops the pipeline.
 
@@ -972,8 +978,8 @@ or via Approve), `scripts/pr-pipeline.sh` runs detached:
    minted for that run. `url` must be `http://localhost[:port]`, and a `navigate` off its origin
    fails the test. `chrome_device` pins a dedicated Chrome and also allows `javascript_tool` (to
    measure computed styles). The report is kept in `state/pr-pipeline/<item>/browser-report.md`.
-4. With `qa` and the `qa-publish` tier, a confined run writes a QA plan from the queue item (the
-   text the trust check saw; the ticket is never re-fetched) and the diff. It can read only its
+4. With `qa` and the `qa-publish` tier, a confined run writes a QA plan from the ticket text
+   implement-next recorded after its trust check (falling back to the queue item; the ticket is never re-fetched) and the diff. It can read only its
    worktree, that item and the diff bash wrote, and write only the plan. Its scripted tests are a JSON list of HTTP checks
    that bash runs with curl against the `browser` server (never model-written shell); without a
    server they are "not executed". Manual items are listed and skipped. With `qa.document: true` the

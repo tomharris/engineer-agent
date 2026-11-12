@@ -244,6 +244,7 @@ untrusted_case() {  # untrusted_case <name> <reason> [trusted_authors]
   eq "$1: nothing claimed or implemented" "0|0" "$(writes)|$(grep -c . "$CLAUDE_LOG")"
   grep -qF "$2" "$NOTIFY_LOG" && grep -q -- "--item-id" "$NOTIFY_LOG" && ok "$1: pushed for Approve with the reason" || bad "$1: push ($(cat "$NOTIFY_LOG"))"
   grep -qF "Unattended run not allowed: $2" "$Q/drafts/"*.md && ok "$1: reason shown at the gate" || bad "$1: reason in item"
+  eq "$1: no ticket text kept for the review guard" 0 "$(find "$EA_AGENT_DIR/state" -name ticket.md 2>/dev/null | wc -l | tr -d ' ')"
 }
 reset; mkissue 1 stranger "ready"
 untrusted_case "untrusted author" "created by stranger, not a trusted author"
@@ -265,6 +266,8 @@ run_job; eq "implemented run exits ok" "0" "$?"
 eq "issue claimed and moved (logins compared case-insensitively)" "tom|In Progress" "$(state 1)"
 case "$(ls "$Q/completed")" in *-ticket-gh-1.md) ok "completed/ record present" ;; *) bad "completed/ holds [$(ls "$Q/completed")]" ;; esac
 eq "drafts/ reconciled" "" "$(drafts)"
+eq "the trusted ticket text is kept for the review guard" "$(printf '# Fix thing 1\n\nDo it.\n- [ ] works')" \
+  "$(cat "$EA_AGENT_DIR/state/pr-pipeline/$(ls "$Q/completed" | sed "s/\.md$//")/ticket.md" 2>/dev/null)"
 grep -q "Autopilot implemented acme/web#1" "$NOTIFY_LOG" && ok "success push" || bad "success push"
 for r in "Bash(gh issue view" "Bash(gh pr view" "Bash(gh pr list" "Bash(gh api" "Bash(curl"; do
   grep -qF -- "$r" "$CLAUDE_ARGS" && bad "unattended run grants $r" || ok "unattended run omits $r"

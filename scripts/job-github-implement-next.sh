@@ -126,6 +126,7 @@ if [ -n "$gate" ]; then
   log "awaiting Approve for ${ITEM}: ${gate}"
   exit 0
 fi
+record_ticket_text "$ITEM" "$(jq -r "${I}.title // \"\"" "$TMPD/issue.json")" "$TMPD/body"
 
 # --- 5. claim + implement -------------------------------------------------------------------------
 # A watchdog kill must not leave the issue claimed with nobody working on it.

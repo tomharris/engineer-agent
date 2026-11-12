@@ -218,6 +218,8 @@ eq "ticket claimed and moved" "acc-me|In Progress" "$(state BILL-1)"
 ITEM="$(ls "$Q/completed")"
 case "$ITEM" in *-ticket-BILL-1.md) ok "completed/ record present" ;; *) bad "completed/ holds [$ITEM]" ;; esac
 eq "drafts/ reconciled" "" "$(drafts)"
+eq "the trusted ticket text is kept for the review guard" "$(printf '# Fix BILL-1\n\nDo it.\n- [ ] works')" \
+  "$(cat "$EA_AGENT_DIR/state/pr-pipeline/${ITEM%.md}/ticket.md" 2>/dev/null)"
 eq "in-flight marker present during the run" "${ITEM} markers=bill" "$(cat "$CLAUDE_LOG")"
 eq "in-flight marker removed after" "" "$(ls "$EA_AGENT_DIR/state/implement-inflight" 2>/dev/null)"
 grep -q "Autopilot implemented BILL-1" "$NOTIFY_LOG" && ok "success push" || bad "success push"
@@ -247,6 +249,7 @@ untrusted_case() {  # untrusted_case <name> <expected reason fragment> [trusted_
   grep -q -- "--item-id" "$NOTIFY_LOG" && grep -qF "$2" "$NOTIFY_LOG" \
     && ok "$1: pushed for Approve with the reason" || bad "$1: push ($(cat "$NOTIFY_LOG"))"
   grep -qF "Unattended run not allowed: $2" "$Q/drafts/"*.md && ok "$1: reason shown at the gate" || bad "$1: reason in item"
+  eq "$1: no ticket text kept for the review guard" 0 "$(find "$EA_AGENT_DIR/state" -name ticket.md 2>/dev/null | wc -l | tr -d ' ')"
 }
 reset; mkissue BILL-1 Bug acc-stranger
 untrusted_case "untrusted creator" "created by acc-stranger, not a trusted author"

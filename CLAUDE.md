@@ -67,6 +67,10 @@ docs/architecture/          detailed design rationale (read before changing that
   `pr-comment`, `jira-comment`, `jira-transition` and `security-review`. QA scripts run only from
   bash, from a nonce-checked run spec; model runs get `--setting-sources user --strict-mcp-config`
   and a credential-free env, and see only trusted ticket text.
+- **The AC guard only narrows review findings against trusted ticket text**: a finding is skipped
+  only when a nonce-checked judge verdict quotes one whole requirement of trust-checked ticket text
+  (`ac_guard_split`), and only if `medium`/`low`; the judge sees bash-trimmed findings
+  (`ac_guard_input`). No text or a failed judgment keeps every finding.
 - **`after_pr` (`pr-pipeline.sh`) keeps every external write in bash**: PR from the bash-recorded
   branch, checks, logs, `gh pr ready`, the security adapter, Slite note, PR/Jira comments, Jira transition and
   Slack announce are bash, each behind its own tier (`pr-ready`, `security-review`, `qa-publish`,
