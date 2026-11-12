@@ -81,6 +81,10 @@ cat > "$TMP/bin/gh" <<'EOF'
 printf '%s\n' "$*" >> "$ST/calls"
 head() { git --git-dir="$ORIGIN" rev-parse "refs/heads/$BR"; }
 case "$1 $2" in
+  "api user") echo "${GH_ME:-tom}" ;;
+  "api repos/"*)   # repository activity: $ST/activity.json; GH_API_FAIL=1 fails it
+    [ -z "${GH_API_FAIL:-}" ] || exit 1
+    cat "$ST/activity.json" 2>/dev/null || echo '[]' ;;
   "pr list")
     case "$*" in
       *headRefName*)   # open PRs, as JSON in $ST/openprs.json, through the caller's --jq
@@ -116,7 +120,9 @@ cat > "$TMP/bin/claude" <<'EOF'
 printf '%s\n' "$*" >> "$CLAUDE_ARGS"
 case "$*" in
   *"CI failed on pull request"*|*"A security review of pull request"*)
-    [ "${FIX:-push}" = push ] && { echo fix >> fixed.txt; git add fixed.txt; git commit -qm fix; git push -q origin "HEAD:refs/heads/$BR"; } ;;
+    [ "${FIX:-push}" = push ] && { b="$(git rev-parse HEAD)"; echo fix >> fixed.txt; git add fixed.txt; git commit -qm fix; git push -q origin "HEAD:refs/heads/$BR"
+      jq --arg b "$b" --arg a "$(git rev-parse HEAD)" --arg l "${FIX_PUSHER:-tom}" '[{before: $b, after: $a, actor: {login: $l}}] + .' \
+        <(cat "$ST/activity.json" 2>/dev/null || echo '[]') > "$ST/activity.fix" && mv "$ST/activity.fix" "$ST/activity.json"; } ;;
   *"Browser-test the change"*)
     nonce="$(printf '%s' "$*" | sed -nE "s/.*'VERDICT: pass ([0-9a-f]+)'.*/\1/p")"
     pinned="$(printf '%s' "$*" | sed -nE 's/.*select_browser with deviceId ([0-9a-f-]+);.*/\1/p')"
@@ -666,6 +672,121 @@ eq "the base branch is not recorded" "" "$(rec "$TMP/repo")"
 git -C "$TMP/repo" checkout -q --detach
 eq "a detached HEAD is not recorded" "" "$(rec "$TMP/repo")"
 git -C "$TMP/repo" checkout -q main
+
+echo "== resume on new commits"
+# sweep [job] — one autopilot tick's resume sweep; relaunched pipelines run in the foreground.
+sweep() { ( PLUGIN_ROOT="$REPO_ROOT"; . "$REPO_ROOT/scripts/lib-paths.sh"; . "$REPO_ROOT/scripts/lib-confined-run.sh"
+            log() { :; }; LOG_FILE=/dev/null EA_PR_PIPELINE_FOREGROUND=1 pr_pipeline_resume_stopped "${1:-web.auto}" ) >/dev/null 2>&1; }
+# push_commit — PUSHER (default tom, the gh user) pushes to the PR branch; its checks pass. The
+# push lands in the repository activity unless UNLISTED is set.
+push_commit() {
+  local w before after; w="$(mktemp -d)"; git clone -q --branch "$BR" "$ORIGIN" "$w" 2>/dev/null
+  before="$(git --git-dir="$ORIGIN" rev-parse "refs/heads/$BR")"
+  ( cd "$w" && echo "$RANDOM" >> human.txt && git add human.txt && git commit -qm human && git push -q origin "HEAD:refs/heads/$BR" )
+  after="$(git --git-dir="$ORIGIN" rev-parse "refs/heads/$BR")"
+  printf 'pass\tlint\thttps://x\n' > "$ST/checks.${after}"
+  [ -n "${UNLISTED:-}" ] || list_push "$before" "$after" "${PUSHER:-tom}"
+}
+# list_push <before> <after> <login> — a push in the repository activity (newest first).
+list_push() {
+  jq --arg b "$1" --arg a "$2" --arg l "$3" '[{before: $b, after: $a, actor: {login: $l}}] + .' \
+    <(cat "$ST/activity.json" 2>/dev/null || echo '[]') > "$ST/activity.tmp" && mv "$ST/activity.tmp" "$ST/activity.json"
+}
+pipeline_runs() { grep -c '^pr list' "$ST/calls"; }
+stopped_on_ci() {
+  reset; write_config '["pr-ready"]' '{ mark_ready: true, ci: { fix_attempts: 0 } }'
+  printf 'fail\ttest\thttps://x\n' > "$ST/checks.default"
+  run >/dev/null
+}
+
+stopped_on_ci
+eq "precondition: the pipeline stopped" stopped "$(res)"
+push_commit; sweep
+eq "a new commit on a stopped PR resumes the pipeline" ready "$(res)"
+eq "the resumed pipeline marks the PR ready" 1 "$(readied)"
+
+stopped_on_ci; n="$(pipeline_runs)"; sweep
+eq "no new commit: not resumed" "stopped|$n" "$(res)|$(pipeline_runs)"
+
+stopped_on_ci; n="$(pipeline_runs)"; : > "$NOTIFY_LOG"
+PUSHER=mallory push_commit; sweep
+eq "someone else's push is not resumed unattended" "stopped|$n" "$(res)|$(pipeline_runs)"
+grep -q "urgent.*${BR} was pushed by mallory, so its stopped PR pipeline was not resumed" "$NOTIFY_LOG" \
+  && ok "an urgent push names who pushed" || bad "push: $(cat "$NOTIFY_LOG")"
+sweep
+eq "and is sent once, not every tick" 1 "$(grep -c 'was pushed by mallory' "$NOTIFY_LOG")"
+push_commit; sweep
+eq "and your own push on top of it does not resume it either" "stopped|$n" "$(res)|$(pipeline_runs)"
+
+stopped_on_ci; n="$(pipeline_runs)"
+PUSHER=mallory push_commit; push_commit; sweep
+eq "your push on top of someone else's since the stop is not resumed" "stopped|$n" "$(res)|$(pipeline_runs)"
+
+stopped_on_ci; n="$(pipeline_runs)"
+push_commit; GH_API_FAIL=1 sweep
+eq "a pusher that cannot be checked is not resumed" "stopped|$n" "$(res)|$(pipeline_runs)"
+sweep
+eq "and is resumed once it can be" ready "$(res)"
+
+stopped_on_ci; n="$(pipeline_runs)"
+UNLISTED=1 push_commit; sweep
+eq "a push not yet in the activity is not resumed" "stopped|$n" "$(res)|$(pipeline_runs)"
+list_push "$(cat "$PD/stopped_head")" "$(git --git-dir="$ORIGIN" rev-parse "refs/heads/$BR")" tom; sweep
+eq "and is resumed once it shows up" ready "$(res)"
+
+# The fix run pushes as FIX_PUSHER; CI keeps failing, so the run stops after its fix.
+stopped_after_fix() {
+  reset; write_config '["pr-ready"]' '{ mark_ready: true, ci: { fix_attempts: 1 } }'
+  printf 'fail\ttest\thttps://x\n' > "$ST/checks.default"
+  run >/dev/null
+}
+stopped_after_fix; n="$(pipeline_runs)"; push_commit; sweep
+eq "your push after the run's own fix push resumes it" "ready|$((n+1))" "$(res)|$(pipeline_runs)"
+
+FIX_PUSHER=mallory stopped_after_fix; n="$(pipeline_runs)"; push_commit; sweep
+eq "someone else's push while the run was going is not resumed" "stopped|$n" "$(res)|$(pipeline_runs)"
+
+stopped_on_ci; push_commit; checked="$(git --git-dir="$ORIGIN" rev-parse "refs/heads/$BR")"; PUSHER=mallory push_commit
+n="$(grep -c statusCheckRollup "$ST/calls")"; before="$(cat "$PD/stopped_head" "$PD/trusted_from")"
+bash "$PIPE" --item "$ITEM" --expect-head "$checked" >/dev/null 2>&1
+eq "a head that moved after the check does not run" "stopped|$n" "$(res)|$(grep -c statusCheckRollup "$ST/calls")"
+eq "and the watch is left for the next sweep" "$before" "$(cat "$PD/stopped_head" "$PD/trusted_from")"
+
+stopped_on_ci
+push_commit; rm -f "$ST/checks.$(git --git-dir="$ORIGIN" rev-parse "refs/heads/$BR")"
+n0="$(pipeline_runs)"; sweep; n="$(pipeline_runs)"
+eq "a new commit that still fails CI is resumed once" "stopped|$((n0+1))" "$(res)|$n"
+sweep
+eq "a resumed run that stops again is not resumed again on the same head" "stopped|$n" "$(res)|$(pipeline_runs)"
+
+reset; write_config '["pr-ready"]'
+run >/dev/null; n="$(pipeline_runs)"; push_commit; sweep
+eq "a PR the pipeline finished is not resumed" "ready|$n" "$(res)|$(pipeline_runs)"
+
+stopped_on_ci; printf 'pass\tlint\thttps://x\n' > "$ST/checks.default"; run >/dev/null
+n="$(pipeline_runs)"; push_commit; sweep
+eq "a stop that a later run got past is not resumed" "ready|$n" "$(res)|$(pipeline_runs)"
+
+stopped_on_ci; push_commit
+mkdir "$PD/lock"; sleep 300 & echo $! > "$PD/lock/pid"; n="$(pipeline_runs)"
+sweep
+eq "a pipeline still running is not launched twice" "$n" "$(pipeline_runs)"
+kill "$(cat "$PD/lock/pid")" 2>/dev/null; rm -rf "$PD/lock"
+
+stopped_on_ci; push_commit; n="$(pipeline_runs)"
+sed -i.bak 's/	web\.auto	/	web.other	/' "$EA_AGENT_DIR/state/autopilot-items.tsv"
+sweep
+eq "an item another job picked is left to that job's sweep" "stopped|$n" "$(res)|$(pipeline_runs)"
+mv "$EA_AGENT_DIR/state/autopilot-items.tsv.bak" "$EA_AGENT_DIR/state/autopilot-items.tsv"; sweep
+eq "and that job's own sweep still resumes it" ready "$(res)"
+
+stopped_on_ci; rm -f "$Q/completed/$ITEM"; push_commit; sweep; n="$(pipeline_runs)"; sweep
+eq "an item the pipeline refused is not resumed again" "refused|$n" "$(res)|$(pipeline_runs)"
+
+stopped_on_ci; n="$(pipeline_runs)"
+git --git-dir="$ORIGIN" update-ref -d "refs/heads/$BR"
+sweep
+eq "a deleted branch is not resumed" "stopped|$n" "$(res)|$(pipeline_runs)"
 
 echo "== validation"
 valid() { ( . "$REPO_ROOT/scripts/lib-paths.sh"; . "$REPO_ROOT/scripts/lib-jobs.sh"

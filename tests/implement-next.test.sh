@@ -266,6 +266,16 @@ run_job
 eq "trusted text edits plus untrusted non-text edits still run unattended" "acc-me|In Progress|1" \
   "$(state BILL-1)|$(ls "$Q/completed" | grep -c ticket-BILL-1)"
 
+echo "== resume a stopped pipeline"
+. "$SCRIPT_DIR/lib-resume-fixture.sh"
+printf '#!/bin/bash\nprintf "%%s\\n" "$*" >> "%s"\n' "$TMP/pipeline.log" > "$TMP/bin/pipeline"; chmod +x "$TMP/bin/pipeline"
+: > "$TMP/pipeline.log"; reset; write_config "[implement, jira-claim]"
+awk '{print} /^        guards: /{print "        after_pr: { mark_ready: true }"}' "$EA_CONFIG_FILE" > "$TMP/c" && mv "$TMP/c" "$EA_CONFIG_FILE"
+stopped_pipeline_fixture bill.auto stopped-ticket-BILL-9.md
+PATH="$TMP/resume-bin:$PATH" EA_PR_PIPELINE_BIN="$TMP/bin/pipeline" EA_PR_PIPELINE_FOREGROUND=1 run_job
+eq "a stopped pipeline whose branch moved resumes, even when no new pick is allowed" \
+  "--item stopped-ticket-BILL-9.md --expect-head $RESUME_NEW|0" "$(cat "$TMP/pipeline.log")|$(grep -c . "$CLAUDE_LOG")"
+
 echo "== max_in_flight"
 reset; write_config "[implement, jira-claim]"
 mkdir -p "$EA_AGENT_DIR/state/implement-inflight"

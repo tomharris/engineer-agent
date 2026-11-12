@@ -48,6 +48,10 @@ IFS='|' read -r SLUG IDX _ <<< "$(jobs_enumerate | awk -F'|' -v k="$JOB" '($1 ".
 [ -n "${SLUG:-}" ] || { echo "no such job: $JOB" >&2; exit 2; }
 P="projects.${SLUG}.job.${IDX}"
 
+# A stopped PR pipeline resumes once its branch has new commits; before the guards, which only
+# limit new picks.
+pr_pipeline_resume_stopped "$JOB"
+
 # --- 1. guards ------------------------------------------------------------------------------------
 max="$(_jcfg "${P}.max_in_flight")"; max="${max:-1}"
 cap="$(_jcfg "${P}.daily_cap")";     cap="${cap:-1}"

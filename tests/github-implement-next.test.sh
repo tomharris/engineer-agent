@@ -282,6 +282,14 @@ case "$(cat "$TMP/pipeline.log")" in "--item "*-ticket-gh-1.md) ok "after_pr lau
 awk '{print} /^        guards: /{print "        after_pr: { mark_ready: true }"}' "$EA_CONFIG_FILE" > "$TMP/c" && mv "$TMP/c" "$EA_CONFIG_FILE"
 FAKE_IMPL=fail run_job
 eq "a failed implementation launches no pipeline" "" "$(cat "$TMP/pipeline.log")"
+
+. "$SCRIPT_DIR/lib-resume-fixture.sh"
+: > "$TMP/pipeline.log"; reset; write_config "[implement, github-claim]"
+awk '{print} /^        guards: /{print "        after_pr: { mark_ready: true }"}' "$EA_CONFIG_FILE" > "$TMP/c" && mv "$TMP/c" "$EA_CONFIG_FILE"
+stopped_pipeline_fixture web.auto stopped-ticket-gh-9.md
+PATH="$TMP/resume-bin:$PATH" run_job
+eq "a stopped pipeline whose branch moved resumes, even when no new pick is allowed" \
+  "--item stopped-ticket-gh-9.md --expect-head $RESUME_NEW|0" "$(cat "$TMP/pipeline.log")|$(grep -c . "$CLAUDE_LOG")"
 unset EA_PR_PIPELINE_BIN EA_PR_PIPELINE_FOREGROUND
 
 reset; write_config "[implement, github-claim]"
