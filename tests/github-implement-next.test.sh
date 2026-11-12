@@ -39,7 +39,6 @@ cat > "$TMP/bin/git" <<'EOF'
 args=("$@")
 for ((i=0;i<${#args[@]};i++)); do
   case "${args[i]}" in
-    ls-remote) [ -z "${LS_REMOTE:-}" ] || printf "%s\trefs/heads/b\n" "$LS_REMOTE"; exit 0;;
     symbolic-ref) echo "origin/main"; exit 0;;
     rev-parse) echo "deadbee"; exit 0;;
     worktree)
@@ -288,7 +287,7 @@ eq "a failed implementation launches no pipeline" "" "$(cat "$TMP/pipeline.log")
 : > "$TMP/pipeline.log"; reset; write_config "[implement, github-claim]"
 awk '{print} /^        guards: /{print "        after_pr: { mark_ready: true }"}' "$EA_CONFIG_FILE" > "$TMP/c" && mv "$TMP/c" "$EA_CONFIG_FILE"
 stopped_pipeline_fixture web.auto stopped-ticket-gh-9.md
-LS_REMOTE=new run_job
+PATH="$TMP/resume-bin:$PATH" run_job
 eq "a stopped pipeline whose branch moved resumes, even when no new pick is allowed" \
   "--item stopped-ticket-gh-9.md|0" "$(cat "$TMP/pipeline.log")|$(grep -c . "$CLAUDE_LOG")"
 unset EA_PR_PIPELINE_BIN EA_PR_PIPELINE_FOREGROUND

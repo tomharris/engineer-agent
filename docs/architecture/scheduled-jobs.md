@@ -199,11 +199,18 @@ reader will otherwise "fix" back:
 - **A stop resumes on new commits.** `stop()` writes the remote branch tip to
   `state/pr-pipeline/<item>/stopped_head`, and every run clears that file at start. Each
   implement-next tick runs `pr_pipeline_resume_stopped` *before* its guards, since the guards only
-  limit new picks. It relaunches the job's ledger items whose branch tip moved, comparing with
-  `git ls-remote` rather than `gh`, so it needs no repo resolution. The sweep deletes the file
-  before it relaunches. That makes one push one resume, and a resumed run that stops again waits
-  for the next push. A deleted branch ends the watch, and an unreachable remote skips the item for
-  that tick. The pipeline's own lock covers a run already in progress.
+  limit new picks. It relaunches the job's ledger items whose branch tip (`git ls-remote`) moved.
+  The sweep deletes the file before it relaunches. That makes one push one resume, and a resumed
+  run that stops again waits for the next push. A deleted branch ends the watch, and an
+  unreachable remote skips the item for that tick. The pipeline's own lock covers a run already in
+  progress.
+- **Only your own pushes resume.** A resumed run executes branch code (fix-run builds,
+  `browser.serve` unconfined), so new commits would otherwise bypass the trust gate the original
+  implementation passed. `resume_push_verdict` walks the repository activity API (`before`/`after`
+  pairs) from the tip back to `stopped_head`, and every push on the way must have the gh user as its
+  `actor`. It checks the pusher, not commit authors, which anyone can forge. Any other pusher ends
+  the watch with one urgent push and the manual command, and does so even when your push sits on
+  top of theirs. If the activity API fails, or the push isn't listed yet, the item waits a tick.
 
 **`after_pr` handoff stages** (spec `docs/superpowers/specs/2026-11-10-after-pr-handoff-design.md`):
 security → CI → browser → QA → ready → transition → announce. Things a reader will otherwise
