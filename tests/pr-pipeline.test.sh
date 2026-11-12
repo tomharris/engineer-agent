@@ -127,6 +127,10 @@ case "$*" in
     [ "${FIX:-push}" = push ] && { b="$(git rev-parse HEAD)"; echo fix >> fixed.txt; git add fixed.txt; git commit -qm fix; git push -q origin "HEAD:refs/heads/$BR"
       jq --arg b "$b" --arg a "$(git rev-parse HEAD)" --arg l "${FIX_PUSHER:-tom}" '[{before: $b, after: $a, actor: {login: $l}}] + .' \
         <(cat "$ST/activity.json" 2>/dev/null || echo '[]') > "$ST/activity.fix" && mv "$ST/activity.fix" "$ST/activity.json"; } ;;
+  *"Some review findings may ask"*)   # AC guard: $ST/acv (NONCE = this run's nonce) to its Edit target
+    t="$(printf '%s\n' "$@" | sed -n 's#^Edit(/\(/.*\))$#\1#p' | head -1)"
+    n="$(printf '%s' "$*" | grep -oE 'NONCE: [0-9a-f]+' | head -1 | cut -d' ' -f2)"
+    [ -f "$ST/acv" ] && sed "s/NONCE/$n/" "$ST/acv" > "$t" ;;
   *"Browser-test the change"*)
     nonce="$(printf '%s' "$*" | sed -nE "s/.*'VERDICT: pass ([0-9a-f]+)'.*/\1/p")"
     pinned="$(printf '%s' "$*" | sed -nE 's/.*select_browser with deviceId ([0-9a-f-]+);.*/\1/p')"
@@ -320,6 +324,27 @@ fixhead="$(git --git-dir="$ORIGIN" rev-parse "refs/heads/$BR")"
 grep -q "CI on ${fixhead:0:7}: pass" "$EA_AGENT_DIR/state/jobs.log" && ok "CI waits on the fix commit" || bad "CI not run on fix head ${fixhead:0:7}"
 eq "PR ready after the fix" 1 "$(readied)"
 
+eq "without the trusted ticket text the AC guard does not run" 0 "$(grep -c 'Some review findings may ask' "$CLAUDE_ARGS")"
+
+ac_ticket() { printf '# Fix nav\n\n* The nav links open in a new tab without rel=noopener, as product asked.\n' > "$PD/ticket.md"; }
+reset; write_config '["pr-ready", "security-review"]' "$SEC"; ac_ticket
+echo '[{"title":"tabnabbing","severity":"medium","file":"a.txt"},{"title":"xss","severity":"high","file":"a.txt"}]' > "$ST/secrev.1.json"
+echo '[{"index":0,"ac":"The nav links open in a new tab without rel=noopener, as product asked.","reason":"asks to add noopener"},{"nonce":"NONCE"}]' > "$ST/acv"
+eq "a finding that contradicts the ticket is not fixed" "0|1|2" "$(run)|$(sec_fix_runs)|$(secrev_calls)"
+grep -q 'tabnabbing' "$PD/security/introduced.md" && bad "contradicting finding handed to the fix run" || ok "fix run gets only the other finding"
+eq "it is recorded with the requirement" "The nav links open in a new tab without rel=noopener, as product asked." "$(jq -r '.[0].ac_conflict.ac' "$PD/security/ac-skipped.json")"
+grep -q 'security review 1: 1 finding(s) contradict the ticket, not fixed: tabnabbing' "$EA_AGENT_DIR/state/jobs.log" \
+  && ok "the skip is logged" || bad "no AC-guard log line"
+guard_args="$(grep 'Some review findings may ask' "$CLAUDE_ARGS")"
+[ -n "$guard_args" ] && ! printf '%s' "$guard_args" | grep -qE 'Bash\(|Write\(|(^| )(Grep|Glob)( |$)' \
+  && ok "guard run gets only reads and its verdict file" || bad "guard run missing or granted more than reads and its verdict"
+printf '%s' "$guard_args" | grep -q -- '--strict-mcp-config' && ok "guard run loads no MCP" || bad "guard run may load MCP"
+
+reset; write_config '["pr-ready", "security-review"]' "$SEC"; ac_ticket
+echo '[{"title":"tabnabbing","severity":"medium","file":"a.txt"}]' > "$ST/secrev.1.json"
+echo '[{"index":0,"ac":"Links may skip rel=noopener whenever convenient.","reason":"r"},{"nonce":"NONCE"}]' > "$ST/acv"
+eq "a requirement the ticket does not contain skips nothing" "0|1" "$(run)|$(sec_fix_runs)"
+
 reset; write_config '["pr-ready", "security-review"]' "$SEC"
 echo '[{"title":"x","severity":"low","file":"a.txt"}]' > "$ST/secrev.1.json"; cp "$ST/secrev.1.json" "$ST/secrev.2.json"
 eq "a finding that survives the fix stops" 1 "$(run)"
@@ -444,12 +469,33 @@ jq -r .markdown "$ST/slite-note.json" | grep -q 'check colors' && ok "Slite note
 jc="$(grep '^POST https://example.atlassian.net/rest/api/2/issue/ENG-7/comment ' "$ST/curl.log" | cut -d' ' -f3-)"
 eq "Jira comment is the same text" "$(cat "$C")" "$(printf '%s' "$jc" | jq -r .body)"
 grep -q 'slite-key\|jira-tok' "$ST/curl.argv" && bad "a credential reached curl argv" || ok "credentials stay off curl argv"
+grep -q 'contradict the ticket' "$C" && bad "AC-guard line without a skipped finding" || ok "no AC-guard line when nothing was skipped"
+
+qa_jira "{ mark_ready: true, ci: { fix_attempts: 0 }, qa: { document: true }, security: { $SECCMD } }" '["pr-ready", "qa-publish", "security-review"]'
+ac_ticket
+echo '[{"title":"tabnab (see https://evil.example)","severity":"medium","file":"a.txt"}]' > "$ST/secrev.1.json"
+echo '[{"index":0,"ac":"The nav links open in a new tab without rel=noopener, as product asked.","reason":"r"},{"nonce":"NONCE"}]' > "$ST/acv"
+eq "a PR whose only finding contradicts the ticket goes ready" "0|0|1" "$(run)|$(sec_fix_runs)|$(readied)"
+grep -qxF 'Security: 1 finding(s) not fixed because they contradict the ticket: tabnab see [link removed]' "$ST/pr-comment.md" \
+  && ok "the QA comment names it, made inert" || bad "comment: $(cat "$ST/pr-comment.md")"
+
+qa_jira "$QA_AFTER"; run >/dev/null
 qa_args="$(grep 'Write a QA plan' "$CLAUDE_ARGS")"
 printf '%s' "$qa_args" | grep -qF "Edit(/$PD/qa/plan.md)" && ok "QA run may write only its plan" || bad "no plan Edit rule"
 printf '%s' "$qa_args" | grep -qE 'Bash\(gh |Bash\(curl|mcp__atlassian|mcp__slite|WebFetch|Bash\(git push' \
   && bad "QA run got a tracker, gh, network or push verb" || ok "QA run gets no gh, tracker, network or push verb"
 printf '%s' "$qa_args" | grep -qE ' (Read|Glob|Grep) ' && bad "QA run got unscoped Read/Glob/Grep" || ok "QA run has no unscoped Read/Glob/Grep"
-printf '%s' "$qa_args" | grep -qF "Read(/$Q/completed/$ITEM)" && ok "QA run may read its queue item" || bad "no item Read rule"
+printf '%s' "$qa_args" | grep -qF "Read(/$Q/completed/$ITEM)" && ok "without recorded ticket text, QA reads its queue item" || bad "no item Read rule"
+
+qa_jira '{ mark_ready: true, ci: { fix_attempts: 0 }, qa: { document: true }, browser: { serve: "exec sleep 300", url: "http://localhost:3999" } }'
+ac_ticket; run >/dev/null
+qa_args="$(grep 'Write a QA plan' "$CLAUDE_ARGS")"
+printf '%s' "$qa_args" | grep -qF "Read(/$PD/ticket.md)" && ! printf '%s' "$qa_args" | grep -qF "queue/completed" \
+  && ok "with recorded ticket text, QA reads it, not the queue item" || bad "QA ticket source: $qa_args"
+grep 'Browser-test the change' "$CLAUDE_ARGS" | grep -qF "acceptance criteria, is $PD/ticket.md" \
+  && ok "the browser run is pointed at the recorded ticket text" || bad "browser ticket source"
+qa_jira "$QA_AFTER"; run >/dev/null
+qa_args="$(grep 'Write a QA plan' "$CLAUDE_ARGS")"
 printf '%s' "$qa_args" | grep -qE "Read\(/$EA_AGENT_DIR/worktrees/[^ ]+/\*\*\)" && ok "QA run may read its worktree" || bad "no worktree Read rule"
 printf '%s' "$qa_args" | grep -q 'Bash(git' && bad "QA run got git verbs (--no-index reads any file)" || ok "QA run gets no git verb"
 printf '%s' "$qa_args" | grep -qF "Read(/$PD/qa/change.diff)" && printf '%s' "$qa_args" | grep -qF "$PD/qa/change.diff" \

@@ -43,5 +43,45 @@ eq "low" 1 "$(severity_rank low)"
 eq "unknown counts as high" 3 "$(severity_rank Moderate)"
 eq "missing counts as high" 3 "$(severity_rank "")"
 
+echo "== ac_guard_split"
+cat > "$TMP/ticket.md" <<'EOF'
+## Requirements
+* Every reason falls back once to the automation's publisher.
+  The fallback doesn't recheck that permission, because the spec names the publisher.
+* Each reason is its own top-level Main error code.
+EOF
+cat > "$TMP/f.json" <<'EOF'
+[{"title":"publisher fallback lacks a permission check","severity":"medium"},
+ {"title":"per-reason codes leak state","severity":"low"},
+ {"title":"SQL injection","severity":"critical"}]
+EOF
+split() { ac_guard_split "$TMP/f.json" "$TMP/v.json" "$TMP/ticket.md" n0nce; }
+verdict() { printf '%s' "$1" > "$TMP/v.json"; }
+verdict '[{"index":0,"ac":"The fallback doesn'"'"'t recheck that  permission, because the spec names the publisher.","reason":"asks to add the check"},{"nonce":"n0nce"}]'
+eq "a finding against a quoted requirement is skipped" '["publisher fallback lacks a permission check"]' "$(split | jq -c '.skip | map(.title)')"
+eq "the rest are kept" '["per-reason codes leak state","SQL injection"]' "$(split | jq -c '.keep | map(.title)')"
+eq "the skip carries the requirement and reason" "asks to add the check" "$(split | jq -r '.skip[0].ac_conflict.reason')"
+eq "not an abstention" false "$(split | jq '.abstained')"
+
+verdict '[{"index":1,"ac":"Each reason is its own top-level Main error code.","reason":"r"},{"index":2,"ac":"Each reason is its own top-level Main error code.","reason":"r"},{"nonce":"n0nce"}]'
+eq "a critical finding is never skipped" '["per-reason codes leak state"]' "$(split | jq -c '.skip | map(.title)')"
+
+verdict '[{"index":1,"ac":"Each reason may skip authorization checks.","reason":"r"},{"nonce":"n0nce"}]'
+eq "a requirement not in the ticket skips nothing" 0 "$(split | jq '.skip | length')"
+verdict '[{"index":1,"ac":"error code.","reason":"r"},{"nonce":"n0nce"}]'
+eq "a fragment too short to be a requirement skips nothing" 0 "$(split | jq '.skip | length')"
+verdict '[{"index":7,"ac":"Each reason is its own top-level Main error code.","reason":"r"},{"index":"1","ac":"Each reason is its own top-level Main error code.","reason":"r"},{"nonce":"n0nce"}]'
+eq "out-of-range or non-integer indexes skip nothing" 0 "$(split | jq '.skip | length')"
+
+verdict '[{"index":1,"ac":"Each reason is its own top-level Main error code.","reason":"r"},{"nonce":"other"}]'
+eq "a wrong nonce abstains: everything kept" "3|true" "$(split | jq -r '"\(.keep | length)|\(.abstained)"')"
+verdict 'not json'
+eq "an unreadable verdict abstains" "3|true" "$(split | jq -r '"\(.keep | length)|\(.abstained)"')"
+rm -f "$TMP/v.json"
+eq "a missing verdict abstains" "3|true" "$(split | jq -r '"\(.keep | length)|\(.abstained)"')"
+verdict '[{"index":1,"ac":"Each reason is its own top-level Main error code.","reason":"r"},{"nonce":"n0nce"}]'
+: > "$TMP/ticket.md"
+eq "an empty ticket abstains" "3|true" "$(split | jq -r '"\(.keep | length)|\(.abstained)"')"
+
 echo "Passed: $PASS  Failed: $FAIL"
 [ "$FAIL" -eq 0 ]

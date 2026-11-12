@@ -163,6 +163,7 @@ if ! crqa_review "$WT" "$W" "$REPO" "$PR" "$BASE" "$SEC_CMD" "$SEC_TO" "$BUDGET"
   finish error 1
 fi
 crqa_blocking "$W" > "$W/blocking.json" || { err "unreadable review findings"; finish error 1; }
+crqa_ac_guard "$W" "${EA_AC_GUARD_BUDGET_USD:-0.50}"
 if [ "$(jq length "$W/blocking.json")" -gt 0 ]; then
   crqa_review_comment "$W/blocking.json" "$TMPD/c.md"; pr_comment "$TMPD/c.md"
   finish review-stopped 0

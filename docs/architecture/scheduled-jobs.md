@@ -93,7 +93,7 @@ Read-only: search + dev-panel reads, never an assign or transition. Four things 
   and the queue item come from **one** fetch and the confined run has **no Jira access**, so the
   model reads exactly the text that was checked. Keep both true: do not add a Jira verb, `curl` or
   a `gh` text read to the unattended allowlist, do not start QA from the unattended implementation
-  run (QA belongs to `after_pr`, which reads only the queue item), and do not
+  run (QA belongs to `after_pr`, which reads only the recorded ticket text or the queue item), and do not
   re-fetch the ticket after the check. Reasons name
   accountIds only, never display names (attacker-chosen text reaching the push).
 - **The listener trusts `state/autopilot-items.tsv`, never frontmatter.** Queue files can be
@@ -248,7 +248,9 @@ security → CI → browser → QA → ready → transition → announce. Things
   expect_contains}` run by `qa_checks` with curl: allowlisted methods, a path that must start with
   `/` and has no `..`, bodies on stdin (`@file` in a body is text). Model-written shell would run
   unconfined with your environment, a bigger residual than `browser.serve`.
-- **The QA run reads only its worktree, its queue item and `change.diff`.** Whatever it reads can be
+- **The QA run reads only its worktree, its ticket text and `change.diff`.** The ticket text is
+  `state/pr-pipeline/<item>/ticket.md` when implement-next recorded it (`ticket_source`), else the
+  queue item, which the implementation run can rewrite without the ticket (AIA-535/536). Whatever it reads can be
   published. Bash writes the diff; the run gets no git verb (`git diff --no-index` reads any file),
   no Glob/Grep (unscoped by path), no tracker, `gh` or network verb, and is told the queue item,
   never the live ticket.
@@ -294,8 +296,19 @@ Things a reader will otherwise "fix" back:
   scopes Grep/Glob, so neither is granted bare) writes nonce-bearing findings; an unmet AC is
   `high`. The `security.command` adapter runs as in `after_pr`, and only findings the PR introduced
   count (`security_introduced`). Severity is case-insensitive; unknown or missing counts as `high`.
-  Anything `medium`+ ⇒ one PR comment, ledger `review-stopped`. A review that cannot complete is an
-  error, never a pass.
+  Anything `medium`+ ⇒ one PR comment, ledger `review-stopped`, after the AC guard below. A review
+  that cannot complete is an error, never a pass.
+- **AC guard (cr-qa review and `after_pr` security).** Reviewers flag behaviour a ticket asks for
+  (AIA-536: the publisher fallback without a permission recheck, per-reason error codes), and fix
+  runs then undo the ticket. A read-only judge run (`ac_guard_prompt`; reads only the findings and
+  the ticket, writes only its verdict) names the conflicting findings; bash (`ac_guard_split`)
+  skips one only when the nonce-checked verdict quotes a requirement of 20+ characters found
+  verbatim in the ticket, and never a `critical` one. A failed or unusable judgment abstains: every
+  finding is kept. The ticket text must be trusted, or a ticket edit could suppress findings:
+  cr-qa uses its trust-checked `ticket.md`; `after_pr` uses `state/pr-pipeline/<item>/ticket.md`,
+  written by implement-next from its one fetch only after the trusted-author gate passed (an
+  Approve pick has none, so the guard doesn't run). The queue item is not a source: the
+  implementation run rewrites `completed/<item>` and can drop the ticket text.
 - **QA scripts are run by bash, not the model.** A model-callable wrapper's log would be forgeable:
   the QA run is allowed `exec.allowed_commands` (e.g. `uv`), which can run arbitrary code. So a plan
   run writes a nonce-bearing run spec (`{runs: [{script, dir, argv}]}`); bash checks `argv[0]` is

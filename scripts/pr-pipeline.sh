@@ -40,6 +40,7 @@ LOG_FILE="${EA_AGENT_DIR}/state/jobs.log"
 CLAUDE_BIN="${CLAUDE_BIN:-$(command -v claude || echo "${HOME}/.local/bin/claude")}"
 NOTIFY="${EA_NOTIFY_BIN:-${PLUGIN_ROOT}/scripts/notify.sh}"
 QA_BUDGET_USD="${EA_QA_BUDGET_USD:-2.00}"
+AC_GUARD_BUDGET_USD="${EA_AC_GUARD_BUDGET_USD:-0.50}"
 POLL="${EA_PR_PIPELINE_POLL:-60}"             # seconds between CI polls
 NONE_GRACE="${EA_PR_PIPELINE_NONE_GRACE:-300}" # no checks reported this long => "none"
 GH_TIMEOUT="${EA_POLL_CMD_TIMEOUT:-120}"
@@ -285,7 +286,7 @@ browser_test() {
   # Only with a pinned (dedicated) device: page text could otherwise steer the run onto another
   # connected browser, or run JS in a tab with your sign-ins. Checked against the transcript below.
   [ -z "$dev" ] || tools+=( mcp__claude-in-chrome__select_browser mcp__claude-in-chrome__javascript_tool )
-  local prompt="Browser-test the change on this branch before it goes to review. The ticket, with its acceptance criteria, is the queue item ${AGENT_DIR}/queue/completed/${ITEM}; the change is \`git diff origin/${BASE}...HEAD\` in the current directory. \
+  local prompt="Browser-test the change on this branch before it goes to review. The ticket, with its acceptance criteria, is $(ticket_source); the change is \`git diff origin/${BASE}...HEAD\` in the current directory. \
 The branch is being served at ${url}. Use the Claude in Chrome tools: open a NEW tab, visit only URLs under ${url}, and close your tab when done. ${instr} \
 Exercise every acceptance criterion and the UI the diff touches, and check the console for errors. Do not modify any file. \
 Reply with a short report (what you checked, pass/fail per criterion, problems found), then a final line that is exactly 'VERDICT: pass ${nonce}' or 'VERDICT: fail ${nonce}'. If you could not test something that matters, the verdict is fail. \
@@ -341,8 +342,8 @@ qa_stage() {
   # can end up published. No git verb at all — `git diff --no-index` reads any file.
   git -C "$WT" diff "origin/${BASE}...HEAD" > "$D/qa/change.diff" 2>>"$LOG_FILE" \
     || { cleanup; stop "QA: could not diff the branch against origin/${BASE}"; }
-  local tools=( "Read(/${WT}/**)" "Read(/${AGENT_DIR}/queue/completed/${ITEM})" "Read(/${D}/qa/change.diff)" "Edit(/${plan})" )
-  local prompt="Write a QA plan for the change on this branch. The ticket, with its acceptance criteria, is the queue item ${AGENT_DIR}/queue/completed/${ITEM}; the change is the diff in ${D}/qa/change.diff, and the current directory is the branch. \
+  local tools=( "Read(/${WT}/**)" "Read(/$(ticket_source))" "Read(/${D}/qa/change.diff)" "Edit(/${plan})" )
+  local prompt="Write a QA plan for the change on this branch. The ticket, with its acceptance criteria, is $(ticket_source); the change is the diff in ${D}/qa/change.diff, and the current directory is the branch. \
 Write the plan to ${plan} (a new file; it is the only file you may write) with exactly these sections: \
 '## Summary' — 2 to 5 sentences: what changed and how each acceptance criterion is covered, no links; \
 '## Scripted Tests' — one \`\`\`json block: an array of at most 50 HTTP checks against the running app, each {\"name\", \"method\" (GET, POST, PUT, PATCH, DELETE or HEAD), \"path\" (starting with /), optional \"body\" (JSON), \"expect_status\", optional \"expect_contains\"}; \
@@ -450,6 +451,9 @@ qa_publish() {
     printf '\n\n%s\nManual checks: %s skipped (unattended)\n' "$QA_AUTO" "$QA_MANUAL"
     skipped="$(jq length "$D/security/skipped.json" 2>/dev/null)"
     [ -z "$skipped" ] || [ "$skipped" = 0 ] || printf 'Security: %s pre-existing finding(s) skipped\n' "$skipped"
+    skipped="$(jq length "$D/security/ac-skipped.json" 2>/dev/null)"
+    [ -z "$skipped" ] || [ "$skipped" = 0 ] || printf 'Security: %s finding(s) not fixed because they contradict the ticket: %s\n' "$skipped" \
+      "$(jq -r '[.[].title // "untitled"] | join("; ")' "$D/security/ac-skipped.json" | _neutral | cut -c1-300)"
     [ -z "$NOTE_URL" ] || printf 'Full plan: %s\n' "$NOTE_URL"
   } > "$c"
   with_timeout "$GH_TIMEOUT" gh pr comment "$PR" --repo "$REPO" --body-file "$c" >>"$LOG_FILE" 2>&1 \
@@ -463,6 +467,28 @@ qa_publish() {
 }
 
 # --- security (security.command adapter) -----------------------------------------------------------
+
+# ac_guard <findings-json> <outdir> — sets AC_KEEP to the findings that don't contradict the ticket;
+# the rest go to $D/security/ac-skipped.json. Only the bash-recorded, trust-checked ticket text
+# counts (record_ticket_text); without it, or on any unusable verdict, every finding is kept.
+ac_guard() {
+  local t="$D/ticket.md" f="$2/ac-findings.json" v="$2/ac-verdict.json" nonce split
+  AC_KEEP="$1"; echo '[]' > "$D/security/ac-skipped.json"
+  [ -s "$t" ] || return 0
+  printf '%s' "$1" > "$f"; rm -f "$v"
+  nonce="$(od -An -tx1 -N8 /dev/urandom | tr -d ' \n')"
+  ( cd "$2" && "$CLAUDE_BIN" -p --model sonnet --permission-mode default --setting-sources user --strict-mcp-config \
+      --allowedTools "Read(/${f})" "Read(/${t})" "Edit(/${v})" --max-budget-usd "$AC_GUARD_BUDGET_USD" \
+      "$(ac_guard_prompt "$f" "$t" "$v" "$nonce")" </dev/null ) >> "$LOG_FILE" 2>&1
+  split="$(ac_guard_split "$f" "$v" "$t" "$nonce")" || { log "AC guard: unreadable findings; all kept"; return 0; }
+  [ "$(printf '%s' "$split" | jq .abstained)" = false ] || log "AC guard: no usable verdict; all findings kept"
+  AC_KEEP="$(printf '%s' "$split" | jq -c .keep)"
+  printf '%s' "$split" | jq .skip > "$D/security/ac-skipped.json"
+}
+
+# ticket_source — the ticket text model runs read: the trust-checked text implement-next recorded,
+# else the queue item (whose ticket text the implementation run may have rewritten away).
+ticket_source() { if [ -s "$D/ticket.md" ]; then echo "$D/ticket.md"; else echo "${AGENT_DIR}/queue/completed/${ITEM}"; fi; }
 
 pr_head() { with_timeout "$GH_TIMEOUT" gh pr view "$PR" --repo "$REPO" --json headRefOid --jq .headRefOid 2>/dev/null; }
 
@@ -494,6 +520,11 @@ security_stage() {
       || stop "could not diff ${sha:0:7} against origin/${BASE}"
     intro="$(security_introduced "$out/findings.json" "$D/security/changed")" || stop "unreadable security findings (${out}/findings.json)"
     jq --argjson i "$intro" '[.[] | select(. as $f | $i | index([$f]) | not)]' "$out/findings.json" > "$D/security/skipped.json"
+    if [ "$(printf '%s' "$intro" | jq length)" -gt 0 ]; then
+      ac_guard "$intro" "$out"; intro="$AC_KEEP"
+      [ "$(jq length "$D/security/ac-skipped.json")" = 0 ] \
+        || log "security review ${round}: $(jq length "$D/security/ac-skipped.json") finding(s) contradict the ticket, not fixed: $(jq -r '[.[].title // "untitled"] | join("; ")' "$D/security/ac-skipped.json" | _neutral | cut -c1-300)"
+    fi
     count="$(printf '%s' "$intro" | jq length)"
     log "security review ${round}: ${count} introduced, $(jq length "$D/security/skipped.json") skipped"
     [ "$count" -gt 0 ] || { REVIEWED_SHA="$sha"; return 0; }

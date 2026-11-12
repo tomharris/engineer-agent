@@ -377,6 +377,14 @@ record_ticket_branch() {
   mkdir -p "$d" && printf '%s\n' "$br" > "${d}/branch"
 }
 
+# record_ticket_text <item> <title> <body-file> — state/pr-pipeline/<item>/ticket.md, the ticket as
+# fetched once by bash. Callers record it only after the trusted-author check passed: pr-pipeline.sh
+# skips findings that contradict this text, so untrusted text here could suppress real findings.
+record_ticket_text() {
+  local d="${PR_PIPELINE_DIR}/${1%.md}"
+  mkdir -p "$d" && { printf '# %s\n\n' "$2"; cat "$3"; } > "${d}/ticket.md"
+}
+
 # reconcile_queue_move — finish a confined run's queue move on the privileged side of the sandbox
 # boundary. A confined run writes completed/<item> but CANNOT delete the drafts/<item> original:
 # that path is outside the worktree cwd and the narrow allowlist grants no delete, so the run
