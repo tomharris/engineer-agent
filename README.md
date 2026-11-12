@@ -988,7 +988,9 @@ or via Approve), `scripts/pr-pipeline.sh` runs detached:
 
 Any stop (CI still red, no checks, browser fail or no verdict, a security finding left, a QA
 failure, `max_runtime` exceeded, default 2h) pushes once, urgently, and leaves the PR in draft. The
-issue stays claimed: its PR exists.
+issue stays claimed: its PR exists. Push a fix to the branch and the pipeline starts again from the
+top on the job's next tick, even when the job's guards block a new pick. It doesn't start again
+while the branch is unchanged, and stops watching once the branch is deleted.
 
 Claiming a ticket (assign to you, transition by status name) needs either a human Approve or
 `jira-claim` in `agent.autonomy.auto_execute`. The ticket is re-read before and after the assignment,

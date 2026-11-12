@@ -47,8 +47,13 @@ mkdir -p "$D" "$(dirname "$LOG_FILE")"
 log() { printf '%s pr-pipeline %s: %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${ITEM%.md}" "$*" >> "$LOG_FILE"; }
 push_ack() { "$NOTIFY" --fyi --title "engineer-agent" --priority "$1" --message "$2" </dev/null >>"$LOG_FILE" 2>&1 || true; }
 result() { printf '%s\t%s\n' "$1" "$2" > "$D/result"; log "result: $1 — $2"; }
-# stop <message> — the one failure exit: record, push once, leave the PR in draft.
-stop() { result stopped "$1"; push_ack urgent "⚠️ PR pipeline stopped on ${KEY:-$ITEM}${PR_URL:+ (${PR_URL})}: $1"; exit 1; }
+# stop <message> — the one failure exit: record, push once, leave the PR in draft. The branch head
+# it stopped on goes to stopped_head; pr_pipeline_resume_stopped relaunches once the branch moves.
+stop() {
+  local h=""
+  [ -z "${PROJECT_PATH:-}" ] || [ -z "${BRANCH:-}" ] || h="$(remote_head)"
+  if [ -n "$h" ]; then printf '%s\n' "$h" > "$D/stopped_head"; else rm -f "$D/stopped_head"; fi
+  result stopped "$1"; push_ack urgent "⚠️ PR pipeline stopped on ${KEY:-$ITEM}${PR_URL:+ (${PR_URL})}: $1"; exit 1; }
 refuse() { log "not runnable: $1"; result refused "$1"; exit 2; }
 
 # --- resolve: ledger -> job -> project, branch, repo, PR (all bash-derived) ------------------------
@@ -72,6 +77,7 @@ if ! mkdir "$D/lock" 2>/dev/null; then
   kill -0 "$(cat "$D/lock/pid" 2>/dev/null || echo 0)" 2>/dev/null && { log "already running"; exit 0; }
 fi
 echo "$$" > "$D/lock/pid"
+rm -f "$D/stopped_head"
 
 pr="$(with_timeout "$GH_TIMEOUT" gh pr list --repo "$REPO" --head "$BRANCH" --state open \
        --json number,url,isDraft,baseRefName --jq '.[] | "\(.number)\t\(.url)\t\(.isDraft)\t\(.baseRefName)"' 2>>"$LOG_FILE")"

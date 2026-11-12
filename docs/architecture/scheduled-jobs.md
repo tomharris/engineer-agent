@@ -196,6 +196,14 @@ reader will otherwise "fix" back:
   pushes that the PR passed and leaves it draft. It never moves the board status.
 - **A stop leaves the claim.** Unlike a failed implementation, the PR exists, so `on_fail` does not
   apply.
+- **A stop resumes on new commits.** `stop()` writes the remote branch tip to
+  `state/pr-pipeline/<item>/stopped_head`, and every run clears that file at start. Each
+  implement-next tick runs `pr_pipeline_resume_stopped` *before* its guards, since the guards only
+  limit new picks. It relaunches the job's ledger items whose branch tip moved, comparing with
+  `git ls-remote` rather than `gh`, so it needs no repo resolution. The sweep deletes the file
+  before it relaunches. That makes one push one resume, and a resumed run that stops again waits
+  for the next push. A deleted branch ends the watch, and an unreachable remote skips the item for
+  that tick. The pipeline's own lock covers a run already in progress.
 
 **`after_pr` handoff stages** (spec `docs/superpowers/specs/2026-11-10-after-pr-handoff-design.md`):
 security → CI → browser → QA → ready → transition → announce. Things a reader will otherwise

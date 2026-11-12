@@ -38,6 +38,7 @@ cat > "$TMP/bin/git" <<'EOF'
 args=("$@")
 for ((i=0;i<${#args[@]};i++)); do
   case "${args[i]}" in
+    ls-remote) [ -z "${LS_REMOTE:-}" ] || printf "%s\trefs/heads/b\n" "$LS_REMOTE"; exit 0;;
     symbolic-ref) echo "origin/main"; exit 0;;
     rev-parse) echo "deadbee"; exit 0;;
     worktree)
@@ -265,6 +266,16 @@ write_config "[implement, jira-claim]"
 run_job
 eq "trusted text edits plus untrusted non-text edits still run unattended" "acc-me|In Progress|1" \
   "$(state BILL-1)|$(ls "$Q/completed" | grep -c ticket-BILL-1)"
+
+echo "== resume a stopped pipeline"
+. "$SCRIPT_DIR/lib-resume-fixture.sh"
+printf '#!/bin/bash\nprintf "%%s\\n" "$*" >> "%s"\n' "$TMP/pipeline.log" > "$TMP/bin/pipeline"; chmod +x "$TMP/bin/pipeline"
+: > "$TMP/pipeline.log"; reset; write_config "[implement, jira-claim]"
+awk '{print} /^        guards: /{print "        after_pr: { mark_ready: true }"}' "$EA_CONFIG_FILE" > "$TMP/c" && mv "$TMP/c" "$EA_CONFIG_FILE"
+stopped_pipeline_fixture bill.auto stopped-ticket-BILL-9.md
+LS_REMOTE=new EA_PR_PIPELINE_BIN="$TMP/bin/pipeline" EA_PR_PIPELINE_FOREGROUND=1 run_job
+eq "a stopped pipeline whose branch moved resumes, even when no new pick is allowed" \
+  "--item stopped-ticket-BILL-9.md|0" "$(cat "$TMP/pipeline.log")|$(grep -c . "$CLAUDE_LOG")"
 
 echo "== max_in_flight"
 reset; write_config "[implement, jira-claim]"

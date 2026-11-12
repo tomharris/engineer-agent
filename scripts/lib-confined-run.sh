@@ -581,3 +581,35 @@ pr_pipeline_launch() {
   fi
   return 0
 }
+
+# pr_pipeline_resume_stopped <job> — relaunch each of the job's stopped pipelines whose remote
+# branch has moved past the head it stopped on (stopped_head), so a pushed fix gets the same CI,
+# review and ready handling. A deleted branch ends the watch; an unreachable remote skips the tick.
+# Only a stop writes stopped_head and every run clears it, so a running pipeline is never matched.
+pr_pipeline_resume_stopped() {
+  local job="$1" slug idx path item d br tip out EA_JOBS_CFG=""
+  [ -f "$AUTOPILOT_LEDGER" ] || return 0
+  command -v jobs_enumerate >/dev/null 2>&1 || . "${PLUGIN_ROOT}/scripts/lib-jobs.sh"
+  jobs_cfg_load
+  IFS='|' read -r slug idx _ <<< "$(jobs_enumerate | awk -F'|' -v k="$job" '($1 "." $3) == k { print; exit }')"
+  [ -n "${slug:-}" ] || return 0
+  path="$(yaml_project_scalar "$slug" path)"
+  [ -d "$path" ] || return 0
+  awk -F'\t' -v j="$job" '$2==j {print $1}' "$AUTOPILOT_LEDGER" | sort -u | while IFS= read -r item; do
+    d="${PR_PIPELINE_DIR}/${item%.md}"
+    [ -s "$d/stopped_head" ] || continue
+    br="$(head -1 "$d/branch" 2>/dev/null)"
+    [[ "$br" =~ ^[A-Za-z0-9._/-]+$ ]] || continue
+    out="$(git -C "$path" ls-remote origin "refs/heads/${br}" 2>/dev/null)" || continue
+    tip="$(printf "%s" "$out" | cut -f1)"
+    if [ -z "$tip" ]; then
+      log "autopilot: ${br} is gone; no longer watching ${item} for new commits"
+      rm -f "$d/stopped_head"; continue
+    fi
+    [ "$tip" = "$(head -1 "$d/stopped_head")" ] && continue
+    log "autopilot: ${br} moved to ${tip:0:7} since its pipeline stopped; resuming ${item}"
+    rm -f "$d/stopped_head"
+    pr_pipeline_launch "$item"
+  done
+  return 0
+}

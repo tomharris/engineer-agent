@@ -667,6 +667,68 @@ git -C "$TMP/repo" checkout -q --detach
 eq "a detached HEAD is not recorded" "" "$(rec "$TMP/repo")"
 git -C "$TMP/repo" checkout -q main
 
+echo "== resume on new commits"
+# sweep [job] — one autopilot tick's resume sweep; relaunched pipelines run in the foreground.
+sweep() { ( PLUGIN_ROOT="$REPO_ROOT"; . "$REPO_ROOT/scripts/lib-paths.sh"; . "$REPO_ROOT/scripts/lib-confined-run.sh"
+            log() { :; }; LOG_FILE=/dev/null EA_PR_PIPELINE_FOREGROUND=1 pr_pipeline_resume_stopped "${1:-web.auto}" ) >/dev/null 2>&1; }
+# push_commit — someone else pushes to the PR branch; its checks pass.
+push_commit() {
+  local w; w="$(mktemp -d)"; git clone -q --branch "$BR" "$ORIGIN" "$w" 2>/dev/null
+  ( cd "$w" && echo "$RANDOM" >> human.txt && git add human.txt && git commit -qm human && git push -q origin "HEAD:refs/heads/$BR" )
+  printf 'pass\tlint\thttps://x\n' > "$ST/checks.$(git --git-dir="$ORIGIN" rev-parse "refs/heads/$BR")"
+}
+pipeline_runs() { grep -c '^pr list' "$ST/calls"; }
+stopped_on_ci() {
+  reset; write_config '["pr-ready"]' '{ mark_ready: true, ci: { fix_attempts: 0 } }'
+  printf 'fail\ttest\thttps://x\n' > "$ST/checks.default"
+  run >/dev/null
+}
+
+stopped_on_ci
+eq "precondition: the pipeline stopped" stopped "$(res)"
+push_commit; sweep
+eq "a new commit on a stopped PR resumes the pipeline" ready "$(res)"
+eq "the resumed pipeline marks the PR ready" 1 "$(readied)"
+
+stopped_on_ci; n="$(pipeline_runs)"; sweep
+eq "no new commit: not resumed" "stopped|$n" "$(res)|$(pipeline_runs)"
+
+stopped_on_ci
+push_commit; rm -f "$ST/checks.$(git --git-dir="$ORIGIN" rev-parse "refs/heads/$BR")"
+n0="$(pipeline_runs)"; sweep; n="$(pipeline_runs)"
+eq "a new commit that still fails CI is resumed once" "stopped|$((n0+1))" "$(res)|$n"
+sweep
+eq "a resumed run that stops again is not resumed again on the same head" "stopped|$n" "$(res)|$(pipeline_runs)"
+
+reset; write_config '["pr-ready"]'
+run >/dev/null; n="$(pipeline_runs)"; push_commit; sweep
+eq "a PR the pipeline finished is not resumed" "ready|$n" "$(res)|$(pipeline_runs)"
+
+stopped_on_ci; printf 'pass\tlint\thttps://x\n' > "$ST/checks.default"; run >/dev/null
+n="$(pipeline_runs)"; push_commit; sweep
+eq "a stop that a later run got past is not resumed" "ready|$n" "$(res)|$(pipeline_runs)"
+
+stopped_on_ci; push_commit
+mkdir "$PD/lock"; sleep 300 & echo $! > "$PD/lock/pid"; n="$(pipeline_runs)"
+sweep
+eq "a pipeline still running is not launched twice" "$n" "$(pipeline_runs)"
+kill "$(cat "$PD/lock/pid")" 2>/dev/null; rm -rf "$PD/lock"
+
+stopped_on_ci; push_commit; n="$(pipeline_runs)"
+sed -i.bak 's/	web\.auto	/	web.other	/' "$EA_AGENT_DIR/state/autopilot-items.tsv"
+sweep
+eq "an item another job picked is left to that job's sweep" "stopped|$n" "$(res)|$(pipeline_runs)"
+mv "$EA_AGENT_DIR/state/autopilot-items.tsv.bak" "$EA_AGENT_DIR/state/autopilot-items.tsv"; sweep
+eq "and that job's own sweep still resumes it" ready "$(res)"
+
+stopped_on_ci; rm -f "$Q/completed/$ITEM"; push_commit; sweep; n="$(pipeline_runs)"; sweep
+eq "an item the pipeline refused is not resumed again" "refused|$n" "$(res)|$(pipeline_runs)"
+
+stopped_on_ci; n="$(pipeline_runs)"
+git --git-dir="$ORIGIN" update-ref -d "refs/heads/$BR"
+sweep
+eq "a deleted branch is not resumed" "stopped|$n" "$(res)|$(pipeline_runs)"
+
 echo "== validation"
 valid() { ( . "$REPO_ROOT/scripts/lib-paths.sh"; . "$REPO_ROOT/scripts/lib-jobs.sh"
             rows="$(jobs_enumerate)"; jobs_validate "$(printf '%s\n' "$rows" | head -1)" "$rows" ); }
