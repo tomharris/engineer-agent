@@ -24,14 +24,16 @@ PLUGIN_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 . "${PLUGIN_ROOT}/scripts/lib-slite-api.sh"
 . "${PLUGIN_ROOT}/scripts/lib-review.sh"
 
-ITEM=""
+ITEM="" EXPECT_HEAD=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --item) ITEM="$2"; shift 2 ;;
+    --expect-head) EXPECT_HEAD="$2"; shift 2 ;;
     *) echo "unknown argument $1" >&2; exit 2 ;;
   esac
 done
 [[ "$ITEM" =~ ^[A-Za-z0-9._-]+\.md$ ]] || { echo "--item must be a queue file name" >&2; exit 2; }
+[[ "$EXPECT_HEAD" =~ ^([0-9a-f]{40})?$ ]] || { echo "--expect-head must be a commit sha" >&2; exit 2; }
 
 AGENT_DIR="$EA_AGENT_DIR"
 LOG_FILE="${EA_AGENT_DIR}/state/jobs.log"
@@ -47,14 +49,20 @@ mkdir -p "$D" "$(dirname "$LOG_FILE")"
 log() { printf '%s pr-pipeline %s: %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${ITEM%.md}" "$*" >> "$LOG_FILE"; }
 push_ack() { "$NOTIFY" --fyi --title "engineer-agent" --priority "$1" --message "$2" </dev/null >>"$LOG_FILE" 2>&1 || true; }
 result() { printf '%s\t%s\n' "$1" "$2" > "$D/result"; log "result: $1 — $2"; }
-# stop <message> — the one failure exit: record, push once, leave the PR in draft. The branch head
-# it stopped on goes to stopped_head; pr_pipeline_resume_stopped relaunches once the branch moves.
+# stop <message> — the one failure exit: record, push once, leave the PR in draft. For
+# pr_pipeline_resume_stopped: stopped_head is the branch tip now (resume once it moves) and
+# trusted_from the head this run started from, so every later push, the run's own fixes included,
+# is checked for who made it. A stop before the run started leaves any earlier watch as it was.
+START_HEAD=""
 stop() {
   local h=""
-  [ -z "${PROJECT_PATH:-}" ] || [ -z "${BRANCH:-}" ] || h="$(remote_head)"
-  if [ -n "$h" ]; then printf '%s\n' "$h" > "$D/stopped_head"; else rm -f "$D/stopped_head"; fi
+  if [ -n "$START_HEAD" ]; then
+    h="$(remote_head)"
+    rm -f "$D/stopped_head" "$D/trusted_from"
+    [ -z "$h" ] || { printf '%s\n' "$START_HEAD" > "$D/trusted_from"; printf '%s\n' "$h" > "$D/stopped_head"; }
+  fi
   result stopped "$1"; push_ack urgent "⚠️ PR pipeline stopped on ${KEY:-$ITEM}${PR_URL:+ (${PR_URL})}: $1"; exit 1; }
-refuse() { log "not runnable: $1"; result refused "$1"; exit 2; }
+refuse() { log "not runnable: $1"; rm -f "$D/stopped_head" "$D/trusted_from"; result refused "$1"; exit 2; }
 
 # --- resolve: ledger -> job -> project, branch, repo, PR (all bash-derived) ------------------------
 jobs_cfg_load   # here, not inside the first $(...), or every later lookup reloads and fails
@@ -77,7 +85,6 @@ if ! mkdir "$D/lock" 2>/dev/null; then
   kill -0 "$(cat "$D/lock/pid" 2>/dev/null || echo 0)" 2>/dev/null && { log "already running"; exit 0; }
 fi
 echo "$$" > "$D/lock/pid"
-rm -f "$D/stopped_head"
 
 pr="$(with_timeout "$GH_TIMEOUT" gh pr list --repo "$REPO" --head "$BRANCH" --state open \
        --json number,url,isDraft,baseRefName --jq '.[] | "\(.number)\t\(.url)\t\(.isDraft)\t\(.baseRefName)"' 2>>"$LOG_FILE")"
@@ -488,6 +495,13 @@ security_stage() {
 # --- run ------------------------------------------------------------------------------------------
 sha="$(pr_head)"
 [ -n "$sha" ] || stop "could not read the PR head"
+# A resume names the head whose pushers it checked; anything else is left for the next sweep.
+if [ -n "$EXPECT_HEAD" ] && [ "$sha" != "$EXPECT_HEAD" ]; then
+  log "the PR head is ${sha:0:7}, not the checked ${EXPECT_HEAD:0:7}; leaving it to the next sweep"
+  exit 0
+fi
+START_HEAD="$sha"
+rm -f "$D/stopped_head" "$D/trusted_from"
 HOLD=""   # review stages skipped for a missing tier: the PR must not reach reviewers
 SEC=0 REVIEWED_SHA=""
 if [ -n "$(_ar_children "$P.security")" ]; then

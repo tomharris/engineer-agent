@@ -289,7 +289,7 @@ awk '{print} /^        guards: /{print "        after_pr: { mark_ready: true }"}
 stopped_pipeline_fixture web.auto stopped-ticket-gh-9.md
 PATH="$TMP/resume-bin:$PATH" run_job
 eq "a stopped pipeline whose branch moved resumes, even when no new pick is allowed" \
-  "--item stopped-ticket-gh-9.md|0" "$(cat "$TMP/pipeline.log")|$(grep -c . "$CLAUDE_LOG")"
+  "--item stopped-ticket-gh-9.md --expect-head $RESUME_NEW|0" "$(cat "$TMP/pipeline.log")|$(grep -c . "$CLAUDE_LOG")"
 unset EA_PR_PIPELINE_BIN EA_PR_PIPELINE_FOREGROUND
 
 reset; write_config "[implement, github-claim]"

@@ -196,21 +196,29 @@ reader will otherwise "fix" back:
   pushes that the PR passed and leaves it draft. It never moves the board status.
 - **A stop leaves the claim.** Unlike a failed implementation, the PR exists, so `on_fail` does not
   apply.
-- **A stop resumes on new commits.** `stop()` writes the remote branch tip to
-  `state/pr-pipeline/<item>/stopped_head`, and every run clears that file at start. Each
-  implement-next tick runs `pr_pipeline_resume_stopped` *before* its guards, since the guards only
-  limit new picks. It relaunches the job's ledger items whose branch tip (`git ls-remote`) moved.
-  The sweep deletes the file before it relaunches. That makes one push one resume, and a resumed
+- **A stop resumes on new commits.** A stop after the run has started writes two files under
+  `state/pr-pipeline/<item>/`: `stopped_head` (the remote tip now) and `trusted_from` (the head
+  the run started from). A run clears both once its start head is known. A stop before that point
+  leaves them as they were. Each implement-next tick runs `pr_pipeline_resume_stopped` *before* its
+  guards, since the guards only limit new picks. It relaunches the job's ledger items whose branch
+  tip (`git ls-remote`) differs from `stopped_head`. That makes one push one resume, and a resumed
   run that stops again waits for the next push. A deleted branch ends the watch, and an
   unreachable remote skips the item for that tick. The pipeline's own lock covers a run already in
   progress.
 - **Only your own pushes resume.** A resumed run executes branch code (fix-run builds,
   `browser.serve` unconfined), so new commits would otherwise bypass the trust gate the original
   implementation passed. `resume_push_verdict` walks the repository activity API (`before`/`after`
-  pairs) from the tip back to `stopped_head`, and every push on the way must have the gh user as its
-  `actor`. It checks the pusher, not commit authors, which anyone can forge. Any other pusher ends
-  the watch with one urgent push and the manual command, and does so even when your push sits on
-  top of theirs. If the activity API fails, or the push isn't listed yet, the item waits a tick.
+  pairs) from the tip back to `trusted_from`, not `stopped_head`. That way a push by someone else
+  while the run was going is checked too, and the run's own fix pushes, made as the gh user, pass.
+  Every push on the way must have the gh user as its `actor`. It checks the pusher, not commit
+  authors, which anyone can forge. Any other pusher ends the watch with one urgent push and the
+  manual command, even when your push sits on top of theirs. If the activity API fails, or the push
+  isn't listed yet, the item waits a tick.
+- **The relaunch runs only the checked tip.** The sweep passes `--expect-head <tip>`. If the PR
+  head has moved when the pipeline starts, it exits without touching `stopped_head` or
+  `trusted_from`, and the next sweep checks the new pushes. Someone else pushing *during* a run is
+  the pipeline's existing residual, for first runs and resumed runs alike: the per-stage head
+  checks and the next resume's `trusted_from` walk catch it, but a stage already running does not.
 
 **`after_pr` handoff stages** (spec `docs/superpowers/specs/2026-11-10-after-pr-handoff-design.md`):
 security → CI → browser → QA → ready → transition → announce. Things a reader will otherwise

@@ -120,7 +120,9 @@ cat > "$TMP/bin/claude" <<'EOF'
 printf '%s\n' "$*" >> "$CLAUDE_ARGS"
 case "$*" in
   *"CI failed on pull request"*|*"A security review of pull request"*)
-    [ "${FIX:-push}" = push ] && { echo fix >> fixed.txt; git add fixed.txt; git commit -qm fix; git push -q origin "HEAD:refs/heads/$BR"; } ;;
+    [ "${FIX:-push}" = push ] && { b="$(git rev-parse HEAD)"; echo fix >> fixed.txt; git add fixed.txt; git commit -qm fix; git push -q origin "HEAD:refs/heads/$BR"
+      jq --arg b "$b" --arg a "$(git rev-parse HEAD)" --arg l "${FIX_PUSHER:-tom}" '[{before: $b, after: $a, actor: {login: $l}}] + .' \
+        <(cat "$ST/activity.json" 2>/dev/null || echo '[]') > "$ST/activity.fix" && mv "$ST/activity.fix" "$ST/activity.json"; } ;;
   *"Browser-test the change"*)
     nonce="$(printf '%s' "$*" | sed -nE "s/.*'VERDICT: pass ([0-9a-f]+)'.*/\1/p")"
     pinned="$(printf '%s' "$*" | sed -nE 's/.*select_browser with deviceId ([0-9a-f-]+);.*/\1/p')"
@@ -731,6 +733,24 @@ UNLISTED=1 push_commit; sweep
 eq "a push not yet in the activity is not resumed" "stopped|$n" "$(res)|$(pipeline_runs)"
 list_push "$(cat "$PD/stopped_head")" "$(git --git-dir="$ORIGIN" rev-parse "refs/heads/$BR")" tom; sweep
 eq "and is resumed once it shows up" ready "$(res)"
+
+# The fix run pushes as FIX_PUSHER; CI keeps failing, so the run stops after its fix.
+stopped_after_fix() {
+  reset; write_config '["pr-ready"]' '{ mark_ready: true, ci: { fix_attempts: 1 } }'
+  printf 'fail\ttest\thttps://x\n' > "$ST/checks.default"
+  run >/dev/null
+}
+stopped_after_fix; n="$(pipeline_runs)"; push_commit; sweep
+eq "your push after the run's own fix push resumes it" "ready|$((n+1))" "$(res)|$(pipeline_runs)"
+
+FIX_PUSHER=mallory stopped_after_fix; n="$(pipeline_runs)"; push_commit; sweep
+eq "someone else's push while the run was going is not resumed" "stopped|$n" "$(res)|$(pipeline_runs)"
+
+stopped_on_ci; push_commit; checked="$(git --git-dir="$ORIGIN" rev-parse "refs/heads/$BR")"; PUSHER=mallory push_commit
+n="$(grep -c statusCheckRollup "$ST/calls")"; before="$(cat "$PD/stopped_head" "$PD/trusted_from")"
+bash "$PIPE" --item "$ITEM" --expect-head "$checked" >/dev/null 2>&1
+eq "a head that moved after the check does not run" "stopped|$n" "$(res)|$(grep -c statusCheckRollup "$ST/calls")"
+eq "and the watch is left for the next sweep" "$before" "$(cat "$PD/stopped_head" "$PD/trusted_from")"
 
 stopped_on_ci
 push_commit; rm -f "$ST/checks.$(git --git-dir="$ORIGIN" rev-parse "refs/heads/$BR")"

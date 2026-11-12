@@ -562,7 +562,7 @@ autopilot_implement() {
   return 0
 }
 
-# pr_pipeline_launch <item> — start scripts/pr-pipeline.sh detached when the item's job (from the
+# pr_pipeline_launch <item> [expect-head] — start scripts/pr-pipeline.sh detached when the item's job (from the
 # ledger) has an after_pr block. Detached so the CI wait is bounded by after_pr.max_runtime, not
 # held under the job's own watchdog, whose TERM trap would release a claim whose PR already exists.
 pr_pipeline_launch() {
@@ -575,9 +575,9 @@ pr_pipeline_launch() {
   [ -n "${slug:-}" ] && [ -n "$(_ar_children "projects.${slug}.job.${idx}.after_pr")" ] || return 0
   log "autopilot: starting pr-pipeline for ${1}"
   if [ "${EA_PR_PIPELINE_FOREGROUND:-0}" = 1 ]; then
-    bash "${EA_PR_PIPELINE_BIN:-${PLUGIN_ROOT}/scripts/pr-pipeline.sh}" --item "$1" </dev/null >>"$LOG_FILE" 2>&1
+    bash "${EA_PR_PIPELINE_BIN:-${PLUGIN_ROOT}/scripts/pr-pipeline.sh}" --item "$1" ${2:+--expect-head "$2"} </dev/null >>"$LOG_FILE" 2>&1
   else
-    nohup bash "${EA_PR_PIPELINE_BIN:-${PLUGIN_ROOT}/scripts/pr-pipeline.sh}" --item "$1" </dev/null >>"$LOG_FILE" 2>&1 &
+    nohup bash "${EA_PR_PIPELINE_BIN:-${PLUGIN_ROOT}/scripts/pr-pipeline.sh}" --item "$1" ${2:+--expect-head "$2"} </dev/null >>"$LOG_FILE" 2>&1 &
   fi
   return 0
 }
@@ -605,11 +605,11 @@ resume_push_verdict() {
 }
 
 # pr_pipeline_resume_stopped <job> — relaunch each of the job's stopped pipelines whose remote
-# branch has moved past the head it stopped on (stopped_head), so a pushed fix gets the same CI,
-# review and ready handling. Only pushes by the gh user resume it (resume_push_verdict): anyone
-# else's push ends the watch with an urgent push, and an unverifiable one waits a tick. A deleted
-# branch ends the watch; an unreachable remote skips the tick. Only a stop writes stopped_head and
-# every run clears it, so a running pipeline is never matched.
+# branch has moved past the tip it stopped on (stopped_head), so a pushed fix gets the same CI,
+# review and ready handling. Every push since the head that run started from (trusted_from) must
+# be the gh user's (resume_push_verdict): anyone else's ends the watch with an urgent push, and an
+# unverifiable one waits a tick. The relaunch names the checked tip, and the pipeline runs only
+# if the PR head still is it. A deleted branch ends the watch; an unreachable remote skips the tick.
 pr_pipeline_resume_stopped() {
   local job="$1" slug idx path repo item d br tip out verdict who EA_JOBS_CFG=""
   [ -f "$AUTOPILOT_LEDGER" ] || return 0
@@ -623,23 +623,23 @@ pr_pipeline_resume_stopped() {
   [[ "$repo" =~ ^[a-z0-9._-]+/[a-z0-9._-]+$ ]] || return 0
   awk -F'\t' -v j="$job" '$2==j {print $1}' "$AUTOPILOT_LEDGER" | sort -u | while IFS= read -r item; do
     d="${PR_PIPELINE_DIR}/${item%.md}"
-    [ -s "$d/stopped_head" ] || continue
+    [ -s "$d/stopped_head" ] && [ -s "$d/trusted_from" ] || continue
     br="$(head -1 "$d/branch" 2>/dev/null)"
     [[ "$br" =~ ^[A-Za-z0-9._/-]+$ ]] || continue
     out="$(git -C "$path" ls-remote origin "refs/heads/${br}" 2>/dev/null)" || continue
     tip="$(printf "%s" "$out" | cut -f1)"
     if [ -z "$tip" ]; then
       log "autopilot: ${br} is gone; no longer watching ${item} for new commits"
-      rm -f "$d/stopped_head"; continue
+      rm -f "$d/stopped_head" "$d/trusted_from"; continue
     fi
     [ "$tip" = "$(head -1 "$d/stopped_head")" ] && continue
-    verdict="$(resume_push_verdict "$repo" "$br" "$(head -1 "$d/stopped_head")" "$tip")"
+    verdict="$(resume_push_verdict "$repo" "$br" "$(head -1 "$d/trusted_from")" "$tip")"
     case "$verdict" in
       ok) ;;
       untrusted\ *)
         who="$(printf '%s' "${verdict#untrusted }" | sed "s/[^][A-Za-z0-9_.-]//g" | cut -c1-60)"
         log "autopilot: ${br} was pushed by ${who}; not resuming ${item} unattended"
-        rm -f "$d/stopped_head"
+        rm -f "$d/stopped_head" "$d/trusted_from"
         "${EA_NOTIFY_BIN:-${PLUGIN_ROOT}/scripts/notify.sh}" --fyi --title "engineer-agent" --priority urgent \
           --message "⚠️ ${item%.md}: ${br} was pushed by ${who}, so its stopped PR pipeline was not resumed. To run it: ${PLUGIN_ROOT}/scripts/pr-pipeline.sh --item ${item}" \
           </dev/null >>"$LOG_FILE" 2>&1 || true
@@ -647,8 +647,7 @@ pr_pipeline_resume_stopped() {
       *) log "autopilot: cannot yet tell who pushed ${br} to ${tip:0:7}; ${item} waits a tick"; continue ;;
     esac
     log "autopilot: ${br} moved to ${tip:0:7} since its pipeline stopped; resuming ${item}"
-    rm -f "$d/stopped_head"
-    pr_pipeline_launch "$item"
+    pr_pipeline_launch "$item" "$tip"
   done
   return 0
 }
