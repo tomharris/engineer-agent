@@ -174,19 +174,20 @@ read `projects.<project>.tracker`, or infer from `source` frontmatter (`github` 
   `implement-ticket`.
   (See "Auto-execute: draft-pr" below for when this is allowed to run without a human approval.)
   Look up `projects.<project>.github.owner` and repo.
+  `{base}` is the base branch the run prompt names, else the one `origin/HEAD` points to.
   - tracker `github-issues` (extract issue number from `ticket_key` stripping `#`; slug =
     title lowercased, non-alphanumeric → hyphens, truncated to 40 chars, trailing hyphens
     stripped):
     ```bash
     gh pr create --repo {owner}/{repo} --title "#{number}: {title}" \
       --body "{body with 'Closes #{number}' as the first line}" \
-      --head "{branch_prefix}/issue-{number}-{slug}" --base main --draft
+      --head "{branch_prefix}/issue-{number}-{slug}" --base "{base}" --draft
     ```
   - tracker `jira`:
     ```bash
     gh pr create --repo {owner}/{repo} --title "{ticket_key}: {title}" \
       --body "{body with '**Ticket:** [{ticket_key}]({source_url})' as the first line}" \
-      --head "{branch_prefix}/{ticket_key}" --base main --draft
+      --head "{branch_prefix}/{ticket_key}" --base "{base}" --draft
     ```
   The source-ticket attribution line is **required on every PR** (same rule as
   `implement-ticket` Step 6): `Closes #{number}` for GitHub issues, the linked ticket key

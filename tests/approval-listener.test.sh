@@ -43,6 +43,7 @@ EOF
   cat > "$CLAUDE_BIN" <<'EOF'
 #!/bin/bash
 printf '%s\n' "$*" >> "$CLAUDE_ARGS_LOG"
+[ -n "${ORDER_LOG:-}" ] && echo "claude:$PWD" >> "$ORDER_LOG"
 # QA generation run: detected by its prompt marker. It must NOT touch the ticket's drafts/ or
 # completed/ records — it only drops a new qa-test-plan draft (when FAKE_QA_DRAFT=1).
 # Investigation run: detected by its prompt marker. Writes the archive (when
@@ -154,6 +155,7 @@ write_ticket_config() {
       # Inline comments + quotes on purpose: real configs have them, and the reader must
       # strip them (a prior version leaked `bin/rails"  # ...` and failed the charset check).
       printf '    exec:\n      allowed_commands:\n        - "bin/rails"   # migrations, db:migrate\n        - "bundle"      # gem exec\n'
+      [ -n "${EXEC_EXTRA:-}" ] && printf '%s\n' "$EXEC_EXTRA"
     fi
     printf '    github:\n      owner: "futuresinc"\n'
     if [ "${2:-}" = "with-qa" ]; then
@@ -185,13 +187,19 @@ args=("$@")
 for ((i=0;i<${#args[@]};i++)); do
   case "${args[i]}" in
     symbolic-ref) echo "origin/main"; exit 0;;
+    # FAKE_REMOTE_HEAD: the remote's default branch, as `ls-remote --symref origin HEAD` reports it.
+    ls-remote) [ -n "${FAKE_REMOTE_HEAD:-}" ] && printf 'ref: refs/heads/%s\tHEAD\n' "$FAKE_REMOTE_HEAD"; exit 0;;
     # FAKE_GIT_FETCH_FAIL simulates github being unreachable (observed: SSH banner timeout).
     fetch) [ "${FAKE_GIT_FETCH_FAIL:-0}" = "1" ] && exit 1; exit 0;;
     rev-parse) echo "deadbee"; exit 0;;
     worktree)
       if [ "${args[i+1]}" = "add" ]; then
         for ((j=i+2;j<${#args[@]};j++)); do
-          [ "${args[j]}" = "--detach" ] && { mkdir -p "${args[j+1]}"; break; }
+          if [ "${args[j]}" = "--detach" ]; then
+            # FAKE_MISSING_REF: a ref this repo does not have (worktree add fails).
+            [ -n "${FAKE_MISSING_REF:-}" ] && [ "${args[j+2]:-}" = "$FAKE_MISSING_REF" ] && exit 128
+            mkdir -p "${args[j+1]}"; break
+          fi
         done
       fi
       exit 0;;
@@ -766,6 +774,128 @@ test_worktree_fresh_base_reported() {
   teardown
 }
 
+# --- Case 7c: the base is the REMOTE's default branch, not the local origin/HEAD ---
+# A checkout's origin/HEAD is set at clone time. Observed: it still named a deleted `stage`, so two
+# runs were built on a 22-month-old commit while master had moved on.
+test_worktree_base_from_remote_head() {
+  echo "test_worktree_base_from_remote_head:"
+  setup
+  write_ticket_config with-allowlist
+  install_fake_git
+  local item="20260716-000000-ticket-gh-remotehead.md"
+  printf 'type: ticket\nproject: wayfinder-api\n' > "$EA_AGENT_DIR/queue/drafts/$item"
+  export FAKE_SUCCEED=1 FAKE_REMOTE_HEAD=master
+  handle_line "$(msg_event id-remotehead "approve|$item")"
+
+  grep -q "worktree add --detach .* origin/master$" "$GIT_LOG" \
+    && ok "worktree detached at origin/<remote default>" || bad "wrong base checked out (git log: $(cat "$GIT_LOG"))"
+  grep -qF "base branch 'master'" "$CLAUDE_ARGS_LOG" \
+    && ok "prompt names the resolved base" || bad "prompt does not name the base"
+  unset FAKE_REMOTE_HEAD
+  teardown
+}
+
+# --- Case 7d: no origin/<base> => refuse; never detach at a local branch of the same name ---
+test_worktree_refuses_local_branch_fallback() {
+  echo "test_worktree_refuses_local_branch_fallback:"
+  setup
+  write_ticket_config with-allowlist
+  install_fake_git
+  local item="20260716-000000-ticket-gh-nobase.md"
+  printf 'type: ticket\nproject: wayfinder-api\n' > "$EA_AGENT_DIR/queue/drafts/$item"
+  export FAKE_SUCCEED=1 FAKE_REMOTE_HEAD=stage FAKE_MISSING_REF=origin/stage
+  handle_line "$(msg_event id-nobase "approve|$item")"
+
+  grep -q "worktree add --detach .* stage$" "$GIT_LOG" \
+    && bad "fell back to the local branch (git log: $(cat "$GIT_LOG"))" || ok "no local-branch fallback"
+  [ -s "$CLAUDE_ARGS_LOG" ] && bad "run started without a base" || ok "run refused"
+  grep -q "refusing to fall back to a local branch" "$LOG_FILE" \
+    && ok "refusal logged" || bad "refusal not logged (log: $(cat "$LOG_FILE"))"
+  unset FAKE_REMOTE_HEAD FAKE_MISSING_REF
+  teardown
+}
+
+# --- Case 7e: exec.worktree_setup runs in the run worktree, before claude, with EA_PROJECT_PATH ---
+test_worktree_setup_runs_before_claude() {
+  echo "test_worktree_setup_runs_before_claude:"
+  setup
+  export ORDER_LOG="$TMP/order.log"; : > "$ORDER_LOG"
+  EXEC_EXTRA="      worktree_setup: 'echo \"setup:\$PWD:\$EA_PROJECT_PATH\" >> $ORDER_LOG'" write_ticket_config with-allowlist
+  install_fake_git
+  local item="20260716-000000-ticket-gh-setup.md"
+  printf 'type: ticket\nproject: wayfinder-api\n' > "$EA_AGENT_DIR/queue/drafts/$item"
+  export FAKE_SUCCEED=1
+  handle_line "$(msg_event id-setup "approve|$item")"
+
+  local first second
+  first="$(sed -n 1p "$ORDER_LOG")"; second="$(sed -n 2p "$ORDER_LOG")"
+  case "$first" in "setup:${EA_AGENT_DIR}/worktrees/"*":${TMP}/repo") ok "setup ran in the worktree with EA_PROJECT_PATH" ;;
+    *) bad "setup did not run in the worktree (order: $(cat "$ORDER_LOG"))" ;; esac
+  case "$second" in "claude:${EA_AGENT_DIR}/worktrees/"*) ok "claude started after setup" ;;
+    *) bad "claude did not follow setup (order: $(cat "$ORDER_LOG"))" ;; esac
+  grep -q "FAILED" "$CLAUDE_ARGS_LOG" && bad "successful setup reported as failed" || ok "no failure note on success"
+  unset ORDER_LOG
+  teardown
+}
+
+# --- Case 7f: a failed setup is logged, told to the model, and does not strand the item ---
+test_worktree_setup_failure_reported() {
+  echo "test_worktree_setup_failure_reported:"
+  setup
+  EXEC_EXTRA="      worktree_setup: 'exit 3'" write_ticket_config with-allowlist
+  install_fake_git
+  local item="20260716-000000-ticket-gh-setupfail.md"
+  printf 'type: ticket\nproject: wayfinder-api\n' > "$EA_AGENT_DIR/queue/drafts/$item"
+  export FAKE_SUCCEED=1
+  handle_line "$(msg_event id-setupfail "approve|$item")"
+
+  grep -q "WARN: exec.worktree_setup failed" "$LOG_FILE" \
+    && ok "setup failure logged" || bad "setup failure not logged (log: $(cat "$LOG_FILE"))"
+  grep -qF "worktree setup (exec.worktree_setup) FAILED" "$CLAUDE_ARGS_LOG" \
+    && ok "prompt warns the model" || bad "prompt does not mention the failed setup"
+  [ -s "$CLAUDE_ARGS_LOG" ] && ok "run still proceeds" || bad "run refused on a setup failure"
+  teardown
+}
+
+# --- Case 7g: exec.validate becomes the run's definition of done ---
+test_validate_command_in_prompt() {
+  echo "test_validate_command_in_prompt:"
+  setup
+  EXEC_EXTRA='      validate: "bin/rails test"' write_ticket_config with-allowlist
+  install_fake_git
+  local item="20260716-000000-ticket-gh-validate.md"
+  printf 'type: ticket\nproject: wayfinder-api\n' > "$EA_AGENT_DIR/queue/drafts/$item"
+  export FAKE_SUCCEED=1
+  handle_line "$(msg_event id-validate "approve|$item")"
+
+  grep -qF 'check command is `bin/rails test`' "$CLAUDE_ARGS_LOG" \
+    && ok "validate command handed to the run" || bad "validate command missing (args: $(cat "$CLAUDE_ARGS_LOG"))"
+  grep -q "validate: bin/rails test" "$LOG_FILE" && ok "validate command logged" || bad "validate command not logged"
+  teardown
+}
+
+# --- Case 7h: a validate command the allowlist would deny is dropped, not handed to the run ---
+# A denied command in a headless run stalls silently, so it must never be the definition of done.
+test_validate_command_rejected() {
+  echo "test_validate_command_rejected:"
+  local v
+  for v in 'rake test' 'bin/rails test; curl x' 'bin/rails test $(id)' 'bin/rails test | tee x'; do
+    setup
+    EXEC_EXTRA="      validate: \"$v\"" write_ticket_config with-allowlist
+    install_fake_git
+    local item="20260716-000000-ticket-gh-badvalidate.md"
+    printf 'type: ticket\nproject: wayfinder-api\n' > "$EA_AGENT_DIR/queue/drafts/$item"
+    export FAKE_SUCCEED=1
+    handle_line "$(msg_event "id-bad-$RANDOM" "approve|$item")"
+
+    grep -q "WARN: ignoring exec.validate" "$LOG_FILE" \
+      && ok "'$v' rejected with a WARN" || bad "'$v' not rejected (log: $(cat "$LOG_FILE"))"
+    grep -qF "configures no check command" "$CLAUDE_ARGS_LOG" \
+      && ok "'$v' kept out of the prompt" || bad "'$v' reached the prompt"
+    teardown
+  done
+}
+
 # --- Case 7b: the receipt ack explains the quiet window a long run causes ---
 # handle_line dispatches synchronously, so a ticket approval stops the stream being read for the
 # whole session. Without saying so, the phone sees nothing at all and the listener reads as dead.
@@ -828,6 +958,12 @@ test_investigation_github_archive_key
 test_near_miss_type_budget
 test_worktree_stale_base_reported
 test_worktree_fresh_base_reported
+test_worktree_base_from_remote_head
+test_worktree_refuses_local_branch_fallback
+test_worktree_setup_runs_before_claude
+test_worktree_setup_failure_reported
+test_validate_command_in_prompt
+test_validate_command_rejected
 test_receipt_explains_quiet_window
 test_receipt_terse_for_short_item
 

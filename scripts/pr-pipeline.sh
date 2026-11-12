@@ -191,10 +191,13 @@ fix_run() {
   NEW_SHA=""
   before="$(remote_head)"
   branch_worktree || { log "could not create a worktree on ${BRANCH}"; return 0; }
+  prepare_run_worktree "$SLUG" "$WT"
   project_build_rules "$SLUG"
+  project_validate_command "$SLUG"
   local tools=( Read Edit Write Glob Grep "${CONFINED_GIT_WRITE_RULES[@]}" ${BUILD_RULES[@]+"${BUILD_RULES[@]}"} "Bash(echo:*)" )
   local prompt="$1 \
 The current working directory is a git worktree checked out on ${BRANCH}; stay inside it. Reproduce the problem with the project's build/test commands where you can, fix the root cause, and commit. \
+$(validation_prompt) \
 Never skip, delete or weaken a test, lint rule or type check, and never suppress a finding instead of fixing it. Do not edit CI configuration. \
 PUSH ONLY with: ${PLUGIN_ROOT}/scripts/confined-push.sh --no-verify (plain git push is denied). Do not open, edit or comment on PRs. \
 ${NO_MEMORY_RULE} Be concise."
