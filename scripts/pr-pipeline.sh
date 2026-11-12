@@ -143,6 +143,12 @@ branch_worktree() {
   git -C "$PROJECT_PATH" worktree add "$WT" "$BRANCH" >>"$LOG_FILE" 2>&1 || { WT=""; return 1; }
 }
 remote_head() { git -C "$PROJECT_PATH" ls-remote origin "refs/heads/${BRANCH}" 2>/dev/null | cut -f1; }
+# base_conflicts <sha> — true only when merging origin/<base> into <sha> conflicts (merge-tree exit 1).
+base_conflicts() {
+  git -C "$PROJECT_PATH" fetch --quiet origin "$BASE" >>"$LOG_FILE" 2>&1 || true
+  git -C "$PROJECT_PATH" merge-tree --write-tree --quiet "origin/${BASE}" "$1" >/dev/null 2>>"$LOG_FILE"
+  [ $? = 1 ]
+}
 
 # --- CI -------------------------------------------------------------------------------------------
 # ci_state — pass | fail | pending | none, for the PR's current head. Writes failing rows to $D/ci.fail.
@@ -208,7 +214,16 @@ fix_run() {
   project_build_rules "$SLUG"
   project_validate_command "$SLUG"
   local tools=( Read Edit Write Glob Grep "${CONFINED_GIT_WRITE_RULES[@]}" ${BUILD_RULES[@]+"${BUILD_RULES[@]}"} "Bash(echo:*)" )
-  local prompt="$1 \
+  local merge=""
+  # Bash starts the merge (the run has no `git merge`); the run resolves and finishes it with `git commit`.
+  if [ "${MERGE_BASE:-0}" = 1 ]; then
+    git -C "$WT" merge --no-edit "origin/${BASE}" >>"$LOG_FILE" 2>&1
+    if [ -f "$(git -C "$WT" rev-parse --git-path MERGE_HEAD)" ]; then
+      git -C "$WT" diff --name-only --diff-filter=U > "$D/merge-conflicts.txt"
+      merge="A merge of origin/${BASE} into this branch is in progress: the branch conflicts with it, so CI cannot build it. Resolve every conflict first (files: ${D}/merge-conflicts.txt). Where origin/${BASE} already does what the branch did, keep its version and adapt the branch's code to it; check that the merged files don't define anything twice and that nothing still refers to code the resolution dropped. Then \`git add\` them and \`git commit --no-edit\` to finish the merge, before fixing anything else. "
+    fi
+  fi
+  local prompt="${merge}$1 \
 The current working directory is a git worktree checked out on ${BRANCH}; stay inside it. Reproduce the problem with the project's build/test commands where you can, fix the root cause, and commit. \
 $(validation_prompt) \
 Never skip, delete or weaken a test, lint rule or type check, and never suppress a finding instead of fixing it. Do not edit CI configuration. \
@@ -452,7 +467,8 @@ qa_publish() {
 pr_head() { with_timeout "$GH_TIMEOUT" gh pr view "$PR" --repo "$REPO" --json headRefOid --jq .headRefOid 2>/dev/null; }
 
 # security_stage — review, fix what the PR introduced, re-review; up to security.fix_attempts
-# rounds. Advances sha on a fix and sets REVIEWED_SHA to the head that came back clean. Stops on
+# rounds. Advances sha on a fix and sets REVIEWED_SHA to the head that came back clean (or, with
+# security.review_last_fix: false, to the last fix's head, unreviewed). Stops on
 # anything left, when a review cannot run, or when the head moved under a review (the adapter
 # reviews the PR's head at that moment, so the verdict would belong to another commit).
 security_stage() {
@@ -489,6 +505,10 @@ security_stage() {
     fix_run "A security review of pull request #${PR} (branch ${BRANCH}) found ${count} issue(s) this change introduced, listed in ${D}/security/introduced.md — read it first. Fix every one in the code (add a regression test where the remediation calls for one); the full report is ${out}/report.md."
     [ -n "$NEW_SHA" ] || stop "security fix attempt ${fixes} pushed nothing"
     sha="$NEW_SHA"
+    if [ "$fixes" -ge "$tries" ] && [ "$(_arc "$P.security.review_last_fix")" = false ]; then
+      log "security fix ${fixes} on ${sha:0:7} not re-reviewed (review_last_fix: false)"
+      REVIEWED_SHA="$sha"; return 0
+    fi
   done
 }
 
@@ -520,7 +540,12 @@ while :; do
     [ "$ci" = fail ] && [ "$n" -lt "$attempts" ] || break
     n=$((n+1))
     ci_logs
+    MERGE_BASE=0
+    if base_conflicts "$sha"; then
+      MERGE_BASE=1; log "CI failed and ${sha:0:7} conflicts with origin/${BASE}: the fix run merges it first"
+    fi
     fix_run "CI failed on pull request #${PR} for branch ${BRANCH}. The failing checks and the tail of their logs are in ${D}/ci-failure.log — read it first."
+    MERGE_BASE=0
     [ -n "$NEW_SHA" ] || stop "CI failed and fix attempt ${n} pushed nothing"
     sha="$NEW_SHA"
   done

@@ -226,6 +226,14 @@ security → CI → browser → QA → ready → transition → announce. Things
 - **Security runs before CI, and both must pass on one head.** A CI fix is re-reviewed and a
   security fix re-runs CI, at most three passes. The adapter reviews the PR's head *at that moment*, so
   a head that moved during a review stops the pipeline: the verdict belongs to another commit.
+  `security.review_last_fix: false` is the one exception: the last fix attempt's head counts as
+  reviewed (logged as not re-reviewed), trading a final check for not stopping on a reviewer
+  that keeps finding something. A later CI fix is still re-reviewed.
+- **A red CI on a head that conflicts with its base is fixed by merging the base.** CI that merges
+  the base first (cihub) fails with only "Failed to merge", which a log-reading fix run can't act
+  on. Bash checks with `git merge-tree` and, on a conflict, runs `git merge origin/<base>` in the
+  fix worktree; the run gets no `git merge` verb and finishes the merge with `git commit`. A
+  head that merges cleanly gets the ordinary fix run.
 - **The reviewer is a user-supplied adapter** (`security.command`, contract in README). The plugin
   names no vendor and parses no vendor-specific title format; the adapter maps its tool's output
   to `findings.json`.

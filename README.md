@@ -949,7 +949,8 @@ or via Approve), `scripts/pr-pipeline.sh` runs detached:
    (`security.command`, see below) on the PR. Every finding the PR **introduced** (any finding on a
    changed file, whatever the adapter says, or one it marks `introduced: true`) goes to a confined
    fix run, whatever its severity, then the review runs again, up to `security.fix_attempts`
-   (default 1) rounds. Other findings are skipped and counted in the
+   (default 1) rounds. `security.review_last_fix: false` skips the re-review after the last fix
+   attempt, so that fix goes on to CI unreviewed. Other findings are skipped and counted in the
    QA comment. Anything introduced that survives, an auth failure, or a head that moved during a
    review stops the pipeline.
 
@@ -961,6 +962,8 @@ or via Approve), `scripts/pr-pipeline.sh` runs detached:
 2. Waits for CI on the PR head (`ci.timeout`, default 30m). On failure it hands the failed steps'
    logs to up to `ci.fix_attempts` (default 1, max 3) confined fix runs: the same build allowlist and
    `confined-push.sh` as the implementation, no `gh`. A fix counts only if the remote branch moved.
+   If the head conflicts with `origin/<base>`, the pipeline starts that merge in the fix run's
+   worktree first, and the run resolves the conflicts and commits the merge before fixing anything else.
    Security and CI must pass on the **same** head: a CI fix is reviewed again, a security fix goes
    through CI again.
 3. With `browser`, serves the final head from a fresh worktree (`setup`, then `serve` in the

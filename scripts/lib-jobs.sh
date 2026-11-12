@@ -191,7 +191,7 @@ jobs_validate_after_pr() {
   _ar_check_keys "$p" "budget_usd max_runtime mark_ready ci browser security qa transition announce" "after_pr" || return 1
   _ar_check_keys "$p.ci" "timeout fix_attempts" "after_pr.ci" || return 1
   _ar_check_keys "$p.browser" "setup serve url ready_timeout instructions chrome_device" "after_pr.browser" || return 1
-  _ar_check_keys "$p.security" "command fix_attempts timeout" "after_pr.security" || return 1
+  _ar_check_keys "$p.security" "command fix_attempts review_last_fix timeout" "after_pr.security" || return 1
   _ar_check_keys "$p.qa" "document" "after_pr.qa" || return 1
   _ar_check_keys "$p.announce" "channel" "after_pr.announce" || return 1
   [ -n "$(gr_project_repos "$1")" ] || { echo "after_pr needs projects.$1.github.owner and github.repos"; return 1; }
@@ -212,6 +212,8 @@ jobs_validate_after_pr() {
   fi
   v="$(_arc "$p.security.fix_attempts")"
   [ -z "$v" ] || [[ "$v" =~ ^[0-3]$ ]] || { echo "after_pr.security.fix_attempts '${v}' must be 0-3"; return 1; }
+  v="$(_arc "$p.security.review_last_fix")"
+  _ar_bool "$v" || { echo "after_pr.security.review_last_fix '${v}' must be true or false"; return 1; }
   v="$(_arc "$p.qa.document")"
   _ar_bool "$v" || { echo "after_pr.qa.document '${v}' must be true or false"; return 1; }
   if [ "$v" = true ] && { [ "$(_arc "projects.$1.qa.document_to")" != slite ] || [ -z "$(_arc "projects.$1.qa.document_parent")" ]; }; then

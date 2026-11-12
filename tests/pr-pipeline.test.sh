@@ -120,6 +120,10 @@ cat > "$TMP/bin/claude" <<'EOF'
 printf '%s\n' "$*" >> "$CLAUDE_ARGS"
 case "$*" in
   *"CI failed on pull request"*|*"A security review of pull request"*)
+    if [ -f "$(git rev-parse --git-path MERGE_HEAD)" ]; then   # resolve a merge the pipeline started
+      git diff --name-only --diff-filter=U > "$ST/merge-unmerged"
+      echo resolved > a.txt; git add a.txt; git commit -q --no-edit
+    fi
     [ "${FIX:-push}" = push ] && { b="$(git rev-parse HEAD)"; echo fix >> fixed.txt; git add fixed.txt; git commit -qm fix; git push -q origin "HEAD:refs/heads/$BR"
       jq --arg b "$b" --arg a "$(git rev-parse HEAD)" --arg l "${FIX_PUSHER:-tom}" '[{before: $b, after: $a, actor: {login: $l}}] + .' \
         <(cat "$ST/activity.json" 2>/dev/null || echo '[]') > "$ST/activity.fix" && mv "$ST/activity.fix" "$ST/activity.json"; } ;;
@@ -321,6 +325,18 @@ echo '[{"title":"x","severity":"low","file":"a.txt"}]' > "$ST/secrev.1.json"; cp
 eq "a finding that survives the fix stops" 1 "$(run)"
 eq "remaining finding named in the result" "stopped	security review: 1 introduced finding(s) remain after 1 fix attempt(s): x — report: $PD/security/round2/report.md" "$(cat "$PD/result")"
 eq "PR stays draft" 0 "$(readied)"
+
+reset; write_config '["pr-ready", "security-review"]' "{ mark_ready: true, ci: { fix_attempts: 0 }, security: { $SECCMD, fix_attempts: 2, review_last_fix: false } }"
+echo '[{"title":"x","severity":"low","file":"a.txt"}]' > "$ST/secrev.1.json"; cp "$ST/secrev.1.json" "$ST/secrev.2.json"; cp "$ST/secrev.1.json" "$ST/secrev.3.json"
+eq "review_last_fix false: the last fix is not re-reviewed" "0|2|2" "$(run)|$(sec_fix_runs)|$(secrev_calls)"
+eq "and the PR goes ready" 1 "$(readied)"
+fixhead="$(git --git-dir="$ORIGIN" rev-parse "refs/heads/$BR")"
+grep -q "security fix 2 on ${fixhead:0:7} not re-reviewed (review_last_fix: false)" "$EA_AGENT_DIR/state/jobs.log" \
+  && ok "the unreviewed fix head is logged" || bad "no unreviewed-head log for ${fixhead:0:7}"
+
+reset; write_config '["pr-ready", "security-review"]' "{ mark_ready: true, ci: { fix_attempts: 0 }, security: { $SECCMD, fix_attempts: 2 } }"
+echo '[{"title":"x","severity":"low","file":"a.txt"}]' > "$ST/secrev.1.json"; cp "$ST/secrev.1.json" "$ST/secrev.2.json"; cp "$ST/secrev.1.json" "$ST/secrev.3.json"
+eq "by default the last fix is re-reviewed" "1|2|3" "$(run)|$(sec_fix_runs)|$(secrev_calls)"
 
 reset; write_config '["pr-ready", "security-review"]' "{ mark_ready: true, ci: { fix_attempts: 0 }, security: { $SECCMD, fix_attempts: 0 } }"
 echo '[{"title":"x","severity":"info","file":"a.txt"}]' > "$ST/secrev.1.json"
@@ -570,6 +586,22 @@ eq "exits 0 after a successful fix" 0 "$(run)"
 eq "one fix run" 1 "$(fix_runs)"
 grep -q 'log of run 77: expected 1 got 2' "$PD/ci-failure.log" && ok "failed run log handed to the fix run" || bad "log: $(cat "$PD/ci-failure.log")"
 grep -q 'FAILED CHECK: test' "$PD/ci-failure.log" && ok "failing check named" || bad "check name missing"
+grep -q 'merge of origin/main' "$CLAUDE_ARGS" && bad "a branch that merges cleanly got a base merge" || ok "no base merge without conflicts"
+
+reset; write_config '["pr-ready"]'
+main0="$(git --git-dir="$ORIGIN" rev-parse refs/heads/main)"
+w="$(mktemp -d)"; git clone -q --branch main "$ORIGIN" "$w"
+( cd "$w" && echo m > a.txt && git add a.txt && git commit -qm "main adds a.txt" && git push -q origin HEAD:refs/heads/main )
+main1="$(git --git-dir="$ORIGIN" rev-parse refs/heads/main)"
+printf 'status-fail\tcihub build\thttps://ci.example/p/9\tFailed to merge origin/main.\n' \
+  > "$ST/checks.$(git --git-dir="$ORIGIN" rev-parse "refs/heads/$BR")"
+eq "a branch that conflicts with its base: exits 0 after the fix" 0 "$(run)"
+eq "the fix run starts inside the base merge, with the conflict unresolved" a.txt "$(cat "$ST/merge-unmerged" 2>/dev/null)"
+grep -q 'A merge of origin/main into this branch is in progress' "$CLAUDE_ARGS" && grep -q "$PD/merge-conflicts.txt" "$CLAUDE_ARGS" \
+  && ok "the fix run is told to finish the merge" || bad "merge not in the fix prompt"
+eq "conflicting files listed" a.txt "$(cat "$PD/merge-conflicts.txt" 2>/dev/null)"
+git --git-dir="$ORIGIN" merge-base --is-ancestor "$main1" "refs/heads/$BR" && ok "the pushed head contains the base" || bad "base not merged into the pushed head"
+git --git-dir="$ORIGIN" update-ref refs/heads/main "$main0"
 
 reset; write_config '["pr-ready"]'
 printf 'status-fail\tcihub build\thttps://ci.example/p/9\tCode and migrations cannot share a PR.\n' \
@@ -809,8 +841,10 @@ write_config '[]' '{ security: { command: "bin/review" } }'
 eq "a relative security.command is refused" "after_pr.security.command 'bin/review' must be an absolute or ~/ path" "$(valid)"
 write_config '[]' '{ security: { command: "/x/review", fix_attempts: 4 } }'
 eq "security fix_attempts above 3 is refused" "after_pr.security.fix_attempts '4' must be 0-3" "$(valid)"
+write_config '[]' '{ security: { command: "/x/review", review_last_fix: no } }'
+eq "a non-boolean review_last_fix is refused" "after_pr.security.review_last_fix 'no' must be true or false" "$(valid)"
 write_config '[]' '{ security: { comand: /x/review } }'
-eq "unknown security key is refused" "after_pr.security: unknown key 'comand' (allowed: command fix_attempts timeout)" "$(valid)"
+eq "unknown security key is refused" "after_pr.security: unknown key 'comand' (allowed: command fix_attempts review_last_fix timeout)" "$(valid)"
 write_config '[]' '{ security: { command: "/x/review", timeout: soon } }'
 eq "a bad security timeout is refused" "after_pr.security.timeout 'soon' must look like 30m or 2h" "$(valid)"
 write_config '[]' '{ transition: "Code Review" }'

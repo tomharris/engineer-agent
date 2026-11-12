@@ -516,6 +516,7 @@ projects:
     #         command: "~/bin/pr-security-review"  # your adapter: <cmd> <owner/repo> <pr> <outdir> writes
     #                                    #   report.md + findings.json; exit 3 = needs login (README)
     #         fix_attempts: 1            # 0-3 fix + re-review rounds; every finding the PR introduced is fixed
+    #         review_last_fix: true      # false => the last fix attempt is not re-reviewed
     #         timeout: 30m               # per review
     #       qa:                          # optional; tier "qa-publish". QA plan + PR (and Jira) comment;
     #         document: true             #   true => Slite note under projects.<slug>.qa.document_parent.
