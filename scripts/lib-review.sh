@@ -29,23 +29,42 @@ A finding conflicts only when fixing it would remove, undo or contradict somethi
 Write ${3} (the only file you may write): a JSON array of {\"index\", \"ac\" (the requirement, copied word for word from the ticket, at least one full sentence), \"reason\" (one sentence)}, one per conflicting finding, ending with the element {\"nonce\": \"<nonce>\"} where <nonce> is the value after NONCE: ${4}. No conflicts is [{\"nonce\": ...}]. ${NO_MEMORY_RULE:-} Be concise."
 }
 
+# ac_guard_input <findings.json> — what the judge sees: index, title, severity and file only. Detail
+# and evidence are free model text written while reading the (possibly untrusted) diff.
+ac_guard_input() {
+  jq '[to_entries[] | {index: .key, title: (.value.title // "" | tostring | .[:200]),
+       severity: (.value.severity // "" | tostring | .[:20]), file: (.value.file // "" | tostring | .[:200])}]' "$1"
+}
+
 # ac_guard_split <findings.json> <verdict.json> <ticket.md> <nonce> — {keep, skip, abstained}. A
-# finding is skipped only when the nonce-checked verdict names its index and quotes a requirement
-# (>= 20 chars, whitespace-normalized) found verbatim in the ticket; a critical one never is. Any
-# unusable verdict or an empty ticket abstains: every finding is kept.
+# finding is skipped only when the nonce-checked verdict names its index and quotes, whitespace-
+# normalized, one whole requirement of the ticket (>= 20 chars): a list item or paragraph, or one
+# complete sentence of one; headings (Markdown or Jira h1.-h6.) and the title line are not requirements. Only medium and low
+# findings are skippable (unknown severity ranks high). Any unusable verdict or an empty ticket
+# abstains: every finding is kept.
 ac_guard_split() {
   local v='null'
   [ -s "$3" ] && v="$(jq -c --arg n "$4" 'select(type == "array" and length > 0 and (last | type == "object" and .nonce == $n)) | .[:-1]' "$2" 2>/dev/null)"
   [ -n "$v" ] || v='null'
   jq -c --argjson v "$v" --rawfile t "$3" '
     def norm: gsub("\\s+"; " ") | ltrimstr(" ") | rtrimstr(" ");
-    . as $f | ($t | norm) as $ticket
+    def marker: "^\\s*([-*+]|[0-9]+[.)]|#+|h[1-6]\\.)\\s";
+    def rank: ((. // "") | tostring | ascii_downcase) as $s | ({critical: 4, high: 3, medium: 2, low: 1}[$s] // 3);
+    # Units: a list item or heading starts one, a blank line ends one, other lines continue it.
+    def units: reduce ($t | split("\n"))[] as $l ({u: [], cur: null};
+        if ($l | test("^\\s*$")) then {u: (.u + [.cur]), cur: null}
+        elif ($l | test(marker)) or .cur == null then {u: (.u + [.cur]), cur: $l}
+        else .cur += " " + $l end)
+      | (.u + [.cur]) | map(select(. != null and (test("^\\s*(#|h[1-6]\\.\\s)") | not))
+          | sub("^\\s*([-*+]|[0-9]+[.)])\\s+(\\[[ xX]\\]\\s+)?"; "") | norm);
+    ([units[] | ., (splits("(?<=[.!?])\\s+") | norm)] | map(select(length >= 20)) | unique) as $reqs
+    | . as $f
     | if $v == null then {keep: $f, skip: [], abstained: true}
       else
         ([$v[] | select(type == "object" and (.index | type) == "number" and .index == (.index | floor)
                         and .index >= 0 and .index < ($f | length) and (.ac | type) == "string")
-              | select((.ac | norm) as $a | ($a | length) >= 20 and ($ticket | contains($a)))
-              | select(($f[.index].severity // "" | tostring | ascii_downcase) != "critical")]
+              | select((.ac | norm) as $a | $reqs | index([$a]))
+              | select($f[.index].severity | rank <= 2)]
          | unique_by(.index)) as $ok
         | ($ok | map(.index)) as $ix
         | {keep: [range($f | length) | select(. as $i | $ix | index($i) | not) | $f[.]],

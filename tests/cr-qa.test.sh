@@ -366,15 +366,17 @@ eq "review stop: no Jira comment" "" "$(cat "$H/jira-comments" 2>/dev/null)"
 eq "ledger review-stopped" review-stopped "$(outcome)"
 eq "worktree removed after review stop" "$WT0" "$(wts)"
 
-e2e_reset '[{"title":"Schedule should not be registered","severity":"high","file":"app/a.py","detail":"drop it"},{"nonce":"NONCE"}]' 0
+e2e_reset '[{"title":"Schedule should not be registered","severity":"medium","file":"app/a.py","detail":"drop it"},{"nonce":"NONCE"}]' 0
 fx ac-verdict '[{"index":0,"ac":"AC1: schedule is registered.","reason":"asks to undo AC1"},{"nonce":"NONCE"}]'
 run_job; eq "a finding that contradicts an AC does not block: approved" approved "$(outcome)"
 has "the Jira comment names it with the AC" "Not blocking, contradicts the ticket: Schedule should not be registered — AC1: schedule is registered." "$(cat "$H/jira-comments" 2>/dev/null)"
 guard_call="$(grep 'Some review findings may ask' "$CLAUDE_CALLS")"
 [ -n "$guard_call" ] && ! printf '%s' "$guard_call" | grep -qE 'Bash\(|Write\(|(^| )(Grep|Glob)( |$)' \
   && ok "guard run gets only reads and its verdict file" || bad "guard run missing or over-granted"
+printf '%s' "$guard_call" | grep -q 'ac-input.json)' && ! printf '%s' "$guard_call" | grep -q 'Read(/[^)]*blocking.json)' \
+  && ok "guard run reads the trimmed findings, not blocking.json" || bad "guard input: $guard_call"
 
-e2e_reset '[{"title":"Schedule should not be registered","severity":"high","file":"app/a.py","detail":"drop it"},{"nonce":"NONCE"}]' 0
+e2e_reset '[{"title":"Schedule should not be registered","severity":"medium","file":"app/a.py","detail":"drop it"},{"nonce":"NONCE"}]' 0
 fx ac-verdict '[{"index":0,"ac":"AC1: schedules may be skipped entirely.","reason":"r"},{"nonce":"NONCE"}]'
 run_job; eq "an AC the ticket does not contain does not unblock" review-stopped "$(outcome)"
 rm -f "$TMP/fx.ac-verdict"

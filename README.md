@@ -953,9 +953,9 @@ or via Approve), `scripts/pr-pipeline.sh` runs detached:
    (default 1) rounds. `security.review_last_fix: false` skips the re-review after the last fix
    attempt, so that fix goes on to CI unreviewed. **AC guard:** a finding whose fix would undo
    something the ticket explicitly requires is not fixed; a small read-only judge run names it,
-   and it is skipped only if the judge quotes the requirement word for word from the ticket text
-   the autopilot recorded at pick time (only after the trusted-author check passed) and it isn't
-   `critical`. Skipped findings are listed in the QA comment. Without that ticket text (an Approve
+   and it is skipped only if the judge quotes one whole requirement (a list item, paragraph or
+   complete sentence) word for word from the ticket text the autopilot recorded at pick time (only
+   after the trusted-author check passed), and the finding is `medium` or `low`. Skipped findings are listed in the QA comment. Without that ticket text (an Approve
    pick), or on any unusable verdict, every finding is fixed as before. Other findings are skipped and counted in the
    QA comment. Anything introduced that survives, an auth failure, or a head that moved during a
    review stops the pipeline.

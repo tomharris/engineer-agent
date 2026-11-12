@@ -300,10 +300,13 @@ Things a reader will otherwise "fix" back:
   that cannot complete is an error, never a pass.
 - **AC guard (cr-qa review and `after_pr` security).** Reviewers flag behaviour a ticket asks for
   (AIA-536: the publisher fallback without a permission recheck, per-reason error codes), and fix
-  runs then undo the ticket. A read-only judge run (`ac_guard_prompt`; reads only the findings and
-  the ticket, writes only its verdict) names the conflicting findings; bash (`ac_guard_split`)
-  skips one only when the nonce-checked verdict quotes a requirement of 20+ characters found
-  verbatim in the ticket, and never a `critical` one. A failed or unusable judgment abstains: every
+  runs then undo the ticket. A read-only judge run (`ac_guard_prompt`; reads only the ticket and
+  `ac_guard_input`'s index/title/severity/file per finding, never evidence or detail, which is model
+  text written over a possibly untrusted diff; writes only its verdict) names the conflicting
+  findings. Bash (`ac_guard_split`) skips one only when the nonce-checked verdict quotes one whole
+  requirement (20+ chars: a list item, paragraph or complete sentence of one; headings and the
+  title are not requirements; a substring is not enough), and only a `medium`/`low` finding:
+  `critical`, `high` (including cr-qa's unmet-AC findings) and unknown severities always count. A failed or unusable judgment abstains: every
   finding is kept. The ticket text must be trusted, or a ticket edit could suppress findings:
   cr-qa uses its trust-checked `ticket.md`; `after_pr` uses `state/pr-pipeline/<item>/ticket.md`,
   written by implement-next from its one fetch only after the trusted-author gate passed (an

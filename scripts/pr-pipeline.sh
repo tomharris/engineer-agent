@@ -472,14 +472,14 @@ qa_publish() {
 # the rest go to $D/security/ac-skipped.json. Only the bash-recorded, trust-checked ticket text
 # counts (record_ticket_text); without it, or on any unusable verdict, every finding is kept.
 ac_guard() {
-  local t="$D/ticket.md" f="$2/ac-findings.json" v="$2/ac-verdict.json" nonce split
+  local t="$D/ticket.md" f="$2/ac-findings.json" in="$2/ac-input.json" v="$2/ac-verdict.json" nonce split
   AC_KEEP="$1"; echo '[]' > "$D/security/ac-skipped.json"
   [ -s "$t" ] || return 0
-  printf '%s' "$1" > "$f"; rm -f "$v"
+  printf '%s' "$1" > "$f"; ac_guard_input "$f" > "$in"; rm -f "$v"
   nonce="$(od -An -tx1 -N8 /dev/urandom | tr -d ' \n')"
   ( cd "$2" && "$CLAUDE_BIN" -p --model sonnet --permission-mode default --setting-sources user --strict-mcp-config \
-      --allowedTools "Read(/${f})" "Read(/${t})" "Edit(/${v})" --max-budget-usd "$AC_GUARD_BUDGET_USD" \
-      "$(ac_guard_prompt "$f" "$t" "$v" "$nonce")" </dev/null ) >> "$LOG_FILE" 2>&1
+      --allowedTools "Read(/${in})" "Read(/${t})" "Edit(/${v})" --max-budget-usd "$AC_GUARD_BUDGET_USD" \
+      "$(ac_guard_prompt "$in" "$t" "$v" "$nonce")" </dev/null ) >> "$LOG_FILE" 2>&1
   split="$(ac_guard_split "$f" "$v" "$t" "$nonce")" || { log "AC guard: unreadable findings; all kept"; return 0; }
   [ "$(printf '%s' "$split" | jq .abstained)" = false ] || log "AC guard: no usable verdict; all findings kept"
   AC_KEEP="$(printf '%s' "$split" | jq -c .keep)"

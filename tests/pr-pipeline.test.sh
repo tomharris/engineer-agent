@@ -339,6 +339,8 @@ guard_args="$(grep 'Some review findings may ask' "$CLAUDE_ARGS")"
 [ -n "$guard_args" ] && ! printf '%s' "$guard_args" | grep -qE 'Bash\(|Write\(|(^| )(Grep|Glob)( |$)' \
   && ok "guard run gets only reads and its verdict file" || bad "guard run missing or granted more than reads and its verdict"
 printf '%s' "$guard_args" | grep -q -- '--strict-mcp-config' && ok "guard run loads no MCP" || bad "guard run may load MCP"
+printf '%s' "$guard_args" | grep -qF "Read(/$PD/security/round1/ac-input.json)" && ! printf '%s' "$guard_args" | grep -qF 'Read(/'"$PD"'/security/round1/ac-findings.json)' \
+  && ok "guard run reads the trimmed findings only" || bad "guard input: $guard_args"
 
 reset; write_config '["pr-ready", "security-review"]' "$SEC"; ac_ticket
 echo '[{"title":"tabnabbing","severity":"medium","file":"a.txt"}]' > "$ST/secrev.1.json"

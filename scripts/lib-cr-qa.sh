@@ -125,9 +125,9 @@ crqa_ac_guard() {
   local w="$1" nonce split
   echo '[]' > "$w/ac-skipped.json"
   [ "$(jq length "$w/blocking.json")" -gt 0 ] && [ -s "$w/ticket.md" ] || return 0
-  nonce="$(_crqa_nonce)"; rm -f "$w/ac-verdict.json"
-  ( cd "$w" && _crqa_claude --allowedTools "Read(/${w}/blocking.json)" "Read(/${w}/ticket.md)" "Edit(/${w}/ac-verdict.json)" \
-      --max-budget-usd "$2" "$(ac_guard_prompt "$w/blocking.json" "$w/ticket.md" "$w/ac-verdict.json" "$nonce")" </dev/null ) \
+  nonce="$(_crqa_nonce)"; rm -f "$w/ac-verdict.json"; ac_guard_input "$w/blocking.json" > "$w/ac-input.json"
+  ( cd "$w" && _crqa_claude --allowedTools "Read(/${w}/ac-input.json)" "Read(/${w}/ticket.md)" "Edit(/${w}/ac-verdict.json)" \
+      --max-budget-usd "$2" "$(ac_guard_prompt "$w/ac-input.json" "$w/ticket.md" "$w/ac-verdict.json" "$nonce")" </dev/null ) \
     >> "${LOG_FILE:-/dev/null}" 2>&1
   split="$(ac_guard_split "$w/blocking.json" "$w/ac-verdict.json" "$w/ticket.md" "$nonce")" || return 0
   printf '%s' "$split" | jq .skip > "$w/ac-skipped.json"
