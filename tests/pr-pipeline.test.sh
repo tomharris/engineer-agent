@@ -42,6 +42,7 @@ done
 case " $* " in *" --config "*|*" @- "*) { cat; echo; } >> "$ST/curl.stdin" ;; esac
 printf '%s %s %s\n' "$method" "$url" "$(printf '%s' "$body" | tr '\n' ' ')" >> "$ST/curl.log"
 printf '%s\n' "$*" >> "$ST/curl.argv"
+for a in "$@"; do case "$a" in @/*.headers) f="${a#@}"; cp "$f" "$ST/hdr.seen"; ls -l "$f" | cut -c1-10 > "$ST/hdr.mode"; echo "$f" > "$ST/hdr.path" ;; esac; done
 code=200; resp='{}'
 case "$url" in */missing*) code=404 ;; esac
 case "$method $url" in
@@ -582,12 +583,15 @@ PASS: signed in
 FAIL: keyed (auth api_key unavailable)
 FAIL: unknown auth (invalid check)" "$(cat "$PD/qa/tests.out" 2>/dev/null)"
 eq "the adapter is given the base URL" "https://app.test:18443" "$(cat "$ST/session.arg" 2>/dev/null)"
-grep -F 'https://app.test:18443/me' "$ST/curl.argv" | grep -qF -- "-H @$PD/qa/auth/session.headers" \
+grep -F 'https://app.test:18443/me' "$ST/curl.argv" | grep -qE -- '-H @/[^ ]+/session\.headers' \
   && ok "session headers go to curl as a file" || bad "argv: $(grep /me "$ST/curl.argv")"
 grep -q 's3cret' "$ST/curl.argv" && bad "a session secret reached curl argv" || ok "auth secrets stay off curl argv"
 eq "headers file holds the adapter output" "Cookie: SID=s3cret
-X-CSRF-TOKEN: tok" "$(cat "$PD/qa/auth/session.headers" 2>/dev/null)"
-eq "headers file is private" "-rw-------" "$(ls -l "$PD/qa/auth/session.headers" 2>/dev/null | cut -c1-10)"
+X-CSRF-TOKEN: tok" "$(cat "$ST/hdr.seen" 2>/dev/null)"
+eq "headers file is private" "-rw-------" "$(cat "$ST/hdr.mode" 2>/dev/null)"
+case "$(cat "$ST/hdr.path" 2>/dev/null)" in "$EA_AGENT_DIR"/*|"") bad "headers kept under the agent dir" ;; *) ok "headers live outside the agent dir" ;; esac
+[ -e "$(cat "$ST/hdr.path" 2>/dev/null)" ] && bad "headers outlive the run" || ok "headers are removed after the run"
+grep -rl s3cret "$EA_AGENT_DIR" >/dev/null 2>&1 && bad "a session secret persisted under the agent dir" || ok "no session secret persists under the agent dir"
 grep -qF 'https://app.test:18443/api/me' "$ST/curl.log" && bad "keyed check was requested" || ok "an unavailable auth sends no request"
 
 printf '#!/bin/bash\nprintf "Cookie: a\\n-K /tmp/x\\n"\n' > "$TMP/bin/qa-session"

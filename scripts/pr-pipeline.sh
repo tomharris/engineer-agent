@@ -112,7 +112,9 @@ BUDGET="$(_arc "$P.budget_usd")"; BUDGET="${BUDGET:-3.00}"
 
 # --- watchdog + cleanup ---------------------------------------------------------------------------
 WT="" SRV="" BT="" NEW_SHA="" WATCHDOG=""
+QA_AUTH_DIR=""
 cleanup() {
+  [ -n "$QA_AUTH_DIR" ] && { rm -rf "$QA_AUTH_DIR"; QA_AUTH_DIR=""; }
   [ -n "$SRV" ] && { jobs_kill_tree "$SRV"; wait "$SRV" 2>/dev/null; SRV=""; }
   if [ -n "$WT" ]; then
     git -C "$PROJECT_PATH" worktree remove --force "$WT" >>"$LOG_FILE" 2>&1 || true
@@ -353,14 +355,15 @@ qa_server_prefix() {
 }
 
 # qa_auth_headers <base-url> — run each qa.auth.<name> adapter (`<cmd> <base-url>`, from bash, never
-# the model) and keep its stdout as $D/qa/auth/<name>.headers when every line is a "Name: value"
-# header. A failed or malformed adapter leaves no file, so its checks fail by name.
+# the model) and keep its stdout as $QA_AUTH_DIR/<name>.headers when every line is a "Name: value"
+# header. A failed or malformed adapter leaves no file, so its checks fail by name. The dir is a
+# private mktemp outside $D (no model run can be granted it) and cleanup removes it.
 qa_auth_headers() {
   local name cmd f
-  rm -rf "$D/qa/auth"; ( umask 077; mkdir -p "$D/qa/auth" )
+  QA_AUTH_DIR="$(mktemp -d)" || return 1
   for name in $(_ar_children "$P.qa.auth"); do
     cmd="$(_arc "$P.qa.auth.$name")"; cmd="${cmd/#\~/$HOME}"
-    f="$D/qa/auth/${name}.headers"
+    f="$QA_AUTH_DIR/${name}.headers"
     ( umask 077; with_timeout 300 "$cmd" "$1" </dev/null > "$f.tmp" 2>>"$D/serve.log" )
     if [ $? -eq 0 ] && [ -s "$f.tmp" ] && ! grep -qvE '^[A-Za-z0-9-]+: [^[:cntrl:]]*$' "$f.tmp"; then
       mv "$f.tmp" "$f"
@@ -446,8 +449,8 @@ qa_checks() {
       if ! [[ "$auth" =~ ^[a-z][a-z0-9_]{0,31}$ ]] || ! _ar_children "$P.qa.auth" | grep -qxF -- "$auth"; then
         echo "FAIL: ${name} (invalid check)"; continue
       fi
-      [ -s "$D/qa/auth/${auth}.headers" ] || { echo "FAIL: ${name} (auth ${auth} unavailable)"; continue; }
-      hdr=( -H "@$D/qa/auth/${auth}.headers" )
+      [ -n "$QA_AUTH_DIR" ] && [ -s "$QA_AUTH_DIR/${auth}.headers" ] || { echo "FAIL: ${name} (auth ${auth} unavailable)"; continue; }
+      hdr=( -H "@$QA_AUTH_DIR/${auth}.headers" )
     fi
     : > "$D/qa/resp"
     if printf '%s' "$c" | jq -e 'has("body")' >/dev/null; then
