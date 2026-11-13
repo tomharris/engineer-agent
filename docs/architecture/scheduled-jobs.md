@@ -253,7 +253,8 @@ security → CI → browser → QA → ready → transition → announce. Things
   Its `url` may name any host, because bash pins that host to 127.0.0.1 with `--resolve`; `insecure`
   adds `-k` for a self-signed local certificate. A check's optional `auth` must be one of the
   configured `qa.auth` names. Bash runs each `qa.auth.<name>` adapter (`<cmd> <base-url>`) after the
-  server answers, keeps its stdout in a 0600 headers file only when every line is a `Name: value`
+  server answers, keeps its stdout in a 0600 headers file (a temp dir outside the agent dir, removed
+  when the run ends) only when every line is a `Name: value`
   header, and hands it to curl as `-H @file`, so no credential reaches the model or argv. A failed
   adapter fails its checks by name.
 - **The QA run reads only its worktree, its ticket text and `change.diff`.** The ticket text is
