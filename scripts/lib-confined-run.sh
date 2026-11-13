@@ -339,7 +339,7 @@ ${NO_MEMORY_RULE} Be concise."
   # no PR, no QA. It never fails the ticket — the ticket's ✅/⚠️ ack is decided by the caller
   # from the drafts/ check alone.
   if [ "$unattended" = 1 ]; then
-    log "skipping QA generation for ${item}: unattended run"
+    log "QA for ${item} deferred to pr-pipeline (unattended run)"
   elif [ -e "${AGENT_DIR}/queue/completed/${item}" ]; then
     run_qa_generation "$item" "$project" "$base" "$wt" "$QA_BUDGET_USD" || true
   fi

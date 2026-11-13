@@ -249,23 +249,40 @@ CHROME_TOOLS=(
 )
 
 # browser_test — sets BT to pass | fail | <reason it could not run>. Report in $D/browser-report.md.
-# serve_branch — run browser.setup then browser.serve in WT until browser.url answers. Sets SRV;
-# rc 1 with SERVE_ERR otherwise (the caller cleans up).
+# local_curl_args <url> <insecure> — sets LCA: for a host other than localhost, --resolve pins it to
+# 127.0.0.1 (the server is the branch bash started, never the network); insecure adds -k for a
+# self-signed local certificate.
+local_curl_args() {
+  local hp host port
+  LCA=()
+  hp="$(printf '%s' "$1" | sed -E 's#^https?://([^/?#]+).*#\1#')"
+  host="${hp%%:*}"; port="${hp##*:}"
+  [ "$port" != "$hp" ] || case "$1" in https:*) port=443 ;; *) port=80 ;; esac
+  case "$host" in localhost|127.0.0.1) ;; *) LCA+=( --resolve "${host}:${port}:127.0.0.1" ) ;; esac
+  [ "$2" = true ] && LCA+=( -k )
+  return 0
+}
+
+# serve_branch <prefix> — run <prefix>.setup then <prefix>.serve in WT until <prefix>.url answers.
+# <prefix> is $P.browser or $P.qa.server. Sets SRV; rc 1 with SERVE_ERR otherwise (the caller
+# cleans up).
 serve_branch() {
-  local url setup serve ready t0 code
-  url="$(_arc "$P.browser.url")"; setup="$(_arc "$P.browser.setup")"; serve="$(_arc "$P.browser.serve")"
-  ready="$(jobs_duration_seconds "$(_arc "$P.browser.ready_timeout")")"; ready="${ready:-180}"
+  local url setup serve ready setup_secs t0 code
+  url="$(_arc "$1.url")"; setup="$(_arc "$1.setup")"; serve="$(_arc "$1.serve")"
+  ready="$(jobs_duration_seconds "$(_arc "$1.ready_timeout")")"; ready="${ready:-180}"
+  setup_secs="$(jobs_duration_seconds "$(_arc "$1.setup_timeout")")"; setup_secs="${setup_secs:-1200}"
+  local_curl_args "$url" "$(_arc "$1.insecure")"
   if [ -n "$setup" ]; then
-    ( cd "$WT" && with_timeout 1200 bash -c "$setup" ) </dev/null >> "$D/serve.log" 2>&1 \
-      || { SERVE_ERR="browser.setup failed (see ${D}/serve.log)"; return 1; }
+    ( cd "$WT" && with_timeout "$setup_secs" bash -c "$setup" ) </dev/null >> "$D/serve.log" 2>&1 \
+      || { SERVE_ERR="${1#"$P".}.setup failed (see ${D}/serve.log)"; return 1; }
   fi
   ( cd "$WT" && exec bash -c "$serve" ) </dev/null >> "$D/serve.log" 2>&1 &
   SRV=$!
   t0="$(date +%s)"
   while :; do
-    code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "$url" 2>/dev/null)"
+    code="$(curl -s ${LCA[@]+"${LCA[@]}"} -o /dev/null -w '%{http_code}' --max-time 5 "$url" 2>/dev/null)"
     [[ "$code" =~ ^[234] ]] && return 0
-    kill -0 "$SRV" 2>/dev/null || { SERVE_ERR="browser.serve exited before ${url} answered (see ${D}/serve.log)"; return 1; }
+    kill -0 "$SRV" 2>/dev/null || { SERVE_ERR="${1#"$P".}.serve exited before ${url} answered (see ${D}/serve.log)"; return 1; }
     [ $(( $(date +%s) - t0 )) -lt "$ready" ] || { SERVE_ERR="${url} did not answer within ${ready}s"; return 1; }
     sleep "$(( POLL < 5 ? POLL : 5 ))"
   done
@@ -280,7 +297,7 @@ browser_test() {
   dev="$(_arc "$P.browser.chrome_device")"
   [ -z "$dev" ] || instr="FIRST call mcp__claude-in-chrome__select_browser with deviceId ${dev}; if that fails, stop: the verdict is fail. ${instr}"
   branch_worktree || { BT="could not create a worktree on ${BRANCH}"; return; }
-  serve_branch || { cleanup; BT="$SERVE_ERR"; return; }
+  serve_branch "$P.browser" || { cleanup; BT="$SERVE_ERR"; return; }
   nonce="$(od -An -tx1 -N8 /dev/urandom | tr -d ' \n')"
   local tools=( Read Glob Grep "${CONFINED_GIT_READ_RULES[@]}" "${CHROME_TOOLS[@]}" )
   # Only with a pinned (dedicated) device: page text could otherwise steer the run onto another
@@ -329,12 +346,36 @@ ${NO_MEMORY_RULE}"
 # _section <file> <heading> — the body under "## <heading>" up to the next "## ".
 _section() { awk -v h="## $2" '$0 == h {f=1; next} /^## / {f=0} f' "$1"; }
 
+# qa_server_prefix — the server QA's checks run against: qa.server, else browser, else none.
+qa_server_prefix() {
+  if [ -n "$(_arc "$P.qa.server.serve")" ]; then echo "$P.qa.server"
+  elif [ -n "$(_arc "$P.browser.serve")" ]; then echo "$P.browser"; fi
+}
+
+# qa_auth_headers <base-url> — run each qa.auth.<name> adapter (`<cmd> <base-url>`, from bash, never
+# the model) and keep its stdout as $D/qa/auth/<name>.headers when every line is a "Name: value"
+# header. A failed or malformed adapter leaves no file, so its checks fail by name.
+qa_auth_headers() {
+  local name cmd f
+  rm -rf "$D/qa/auth"; ( umask 077; mkdir -p "$D/qa/auth" )
+  for name in $(_ar_children "$P.qa.auth"); do
+    cmd="$(_arc "$P.qa.auth.$name")"; cmd="${cmd/#\~/$HOME}"
+    f="$D/qa/auth/${name}.headers"
+    ( umask 077; with_timeout 300 "$cmd" "$1" </dev/null > "$f.tmp" 2>>"$D/serve.log" )
+    if [ $? -eq 0 ] && [ -s "$f.tmp" ] && ! grep -qvE '^[A-Za-z0-9-]+: [^[:cntrl:]]*$' "$f.tmp"; then
+      mv "$f.tmp" "$f"
+    else
+      rm -f "$f.tmp"; log "QA auth '${name}' adapter failed; its checks will fail"
+    fi
+  done
+}
+
 # qa_stage — one confined run writes the plan from the trust-checked queue item and the diff (it
 # never re-fetches the ticket and gets no tracker, gh or network verb). Success = the plan has its
-# three sections and ends with this run's nonce. With browser.serve, bash runs the scripted block
-# against the served branch. Sets QA_PASS, QA_FAIL, QA_AUTO, QA_MANUAL.
+# three sections and ends with this run's nonce. With a server (qa_server_prefix), bash serves the
+# branch and runs the scripted block against it. Sets QA_PASS, QA_FAIL, QA_AUTO, QA_MANUAL.
 qa_stage() {
-  local plan="$D/qa/plan.md" nonce url last
+  local plan="$D/qa/plan.md" nonce url last srv auth_names auth_rule=""
   rm -rf "$D/qa"; mkdir -p "$D/qa"
   branch_worktree || stop "QA: could not create a worktree on ${BRANCH}"
   nonce="$(od -An -tx1 -N8 /dev/urandom | tr -d ' \n')"
@@ -343,10 +384,13 @@ qa_stage() {
   git -C "$WT" diff "origin/${BASE}...HEAD" > "$D/qa/change.diff" 2>>"$LOG_FILE" \
     || { cleanup; stop "QA: could not diff the branch against origin/${BASE}"; }
   local tools=( "Read(/${WT}/**)" "Read(/$(ticket_source))" "Read(/${D}/qa/change.diff)" "Edit(/${plan})" )
+  srv="$(qa_server_prefix)"
+  auth_names="$(_ar_children "$P.qa.auth" | paste -sd, - | sed 's/,/, /g')"
+  [ -z "$auth_names" ] || auth_rule=" A check that needs a signed-in caller adds \"auth\" set to one of: ${auth_names}; omit it for an anonymous request."
   local prompt="Write a QA plan for the change on this branch. The ticket, with its acceptance criteria, is $(ticket_source); the change is the diff in ${D}/qa/change.diff, and the current directory is the branch. \
 Write the plan to ${plan} (a new file; it is the only file you may write) with exactly these sections: \
 '## Summary' — 2 to 5 sentences: what changed and how each acceptance criterion is covered, no links; \
-'## Scripted Tests' — one \`\`\`json block: an array of at most 50 HTTP checks against the running app, each {\"name\", \"method\" (GET, POST, PUT, PATCH, DELETE or HEAD), \"path\" (starting with /), optional \"body\" (JSON), \"expect_status\", optional \"expect_contains\"}; \
+'## Scripted Tests' — one \`\`\`json block: an array of at most 50 HTTP checks against the running app, each {\"name\", \"method\" (GET, POST, PUT, PATCH, DELETE or HEAD), \"path\" (starting with /), optional \"body\" (JSON), \"expect_status\", optional \"expect_contains\"}.${auth_rule} Cover every endpoint the diff adds or changes, success and failure paths; \
 '## Manual Checklist' — '- [ ] ' items only a person can judge. \
 End the file with the line 'QA-NONCE: ${nonce}'. ${NO_MEMORY_RULE} Be concise."
   log "QA run on ${sha:0:7} (budget ${QA_BUDGET_USD})"
@@ -358,14 +402,15 @@ End the file with the line 'QA-NONCE: ${nonce}'. ${NO_MEMORY_RULE} Be concise."
     cleanup; stop "QA run produced no plan"
   fi
   QA_MANUAL="$(_section "$plan" "Manual Checklist" | grep -c '^- \[ \]')"
-  QA_PASS=0 QA_FAIL=0 QA_AUTO="Automated: not executed — no local server"
+  QA_PASS=0 QA_FAIL=0 QA_AUTO="Automated: not executed — no local server (set after_pr.qa.server)"
   _section "$plan" "Scripted Tests" | awk '/^```/ { if (f) exit; f = 1; next } f' > "$D/qa/checks.json"
   jq -e 'type == "array"' "$D/qa/checks.json" >/dev/null 2>&1 || : > "$D/qa/checks.json"
-  if [ -n "$(_arc "$P.browser.serve")" ]; then
+  if [ -n "$srv" ]; then
     if [ ! -s "$D/qa/checks.json" ]; then
       QA_AUTO="Automated: not executed — the plan's checks are not a JSON list"
-    elif serve_branch; then
-      url="$(_arc "$P.browser.url")"
+    elif serve_branch "$srv"; then
+      url="$(_arc "$srv.url")"; url="${url%/}"
+      qa_auth_headers "$url"
       qa_checks "$D/qa/checks.json" "$url" > "$D/qa/tests.out"
       QA_PASS="$(grep -c '^PASS: ' "$D/qa/tests.out")"; QA_FAIL="$(grep -c '^FAIL: ' "$D/qa/tests.out")"
       QA_AUTO="Automated: ${QA_PASS} passed, ${QA_FAIL} failed"
@@ -380,8 +425,10 @@ End the file with the line 'QA-NONCE: ${nonce}'. ${NO_MEMORY_RULE} Be concise."
 # to <base-url><path> with an allowlisted method; a body goes on stdin (so "@file" is just text).
 # Prints PASS:/FAIL: lines.
 qa_checks() {
-  local c name method path want contains code
+  local c name method path want contains code auth
   local re='^/[A-Za-z0-9._~/?=&%:+,@-]*$'
+  local hdr=()
+  local_curl_args "$2" "$(_arc "$(qa_server_prefix).insecure")"
   jq -c '.[:50][]' "$1" | while IFS= read -r c; do
     name="$(printf '%s' "$c" | jq -r '.name // "unnamed" | tostring' | tr -cd '[:print:]' | cut -c1-120)"
     method="$(printf '%s' "$c" | jq -r '.method // "GET" | tostring')"
@@ -392,12 +439,22 @@ qa_checks() {
     if ! [[ "$path" =~ $re ]] || [[ "$path" == *..* ]] || ! [[ "$want" =~ ^[0-9]{3}$ ]]; then
       echo "FAIL: ${name} (invalid check)"; continue
     fi
+    # auth is a config-derived name or nothing; its headers go to curl as a file, never argv.
+    auth="$(printf '%s' "$c" | jq -r '.auth // "" | tostring')"
+    hdr=()
+    if [ -n "$auth" ]; then
+      if ! [[ "$auth" =~ ^[a-z][a-z0-9_]{0,31}$ ]] || ! _ar_children "$P.qa.auth" | grep -qxF -- "$auth"; then
+        echo "FAIL: ${name} (invalid check)"; continue
+      fi
+      [ -s "$D/qa/auth/${auth}.headers" ] || { echo "FAIL: ${name} (auth ${auth} unavailable)"; continue; }
+      hdr=( -H "@$D/qa/auth/${auth}.headers" )
+    fi
     : > "$D/qa/resp"
     if printf '%s' "$c" | jq -e 'has("body")' >/dev/null; then
-      code="$(printf '%s' "$c" | jq -c '.body' | curl -s -o "$D/qa/resp" -w '%{http_code}' --max-time 20 -X "$method" \
+      code="$(printf '%s' "$c" | jq -c '.body' | curl -s ${LCA[@]+"${LCA[@]}"} ${hdr[@]+"${hdr[@]}"} -o "$D/qa/resp" -w '%{http_code}' --max-time 20 -X "$method" \
                 -H 'Content-Type: application/json' --data-binary @- "${2}${path}" 2>/dev/null)"
     else
-      code="$(curl -s -o "$D/qa/resp" -w '%{http_code}' --max-time 20 -X "$method" "${2}${path}" </dev/null 2>/dev/null)"
+      code="$(curl -s ${LCA[@]+"${LCA[@]}"} ${hdr[@]+"${hdr[@]}"} -o "$D/qa/resp" -w '%{http_code}' --max-time 20 -X "$method" "${2}${path}" </dev/null 2>/dev/null)"
     fi
     if [ "$code" != "$want" ]; then echo "FAIL: ${name} (expected ${want}, got ${code:-no response})"
     elif [ -n "$contains" ] && ! grep -qF -- "$contains" "$D/qa/resp"; then echo "FAIL: ${name} (response lacks the expected text)"
@@ -419,7 +476,7 @@ qa_note_md() {
     jq 'def inert: gsub("[\\[\\]()<>`|]"; "") | gsub("[A-Za-z][A-Za-z0-9+.-]*://\\S*"; "[link removed]")
                    | gsub("[Ww][Ww][Ww]\\.\\S*"; "[link removed]") | .[:200];
         .[:50] | map(if type == "object" then
-          {name, method, path, body: (if has("body") then (.body | tojson) else null end), expect_status, expect_contains}
+          {name, method, path, auth, body: (if has("body") then (.body | tojson) else null end), expect_status, expect_contains}
           | with_entries(select(.value != null))
           | with_entries(.value |= (if type == "string" then inert elif type == "number" then . else "[omitted]" end))
         else "[omitted]" end)' "$D/qa/checks.json"

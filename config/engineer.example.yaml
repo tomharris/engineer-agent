@@ -520,7 +520,14 @@ projects:
     #         timeout: 30m               # per review
     #       qa:                          # optional; tier "qa-publish". QA plan + PR (and Jira) comment;
     #         document: true             #   true => Slite note under projects.<slug>.qa.document_parent.
-    #                                    #   Scripted checks run only against the browser server above.
+    #                                    #   Scripted checks run against qa.server, else the browser server.
+    #         server:                    # optional; serves the branch for the checks without the browser test
+    #           setup: "make deps"       #   same keys as browser, plus setup_timeout (default 20m)
+    #           serve: "exec sleep 86400"   # stays up while checks run; killed afterwards
+    #           url: "https://app.test:8443"  # any host: bash pins it to 127.0.0.1
+    #           insecure: true           #   -k for a self-signed local certificate
+    #         auth:                      # optional; a check may set "auth": "<name>"
+    #           session: "~/bin/qa-login"   # `<cmd> <base-url>` prints "Name: value" header lines
     #       transition: "Code Review"    # Jira jobs; tier "jira-transition"; after the PR is ready
     #       announce:                    # tier "slack-post": "CR+QA: <PR urls> <ticket url>"
     #         channel: C12345678         #   must be one of projects.<slug>.slack.channels

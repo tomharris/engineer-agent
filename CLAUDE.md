@@ -76,7 +76,9 @@ docs/architecture/          detailed design rationale (read before changing that
   Slack announce are bash, each behind its own tier (`pr-ready`, `security-review`, `qa-publish`,
   `jira-transition`, `slack-post`). Fix, browser and QA runs get no `gh`/tracker/network verb and
   pass only by side effect (branch moved; nonce-bearing verdict or plan). QA never re-fetches the
-  ticket; its tests are data, not shell; model text leaves only via `_neutral`.
+  ticket; its tests are data, not shell, run only against a 127.0.0.1-pinned server; auth is a
+  config name whose headers bash gets from an adapter and passes as `-H @file`; model text leaves
+  only via `_neutral`.
 
 ## Conventions
 

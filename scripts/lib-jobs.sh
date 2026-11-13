@@ -190,14 +190,15 @@ jobs_validate_after_pr() {
   [ -n "$(_ar_children "$p")" ] || return 0
   _ar_check_keys "$p" "budget_usd max_runtime mark_ready ci browser security qa transition announce" "after_pr" || return 1
   _ar_check_keys "$p.ci" "timeout fix_attempts" "after_pr.ci" || return 1
-  _ar_check_keys "$p.browser" "setup serve url ready_timeout instructions chrome_device" "after_pr.browser" || return 1
+  _ar_check_keys "$p.browser" "setup serve url ready_timeout setup_timeout instructions chrome_device" "after_pr.browser" || return 1
   _ar_check_keys "$p.security" "command fix_attempts review_last_fix timeout" "after_pr.security" || return 1
-  _ar_check_keys "$p.qa" "document" "after_pr.qa" || return 1
+  _ar_check_keys "$p.qa" "document server auth" "after_pr.qa" || return 1
+  _ar_check_keys "$p.qa.server" "setup serve url ready_timeout setup_timeout insecure" "after_pr.qa.server" || return 1
   _ar_check_keys "$p.announce" "channel" "after_pr.announce" || return 1
   [ -n "$(gr_project_repos "$1")" ] || { echo "after_pr needs projects.$1.github.owner and github.repos"; return 1; }
   v="$(_arc "$p.budget_usd")"
   [ -z "$v" ] || [[ "$v" =~ ^[0-9]+(\.[0-9]+)?$ ]] || { echo "after_pr.budget_usd '${v}' must be a number"; return 1; }
-  for k in max_runtime ci.timeout browser.ready_timeout security.timeout; do
+  for k in max_runtime ci.timeout browser.ready_timeout browser.setup_timeout qa.server.ready_timeout qa.server.setup_timeout security.timeout; do
     v="$(_arc "$p.$k")"
     [ -z "$v" ] || [ -n "$(jobs_duration_seconds "$v")" ] || { echo "after_pr.${k} '${v}' must look like 30m or 2h"; return 1; }
   done
@@ -225,6 +226,22 @@ jobs_validate_after_pr() {
   v="$(_arc "$p.announce.channel")"
   if [ -n "$v" ] && ! _arcl "projects.$1.slack.channels" | grep -qxF -- "$v"; then
     echo "after_pr.announce.channel '${v}' is not one of projects.$1.slack.channels"; return 1
+  fi
+  if [ -n "$(_ar_children "$p.qa.server")" ]; then
+    [ -n "$(_arc "$p.qa.server.serve")" ] || { echo "after_pr.qa.server.serve is required"; return 1; }
+    # Any host name is allowed: bash pins it to 127.0.0.1 (--resolve), so the checks stay local.
+    [[ "$(_arc "$p.qa.server.url")" =~ ^https?://[A-Za-z0-9.-]+(:[0-9]+)?/?$ ]] \
+      || { echo "after_pr.qa.server.url must be an http(s)://host[:port] origin (served locally)"; return 1; }
+    v="$(_arc "$p.qa.server.insecure")"
+    _ar_bool "$v" || { echo "after_pr.qa.server.insecure '${v}' must be true or false"; return 1; }
+  fi
+  for k in $(_ar_children "$p.qa.auth"); do
+    [[ "$k" =~ ^[a-z][a-z0-9_]{0,31}$ ]] || { echo "after_pr.qa.auth name '${k}' must match [a-z][a-z0-9_]*"; return 1; }
+    v="$(_arc "$p.qa.auth.$k")"
+    case "$v" in /*|"~/"*) ;; *) echo "after_pr.qa.auth.${k} '${v}' must be an absolute or ~/ path"; return 1 ;; esac
+  done
+  if [ -n "$(_ar_children "$p.qa.auth")" ] && [ -z "$(_ar_children "$p.qa.server")" ] && [ -z "$(_ar_children "$p.browser")" ]; then
+    echo "after_pr.qa.auth needs a server (after_pr.qa.server or after_pr.browser)"; return 1
   fi
   if [ -n "$(_ar_children "$p.browser")" ]; then
     [ -n "$(_arc "$p.browser.serve")" ] || { echo "after_pr.browser.serve is required"; return 1; }

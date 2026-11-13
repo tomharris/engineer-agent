@@ -248,6 +248,14 @@ security → CI → browser → QA → ready → transition → announce. Things
   expect_contains}` run by `qa_checks` with curl: allowlisted methods, a path that must start with
   `/` and has no `..`, bodies on stdin (`@file` in a body is text). Model-written shell would run
   unconfined with your environment, a bigger residual than `browser.serve`.
+- **QA checks have their own server, and auth is a name, not a credential.** `qa.server` serves the
+  branch for the checks without turning on the Chrome browser test (it falls back to `browser`).
+  Its `url` may name any host, because bash pins that host to 127.0.0.1 with `--resolve`; `insecure`
+  adds `-k` for a self-signed local certificate. A check's optional `auth` must be one of the
+  configured `qa.auth` names. Bash runs each `qa.auth.<name>` adapter (`<cmd> <base-url>`) after the
+  server answers, keeps its stdout in a 0600 headers file only when every line is a `Name: value`
+  header, and hands it to curl as `-H @file`, so no credential reaches the model or argv. A failed
+  adapter fails its checks by name.
 - **The QA run reads only its worktree, its ticket text and `change.diff`.** The ticket text is
   `state/pr-pipeline/<item>/ticket.md` when implement-next recorded it (`ticket_source`), else the
   queue item, which the implementation run can rewrite without the ticket (AIA-535/536). Whatever it reads can be
