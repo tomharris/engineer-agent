@@ -164,6 +164,9 @@ $v" '{type: "result", result: $r}' ;;
     checks='{"name":"links render","method":"GET","path":"/nav","expect_status":200}'
     [ -n "${QA_FAIL:-}" ] && checks="${checks}"',{"name":"footer link","method":"GET","path":"/missing","expect_status":200}'
     [ "${QA:-}" = extra ] && checks="${checks}"',{"name":"see https://evil.example/n [x](y)","method":"GET","path":"/nav","expect_contains":"www.evil.example","https://evil.example/k":1}'
+    [ "${QA:-}" = auth ] && checks="${checks}"',{"name":"signed in","method":"GET","path":"/me","auth":"session","expect_status":200}'\
+',{"name":"keyed","method":"GET","path":"/api/me","auth":"api_key","expect_status":200}'\
+',{"name":"unknown auth","method":"GET","path":"/me","auth":"root","expect_status":200}'
     [ "${QA:-}" = evil ] && checks="${checks}"',{"name":"offsite","method":"GET","path":"http://evil.example/"}'\
 ',{"name":"flag","method":"GET -K /tmp/x","path":"/a"},{"name":"file body","method":"POST","path":"/form","body":"@/etc/passwd","expect_status":200}'\
 ',{"name":"traverse","method":"GET","path":"/../../etc"}'
@@ -556,6 +559,42 @@ eq "invalid checks fail by name" "FAIL: offsite (invalid check)
 FAIL: flag (invalid check)
 FAIL: traverse (invalid check)" "$(grep 'invalid check' "$PD/qa/tests.out")"
 
+echo "== QA server and auth"
+# Auth adapters: session prints a header and logs its argument; api_key fails.
+printf '#!/bin/bash\nprintf "%%s\\n" "$1" > "$ST/session.arg"\nprintf "Cookie: SID=s3cret\\nX-CSRF-TOKEN: tok\\n"\n' > "$TMP/bin/qa-session"
+printf '#!/bin/bash\nexit 1\n' > "$TMP/bin/qa-key"
+chmod +x "$TMP/bin/qa-session" "$TMP/bin/qa-key"
+QA_SRV="qa: { document: true, server: { serve: \"exec sleep 300\", url: \"https://app.test:18443\", insecure: true }, auth: { session: \"$TMP/bin/qa-session\", api_key: \"$TMP/bin/qa-key\" } }"
+
+qa_jira "{ mark_ready: true, ci: { fix_attempts: 0 }, $QA_SRV }"
+eq "qa.server alone: checks pass, PR ready" "0|1" "$(run)|$(readied)"
+grep -q 'Browser-test the change' "$CLAUDE_ARGS" && bad "qa.server started a browser run" || ok "qa.server runs no browser test"
+grep -q '^GET https://app.test:18443/nav ' "$ST/curl.log" && ok "checks run against qa.server.url" || bad "curl.log: $(cat "$ST/curl.log")"
+grep -F 'https://app.test:18443/nav' "$ST/curl.argv" | grep -qF -- '--resolve app.test:18443:127.0.0.1 -k' \
+  && ok "a named host is pinned to 127.0.0.1, insecure adds -k" || bad "argv: $(grep app.test "$ST/curl.argv")"
+grep -qF 'Automated: 1 passed, 0 failed' "$ST/pr-comment.md" && ok "comment counts the scripted results" || bad "comment: $(cat "$ST/pr-comment.md")"
+grep 'Write a QA plan' "$CLAUDE_ARGS" | grep -qF 'one of: session, api_key' && ok "the QA prompt names the configured auth" || bad "no auth names in prompt"
+
+qa_jira "{ mark_ready: true, ci: { fix_attempts: 0 }, $QA_SRV }"
+eq "a failing auth adapter fails its checks and stops" 1 "$(QA=auth run)"
+eq "auth check results" "PASS: links render
+PASS: signed in
+FAIL: keyed (auth api_key unavailable)
+FAIL: unknown auth (invalid check)" "$(cat "$PD/qa/tests.out" 2>/dev/null)"
+eq "the adapter is given the base URL" "https://app.test:18443" "$(cat "$ST/session.arg" 2>/dev/null)"
+grep -F 'https://app.test:18443/me' "$ST/curl.argv" | grep -qF -- "-H @$PD/qa/auth/session.headers" \
+  && ok "session headers go to curl as a file" || bad "argv: $(grep /me "$ST/curl.argv")"
+grep -q 's3cret' "$ST/curl.argv" && bad "a session secret reached curl argv" || ok "auth secrets stay off curl argv"
+eq "headers file holds the adapter output" "Cookie: SID=s3cret
+X-CSRF-TOKEN: tok" "$(cat "$PD/qa/auth/session.headers" 2>/dev/null)"
+eq "headers file is private" "-rw-------" "$(ls -l "$PD/qa/auth/session.headers" 2>/dev/null | cut -c1-10)"
+grep -qF 'https://app.test:18443/api/me' "$ST/curl.log" && bad "keyed check was requested" || ok "an unavailable auth sends no request"
+
+printf '#!/bin/bash\nprintf "Cookie: a\\n-K /tmp/x\\n"\n' > "$TMP/bin/qa-session"
+qa_jira "{ mark_ready: true, ci: { fix_attempts: 0 }, $QA_SRV }"
+QA=auth run >/dev/null
+grep -qx 'FAIL: signed in (auth session unavailable)' "$PD/qa/tests.out" && ok "a malformed header line voids the adapter" || bad "tests.out: $(cat "$PD/qa/tests.out")"
+
 qa_jira "$QA_AFTER"
 eq "a head that moves after the checks stops before ready" 1 "$(QA=moved run)"
 eq "late-push reason" "stopped	the PR head moved after it was checked; not marking it ready" "$(cat "$PD/result")"
@@ -905,6 +944,20 @@ write_config '[]' '{ qa: { document: true } }'
 eq "qa.document without a Slite target is refused" "after_pr.qa.document needs projects.web.qa.document_to: slite and document_parent" "$(valid)"
 write_config '[]' '{ qa: { document: maybe } }'
 eq "a non-boolean qa.document is refused" "after_pr.qa.document 'maybe' must be true or false" "$(valid)"
+write_config '[]' '{ qa: { server: { serve: "x", url: "https://h.test/path" } } }'
+eq "a qa.server url with a path is refused" "after_pr.qa.server.url must be an http(s)://host[:port] origin (served locally)" "$(valid)"
+write_config '[]' '{ qa: { server: { url: "http://localhost:1" } } }'
+eq "qa.server without serve is refused" "after_pr.qa.server.serve is required" "$(valid)"
+write_config '[]' '{ qa: { server: { serve: "x", url: "http://localhost:1", insecure: yes } } }'
+eq "a non-boolean qa.server.insecure is refused" "after_pr.qa.server.insecure 'yes' must be true or false" "$(valid)"
+write_config '[]' '{ qa: { server: { serve: "x", url: "http://localhost:1" }, auth: { session: "bin/login" } } }'
+eq "a relative auth adapter is refused" "after_pr.qa.auth.session 'bin/login' must be an absolute or ~/ path" "$(valid)"
+write_config '[]' '{ qa: { server: { serve: "x", url: "http://localhost:1" }, auth: { Session: "/x" } } }'
+eq "a bad auth name is refused" "after_pr.qa.auth name 'Session' must match [a-z][a-z0-9_]*" "$(valid)"
+write_config '[]' '{ qa: { auth: { session: "/x" } } }'
+eq "auth without a server is refused" "after_pr.qa.auth needs a server (after_pr.qa.server or after_pr.browser)" "$(valid)"
+write_config '[]' '{ qa: { server: { serve: "x", url: "https://unittest.bamboolocal.com:18443", insecure: true, setup_timeout: 30m }, auth: { session: "~/a", api_key: "/b" } } }'
+eq "a full qa.server block is valid" "" "$(valid)"
 PROJ_EXTRA='    qa: { document_to: slite, document_parent: "P1" }' JOB_INTEG=jira write_config '[]' \
   '{ security: { command: "~/bin/review", fix_attempts: 1, timeout: 30m }, qa: { document: true }, transition: "Code Review", announce: { channel: C1 } }'
 eq "the full handoff block is valid on a jira job" "" "$(valid)"

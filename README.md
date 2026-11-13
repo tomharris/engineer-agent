@@ -981,8 +981,12 @@ or via Approve), `scripts/pr-pipeline.sh` runs detached:
 4. With `qa` and the `qa-publish` tier, a confined run writes a QA plan from the ticket text
    implement-next recorded after its trust check (falling back to the queue item; the ticket is never re-fetched) and the diff. It can read only its
    worktree, that item and the diff bash wrote, and write only the plan. Its scripted tests are a JSON list of HTTP checks
-   that bash runs with curl against the `browser` server (never model-written shell); without a
-   server they are "not executed". Manual items are listed and skipped. With `qa.document: true` the
+   that bash runs with curl against `qa.server` (else the `browser` server; never model-written
+   shell); without a server they are "not executed". `qa.server` takes the same `setup`, `serve`,
+   `url`, `ready_timeout` keys plus `setup_timeout` and `insecure`; its `url` host is pinned to
+   127.0.0.1. `qa.auth.<name>: <adapter>` lets a check carry `"auth": "<name>"`: bash runs
+   `<adapter> <base-url>`, which prints `Name: value` header lines, and sends them from a private
+   file. Manual items are listed and skipped. With `qa.document: true` the
    plan goes to Slite under `projects.<slug>.qa.document_parent`. Bash then posts one comment (QA
    summary with links stripped, check counts, skipped checks, the Slite link) on the PR and, for
    Jira, on the ticket. A failed check stops after publishing.
