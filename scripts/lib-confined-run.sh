@@ -127,7 +127,7 @@ create_run_worktree() {
     WT_STALE=1
     log "WARN: git fetch origin ${WT_BASE} failed for ${item} — proceeding from the LOCAL origin/${WT_BASE} ref, which may be behind"
   fi
-  if ! git -C "$project_path" worktree add --detach "$WT_PATH" "origin/${WT_BASE}" >>"$LOG_FILE" 2>&1; then
+  if ! git -C "$project_path" worktree add --quiet --detach "$WT_PATH" "origin/${WT_BASE}" >>"$LOG_FILE" 2>&1; then
     log "WARN: origin/${WT_BASE} is not available in ${project_path}; refusing to fall back to a local branch"
     return 1
   fi
