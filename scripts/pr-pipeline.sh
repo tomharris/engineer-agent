@@ -220,7 +220,7 @@ fix_run() {
   project_validate_command "$SLUG"
   local tools=( Read Edit Write Glob Grep "${CONFINED_GIT_WRITE_RULES[@]}" ${BUILD_RULES[@]+"${BUILD_RULES[@]}"} "Bash(echo:*)" )
   if [ -n "$decline" ]; then
-    rm -f "$decline"; tools+=( "Write(/${decline})" "Edit(/${decline})" )
+    rm -f "$decline"; tools+=( "Edit(/${decline})" )
     declining="If you conclude a finding should not be fixed in this change (a false positive, or out of scope, e.g. deferred to another ticket), leave the code alone for it and list it in ${decline} as a JSON array of {\"title\": <the finding's exact title>, \"reason\": <one sentence>}; fix the rest. If you decline every finding, commit and push nothing. "
   fi
   local merge=""
@@ -559,11 +559,13 @@ ac_guard() {
 # else the queue item (whose ticket text the implementation run may have rewritten away).
 ticket_source() { if [ -s "$D/ticket.md" ]; then echo "$D/ticket.md"; else echo "${AGENT_DIR}/queue/completed/${ITEM}"; fi; }
 
-# security_declined <decline-file> <findings-json> — the {title, reason} entries a fix run wrote that
-# name one of the findings; [] when the file is missing or unreadable.
+# security_declined <decline-file> <findings-json> — the findings a fix run declined, as {title, file,
+# reason}: each entry it wrote that names one by title takes that finding's file. [] when the file is
+# missing or unreadable.
 security_declined() {
-  jq -c --argjson f "$2" '[($f | map(.title)) as $t | .[] | objects | select((.title | type) == "string" and (.title as $x | $t | index([$x])))
-    | {title, reason: ((.reason // "") | tostring)}] | unique_by(.title)' "$1" 2>/dev/null || echo '[]'
+  jq -c --argjson f "$2" '[.[] | objects | select((.title | type) == "string") | . as $d
+    | $f[] | select(.title == $d.title) | {title, file: (.file // ""), reason: (($d.reason // "") | tostring)}]
+    | unique_by([.title, .file])' "$1" 2>/dev/null || echo '[]'
 }
 
 pr_head() { with_timeout "$GH_TIMEOUT" gh pr view "$PR" --repo "$REPO" --json headRefOid --jq .headRefOid 2>/dev/null; }
@@ -602,7 +604,8 @@ security_stage() {
       [ "$(jq length "$D/security/ac-skipped.json")" = 0 ] \
         || log "security review ${round}: $(jq length "$D/security/ac-skipped.json") finding(s) contradict the ticket, not fixed: $(jq -r '[.[].title // "untitled"] | join("; ")' "$D/security/ac-skipped.json" | _neutral | cut -c1-300)"
     fi
-    intro="$(printf '%s' "$intro" | jq -c --slurpfile d "$D/security/declined.json" '[.[] | select(.title as $x | $d[0] | map(.title) | index([$x]) | not)]')"
+    intro="$(printf '%s' "$intro" | jq -c --slurpfile d "$D/security/declined.json" \
+      '[.[] | select([.title, (.file // "")] as $k | $d[0] | map([.title, .file]) | index([$k]) | not)]')"
     count="$(printf '%s' "$intro" | jq length)"
     log "security review ${round}: ${count} introduced, $(jq length "$D/security/skipped.json") skipped"
     [ "$count" -gt 0 ] || { REVIEWED_SHA="$sha"; return 0; }
@@ -615,7 +618,7 @@ security_stage() {
       "$D/security/decline.json"
     dec="$(security_declined "$D/security/decline.json" "$intro")"
     if [ "$(printf '%s' "$dec" | jq length)" -gt 0 ]; then
-      jq -c --argjson n "$dec" '. + $n | unique_by(.title)' "$D/security/declined.json" > "$D/security/declined.tmp" \
+      jq -c --argjson n "$dec" '. + $n | unique_by([.title, .file])' "$D/security/declined.json" > "$D/security/declined.tmp" \
         && mv "$D/security/declined.tmp" "$D/security/declined.json"
       log "security fix ${fixes}: $(printf '%s' "$dec" | jq length) finding(s) declined: $(printf '%s' "$dec" | jq -r '[.[] | "\(.title): \(.reason)"] | join("; ")' | _neutral | cut -c1-300)"
     fi

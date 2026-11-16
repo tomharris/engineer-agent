@@ -127,8 +127,8 @@ case "$*" in
       git diff --name-only --diff-filter=U > "$ST/merge-unmerged"
       echo resolved > a.txt; git add a.txt; git commit -q --no-edit
     fi
-    if [ -n "${DECLINE:-}" ]; then   # the fix run declines: $DECLINE to its decline-file Write target
-      t="$(printf '%s\n' "$@" | sed -n 's#^Write(/\(/.*/decline\.json\))$#\1#p' | head -1)"
+    if [ -n "${DECLINE:-}" ]; then   # the fix run declines: $DECLINE to its decline-file Edit target
+      t="$(printf '%s\n' "$@" | sed -n 's#^Edit(/\(/.*/decline\.json\))$#\1#p' | head -1)"
       [ -n "$t" ] && printf '%s' "$DECLINE" > "$t"
     fi
     [ "${FIX:-push}" = push ] && { b="$(git rev-parse HEAD)"; echo fix >> fixed.txt; git add fixed.txt; git commit -qm fix; git push -q origin "HEAD:refs/heads/$BR"
@@ -416,7 +416,7 @@ reset; write_config '["pr-ready", "security-review"]' "$SEC"
 echo '[{"title":"x","severity":"low","file":"a.txt"},{"title":"y","severity":"low","file":"a.txt"}]' > "$ST/secrev.1.json"
 eq "a security fix that declines every finding and pushes nothing goes ready" "0|ready|1" \
   "$(FIX=none DECLINE='[{"title":"x","reason":"deferred to ENG-8"},{"title":"y","reason":"false positive"}]' run)|$(res)|$(readied)"
-eq "declined findings recorded" '[{"title":"x","reason":"deferred to ENG-8"},{"title":"y","reason":"false positive"}]' "$(jq -c . "$PD/security/declined.json")"
+eq "declined findings recorded with their file" '[{"title":"x","file":"a.txt","reason":"deferred to ENG-8"},{"title":"y","file":"a.txt","reason":"false positive"}]' "$(jq -c . "$PD/security/declined.json")"
 grep -q 'security fix 1: 2 finding(s) declined: x: deferred to ENG-8; y: false positive' "$EA_AGENT_DIR/state/jobs.log" \
   && ok "declined findings logged" || bad "no declined log"
 
@@ -438,6 +438,11 @@ echo '[{"title":"x","severity":"low","file":"a.txt"},{"title":"y","severity":"lo
 echo '[{"title":"y","severity":"low","file":"a.txt"}]' > "$ST/secrev.2.json"
 eq "a finding declined alongside a pushed fix is left out of the re-review" "0|ready|1|2" \
   "$(DECLINE='[{"title":"y","reason":"r"}]' run)|$(res)|$(sec_fix_runs)|$(secrev_calls)"
+
+reset; write_config '["pr-ready", "security-review"]' "{ mark_ready: true, ci: { fix_attempts: 0 }, security: { $SECCMD, fix_attempts: 2 } }"
+echo '[{"title":"x","severity":"low","file":"a.txt"},{"title":"y","severity":"low","file":"a.txt"}]' > "$ST/secrev.1.json"
+echo '[{"title":"y","severity":"low","file":"b.txt","introduced":true}]' > "$ST/secrev.2.json"
+eq "a declined title on another file is fixed again" 2 "$(DECLINE='[{"title":"y","reason":"r"}]' run >/dev/null; sec_fix_runs)"
 
 sec_args="$(grep 'A security review of pull request' "$CLAUDE_ARGS")"
 printf '%s' "$sec_args" | grep -q 'confined-push.sh' && ok "security fix pushes via confined-push" || bad "no confined-push"
