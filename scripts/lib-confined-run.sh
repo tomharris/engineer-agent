@@ -298,7 +298,7 @@ PUSH ONLY with: ${PLUGIN_ROOT}/scripts/confined-push.sh --no-verify (from the ti
 Read config from ${EA_CONFIG_FILE}. \
 To finalize the queue item, WRITE the completed record to ${AGENT_DIR}/queue/completed/${item} (status: completed). You do NOT need to delete the drafts/ original — the listener reconciles that afterward; do not spend effort trying to remove it. \
 Operate ONLY inside this working directory (plus writing that one completed/ queue file). \
-${NO_MEMORY_RULE} Be concise."
+${HANDOFF_PROMPT:-} ${NO_MEMORY_RULE} Be concise."
 
   # Turn-completion push (opt-in: agent.notify.turn_completions). hooks/hooks.json fires
   # scripts/turn-notify-hook.sh at the end of every turn, but ONLY when armed — and this run is
@@ -540,11 +540,97 @@ _autopilot_claim_cmd() {
 autopilot_claim()   { _autopilot_claim_cmd claim "$@"; }
 autopilot_release() { _autopilot_claim_cmd release "$1"; }
 
+# --- Project handoff --------------------------------------------------------------------------
+# A job's selection (e.g. a summary-based JQL) can pick a ticket whose code lives in another
+# project. The confined run may then name that project in a nonce-bearing verdict file, and bash
+# re-runs it there, at most once per item, and only for an unattended run. The model only chooses among config-derived candidates:
+# other projects with an implement-next job of the same integration. The target job must trust every author the source job trusts, so text that passed the source gate passes the
+# target's. The claim stays the source job's (its rule's on_fail undoes it); after_pr and the
+# pipeline's project come from the target (state/pr-pipeline/<item>/handoff_job).
+HANDOFF_DIR="${EA_AGENT_DIR}/state/handoff"
+
+# _job_locate <job key> — "slug|idx|integration|action"; rc 1 if not configured.
+_job_locate() {
+  local r
+  r="$(jobs_enumerate | awk -F'|' -v k="$1" '($1 "." $3) == k { print $1 "|" $2 "|" $4 "|" $5; exit }')"
+  [ -n "$r" ] && printf '%s\n' "$r"
+}
+
+# handoff_candidates <job key> — "slug|job key", one per other project with a job of the same
+# integration and action (its first such job).
+handoff_candidates() {
+  local s integ action
+  IFS='|' read -r s _ integ action <<< "$(_job_locate "$1")"
+  [ -n "$s" ] || return 0
+  jobs_enumerate | awk -F'|' -v s="$s" -v g="$integ" -v a="$action" \
+    '$1 != s && $4 == g && $5 == a && !seen[$1]++ { print $1 "|" $1 "." $3 }'
+}
+
+# autopilot_pipeline_job <item> — the job whose after_pr and project run the item's pipeline.
+autopilot_pipeline_job() {
+  local h="${PR_PIPELINE_DIR}/${1%.md}/handoff_job" row
+  if [ -s "$h" ]; then head -1 "$h"; return 0; fi
+  row="$(autopilot_lookup "$1")" || return 1
+  printf '%s\n' "${row%%	*}"
+}
+
+# _handoff_offer <item> — sets HANDOFF_PROMPT/HANDOFF_NONCE for the next run when the item has not
+# been handed off yet and another project could take it; clears them otherwise.
+_handoff_offer() {
+  local item="$1" row slug repos desc list="" EA_JOBS_CFG=""   # fresh config: the listener is long-lived
+  HANDOFF_PROMPT="" HANDOFF_NONCE=""
+  [ -e "${PR_PIPELINE_DIR}/${item%.md}/handoff_job" ] && return 0
+  row="$(autopilot_lookup "$item")" || return 0
+  command -v jobs_enumerate >/dev/null 2>&1 || . "${PLUGIN_ROOT}/scripts/lib-jobs.sh"
+  jobs_cfg_load
+  while IFS='|' read -r slug _; do
+    [ -n "$slug" ] || continue
+    repos="$(gr_project_repos "$slug" | paste -sd, -)"
+    desc="$(_arc "projects.${slug}.routing.description")"
+    list="${list}${list:+; }'${slug}' (repos: ${repos:-none}${desc:+; ${desc}})"
+  done < <(handoff_candidates "${row%%	*}")
+  [ -n "$list" ] || return 0
+  HANDOFF_NONCE="$(od -An -tx1 -N8 /dev/urandom | tr -d ' \n')"
+  mkdir -p "$HANDOFF_DIR" && rm -f "${HANDOFF_DIR}/${item}"
+  HANDOFF_PROMPT="WRONG REPO HANDOFF: if, before changing any code, you find that the ticket's work belongs in a different repository than this worktree, and that repository belongs to exactly one of these configured projects: ${list} — do not implement it here and do not write the completed/ record. Instead WRITE the single line 'HANDOFF ${HANDOFF_NONCE} <project>' to ${HANDOFF_DIR}/${item} and stop; it will be re-run in that project. If it belongs to none of them, follow the skill's wrong-repo rule."
+}
+
+# _handoff_accept <item> <unattended> — prints the target "slug|job key" when this run's verdict
+# names a handoff bash can honor; rc 1 (reason logged) otherwise. Always consumes the verdict file.
+_handoff_accept() {
+  local item="$1" unattended="$2" f="${HANDOFF_DIR}/${1}" line slug row src tracker tgt
+  local tslug tidx sslug sidx max ci=0 a ttrust EA_JOBS_CFG=""
+  [ -n "${HANDOFF_NONCE:-}" ] && [ -f "$f" ] || return 1
+  jobs_cfg_load
+  line="$(head -1 "$f")"; rm -f "$f"
+  [[ "$line" =~ ^HANDOFF\ ${HANDOFF_NONCE}\ ([A-Za-z0-9._-]+)$ ]] \
+    || { log "autopilot: ignoring a malformed handoff verdict for ${item}"; return 1; }
+  slug="${BASH_REMATCH[1]}"
+  row="$(autopilot_lookup "$item")" || return 1
+  IFS="	" read -r src _ _ tracker <<< "$row"
+  tgt="$(handoff_candidates "$src" | awk -F'|' -v s="$slug" '$1 == s { print; exit }')"
+  [ -n "$tgt" ] || { log "autopilot: ${item} named project '${slug}', which has no matching implement-next job; not handing off"; return 1; }
+  IFS='|' read -r tslug tidx _ <<< "$(_job_locate "${tgt#*|}")"
+  max="$(_jcfg "projects.${tslug}.job.${tidx}.max_in_flight")"
+  [ "$(inflight_count "$tslug")" -lt "${max:-1}" ] \
+    || { log "autopilot: ${tslug} is at max_in_flight; not handing ${item} off"; return 1; }
+  [ "$unattended" = 1 ] || return 1
+  IFS='|' read -r sslug sidx _ <<< "$(_job_locate "$src")"
+  [ "$tracker" = github ] && ci=1
+  ttrust="$(_arcl "projects.${tslug}.job.${tidx}.trusted_authors")"
+  while IFS= read -r a; do
+    [ -n "$a" ] || continue
+    _ar_member "$a" "$ttrust" "$ci" \
+      || { log "autopilot: ${tgt#*|} does not trust ${a}, whom ${src} trusts; not handing ${item} off"; return 1; }
+  done < <(_arcl "projects.${sslug}.job.${sidx}.trusted_authors")
+  printf '%s\n' "$tgt"
+}
+
 # autopilot_implement <item> <budget> [--approved] — claim, implement, roll back on failure.
 # rc 0 implemented, 3 someone else claimed it first (item moved to rejected/), 1 failed (claim
 # rolled back, item left in drafts/).
 autopilot_implement() {
-  local item="$1" budget="$2" rc draft="${AGENT_DIR}/queue/drafts/$1" unattended=1
+  local item="$1" budget="$2" rc draft="${AGENT_DIR}/queue/drafts/$1" unattended=1 tgt from
   shift 2
   [ "${1:-}" = --approved ] && unattended=0
   autopilot_claim "$item" "$@"; rc=$?
@@ -560,7 +646,20 @@ autopilot_implement() {
        autopilot_release "$item"
        return 1 ;;
   esac
+  # An Approve tap approved this project's sandbox for text that may be untrusted; only an
+  # unattended run (trust gate passed) may move to another project's.
+  HANDOFF_PROMPT="" HANDOFF_NONCE=""
+  [ "$unattended" = 1 ] && _handoff_offer "$item"
   run_ticket_implementation "$item" "$budget" "$unattended"
+  if [ -e "$draft" ] && tgt="$(_handoff_accept "$item" "$unattended")"; then
+    from="$(grep -m1 '^project:' "$draft" | sed 's/^project:[[:space:]]*//; s/["'\'' ]//g')"
+    fm_set "$draft" project "${tgt%%|*}"
+    mkdir -p "${PR_PIPELINE_DIR}/${item%.md}" && printf '%s\n' "${tgt#*|}" > "${PR_PIPELINE_DIR}/${item%.md}/handoff_job"
+    log "autopilot: ${item} belongs to project ${tgt%%|*}, not ${from}; handing off to ${tgt#*|}"
+    HANDOFF_PROMPT="" HANDOFF_NONCE=""
+    run_ticket_implementation "$item" "$budget" "$unattended"
+  fi
+  HANDOFF_PROMPT="" HANDOFF_NONCE=""
   if [ -e "$draft" ]; then
     log "autopilot: ${item} did not complete; releasing the claim"
     autopilot_release "$item"
@@ -574,9 +673,8 @@ autopilot_implement() {
 # ledger) has an after_pr block. Detached so the CI wait is bounded by after_pr.max_runtime, not
 # held under the job's own watchdog, whose TERM trap would release a claim whose PR already exists.
 pr_pipeline_launch() {
-  local row job slug idx EA_JOBS_CFG=""   # fresh config: the listener is long-lived
-  row="$(autopilot_lookup "$1")" || return 0
-  job="$(printf '%s' "$row" | cut -f1)"
+  local job slug idx EA_JOBS_CFG=""   # fresh config: the listener is long-lived
+  job="$(autopilot_pipeline_job "$1")" || return 0
   command -v jobs_enumerate >/dev/null 2>&1 || . "${PLUGIN_ROOT}/scripts/lib-jobs.sh"
   jobs_cfg_load
   IFS='|' read -r slug idx _ <<< "$(jobs_enumerate | awk -F'|' -v k="$job" '($1 "." $3) == k { print; exit }')"
@@ -629,9 +727,10 @@ pr_pipeline_resume_stopped() {
   [ -d "$path" ] || return 0
   repo="$(git -C "$path" config --get remote.origin.url 2>/dev/null | sed -E 's#^(git@[^:]+:|https?://[^/]+/|ssh://[^/]+/)##; s#\.git$##' | tr '[:upper:]' '[:lower:]')"
   [[ "$repo" =~ ^[a-z0-9._-]+/[a-z0-9._-]+$ ]] || return 0
-  awk -F'\t' -v j="$job" '$2==j {print $1}' "$AUTOPILOT_LEDGER" | sort -u | while IFS= read -r item; do
+  awk -F'\t' '{print $1}' "$AUTOPILOT_LEDGER" | sort -u | while IFS= read -r item; do
     d="${PR_PIPELINE_DIR}/${item%.md}"
     [ -s "$d/stopped_head" ] && [ -s "$d/trusted_from" ] || continue
+    [ "$(autopilot_pipeline_job "$item")" = "$job" ] || continue
     br="$(head -1 "$d/branch" 2>/dev/null)"
     [[ "$br" =~ ^[A-Za-z0-9._/-]+$ ]] || continue
     out="$(git -C "$path" ls-remote origin "refs/heads/${br}" 2>/dev/null)" || continue

@@ -107,6 +107,17 @@ Read-only: search + dev-panel reads, never an assign or transition. Four things 
   still in `drafts/` (awaiting a human, or left there by a failed run); picks today ≥ `daily_cap`
   (default 1, machine-local date, `state/jobs/<key>.picks`). A lost claim race moves the item to
   `rejected/` so it never blocks the job.
+- **Wrong-project handoff (`_handoff_offer` / `_handoff_accept`).** A summary-based JQL can pick a
+  ticket whose code is in another project. The run's prompt lists the candidates — other projects
+  with an implement-next job of the same integration, from config — and the run may write
+  `HANDOFF <nonce> <slug>` to `state/handoff/<item>`. Bash honors it only for a listed slug, at most
+  once per item, under the target job's `max_in_flight`, and only if the target job's
+  `trusted_authors` ⊇ the source job's, so the trust gate's verdict carries over without a re-fetch.
+  **Unattended runs only**: an Approve tap vouched for one project's sandbox, possibly for
+  untrusted text, and the superset check says nothing about the ticket's actual authors.
+  The ledger row is not rewritten: the claim and its `on_fail` stay the source rule's.
+  `state/pr-pipeline/<item>/handoff_job` names the job whose `after_pr` and project run the
+  pipeline (`autopilot_pipeline_job`); the queue item's `project` is rewritten for the re-run.
 - **A ticket the kind ladder makes an investigation is skipped in selection** (the shipped
   `investigation.jira_types` default includes `Task`). `preview` applies the same skip.
 - **The handler traps TERM** (the dispatcher's watchdog kill) and releases the claim, so a timeout
