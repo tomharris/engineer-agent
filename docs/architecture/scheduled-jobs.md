@@ -255,6 +255,14 @@ security → CI → browser → QA → ready → transition → announce. Things
   they are counted in the QA comment, not gated on.
 - **Every introduced finding is fixed, any severity.** Same user decision. `fix_attempts: 0` turns
   the stage into a gate.
+- **The fix run may decline findings, and the PR still goes ready.** User decision (2026-11-16): a
+  finding that is a false positive or out of scope for the ticket should not stop the pipeline.
+  The fix run lists declines in `security/decline.json` (its only writable path outside the
+  worktree); `security_declined` keeps only entries naming a finding of that round by title and
+  records each with that finding's file, so later rounds drop only the same title on the same
+  file. Residual risk, accepted: the agent that reads the PR content also waives the findings, so
+  planted text could talk it out of a fix. Declines are logged and listed in the QA comment rather
+  than gated on.
 - **The QA run's scripted tests are data.** A JSON list of `{method, path, body, expect_status,
   expect_contains}` run by `qa_checks` with curl: allowlisted methods, a path that must start with
   `/` and has no `..`, bodies on stdin (`@file` in a body is text). Model-written shell would run

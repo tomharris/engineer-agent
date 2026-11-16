@@ -515,7 +515,7 @@ projects:
     #       security:                    # optional; tier "security-review"
     #         command: "~/bin/pr-security-review"  # your adapter: <cmd> <owner/repo> <pr> <outdir> writes
     #                                    #   report.md + findings.json; exit 3 = needs login (README)
-    #         fix_attempts: 1            # 0-3 fix + re-review rounds; every finding the PR introduced is fixed
+    #         fix_attempts: 1            # 0-3 fix + re-review rounds; every introduced finding is fixed or declined
     #         review_last_fix: true      # false => the last fix attempt is not re-reviewed
     #         timeout: 30m               # per review
     #       qa:                          # optional; tier "qa-publish". QA plan + PR (and Jira) comment;
