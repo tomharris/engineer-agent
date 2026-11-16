@@ -127,6 +127,10 @@ case "$*" in
       git diff --name-only --diff-filter=U > "$ST/merge-unmerged"
       echo resolved > a.txt; git add a.txt; git commit -q --no-edit
     fi
+    if [ -n "${DECLINE:-}" ]; then   # the fix run declines: $DECLINE to its decline-file Write target
+      t="$(printf '%s\n' "$@" | sed -n 's#^Write(/\(/.*/decline\.json\))$#\1#p' | head -1)"
+      [ -n "$t" ] && printf '%s' "$DECLINE" > "$t"
+    fi
     [ "${FIX:-push}" = push ] && { b="$(git rev-parse HEAD)"; echo fix >> fixed.txt; git add fixed.txt; git commit -qm fix; git push -q origin "HEAD:refs/heads/$BR"
       jq --arg b "$b" --arg a "$(git rev-parse HEAD)" --arg l "${FIX_PUSHER:-tom}" '[{before: $b, after: $a, actor: {login: $l}}] + .' \
         <(cat "$ST/activity.json" 2>/dev/null || echo '[]') > "$ST/activity.fix" && mv "$ST/activity.fix" "$ST/activity.json"; } ;;
@@ -408,6 +412,33 @@ reset; write_config '["pr-ready", "security-review"]' "$SEC"
 echo '[{"title":"x","severity":"low","file":"a.txt"}]' > "$ST/secrev.1.json"
 eq "a security fix that pushes nothing stops" 1 "$(FIX=none run)"
 eq "reason recorded" "stopped	security fix attempt 1 pushed nothing" "$(cat "$PD/result")"
+reset; write_config '["pr-ready", "security-review"]' "$SEC"
+echo '[{"title":"x","severity":"low","file":"a.txt"},{"title":"y","severity":"low","file":"a.txt"}]' > "$ST/secrev.1.json"
+eq "a security fix that declines every finding and pushes nothing goes ready" "0|ready|1" \
+  "$(FIX=none DECLINE='[{"title":"x","reason":"deferred to ENG-8"},{"title":"y","reason":"false positive"}]' run)|$(res)|$(readied)"
+eq "declined findings recorded" '[{"title":"x","reason":"deferred to ENG-8"},{"title":"y","reason":"false positive"}]' "$(jq -c . "$PD/security/declined.json")"
+grep -q 'security fix 1: 2 finding(s) declined: x: deferred to ENG-8; y: false positive' "$EA_AGENT_DIR/state/jobs.log" \
+  && ok "declined findings logged" || bad "no declined log"
+
+reset; write_config '["pr-ready", "security-review"]' "$SEC"
+echo '[{"title":"x","severity":"low","file":"a.txt"},{"title":"y","severity":"low","file":"a.txt"}]' > "$ST/secrev.1.json"
+eq "declining some findings and pushing nothing stops" "1|stopped	security fix attempt 1 pushed nothing" \
+  "$(FIX=none DECLINE='[{"title":"x","reason":"r"}]' run)|$(cat "$PD/result")"
+
+reset; write_config '["pr-ready", "security-review"]' "$SEC"
+echo '[{"title":"x","severity":"low","file":"a.txt"}]' > "$ST/secrev.1.json"
+eq "a decline naming no finding does not count" 1 "$(FIX=none DECLINE='[{"title":"other","reason":"r"}]' run)"
+
+reset; write_config '["pr-ready", "security-review"]' "$SEC"
+echo '[{"title":"x","severity":"low","file":"a.txt"}]' > "$ST/secrev.1.json"
+eq "an unreadable decline file does not count" 1 "$(FIX=none DECLINE='not json' run)"
+
+reset; write_config '["pr-ready", "security-review"]' "$SEC"
+echo '[{"title":"x","severity":"low","file":"a.txt"},{"title":"y","severity":"low","file":"a.txt"}]' > "$ST/secrev.1.json"
+echo '[{"title":"y","severity":"low","file":"a.txt"}]' > "$ST/secrev.2.json"
+eq "a finding declined alongside a pushed fix is left out of the re-review" "0|ready|1|2" \
+  "$(DECLINE='[{"title":"y","reason":"r"}]' run)|$(res)|$(sec_fix_runs)|$(secrev_calls)"
+
 sec_args="$(grep 'A security review of pull request' "$CLAUDE_ARGS")"
 printf '%s' "$sec_args" | grep -q 'confined-push.sh' && ok "security fix pushes via confined-push" || bad "no confined-push"
 printf '%s' "$sec_args" | grep -qE 'Bash\(gh |Bash\(git push' && bad "security fix got gh or raw push" || ok "security fix gets no gh or raw push"
@@ -487,6 +518,12 @@ echo '[{"index":0,"ac":"The nav links open in a new tab without rel=noopener, as
 eq "a PR whose only finding contradicts the ticket goes ready" "0|0|1" "$(run)|$(sec_fix_runs)|$(readied)"
 grep -qxF 'Security: 1 finding(s) not fixed because they contradict the ticket: tabnab see [link removed]' "$ST/pr-comment.md" \
   && ok "the QA comment names it, made inert" || bad "comment: $(cat "$ST/pr-comment.md")"
+
+qa_jira "{ mark_ready: true, ci: { fix_attempts: 0 }, qa: { document: true }, security: { $SECCMD } }" '["pr-ready", "qa-publish", "security-review"]'
+echo '[{"title":"x","severity":"low","file":"a.txt"}]' > "$ST/secrev.1.json"
+eq "a PR whose only finding the fix run declines goes ready" "0|1" "$(FIX=none DECLINE='[{"title":"x","reason":"see https://evil.example"}]' run)|$(readied)"
+grep -qxF 'Security: 1 finding(s) declined by the fix run: x: see [link removed]' "$ST/pr-comment.md" \
+  && ok "the QA comment names the declined finding, made inert" || bad "comment: $(cat "$ST/pr-comment.md")"
 
 qa_jira "$QA_AFTER"; run >/dev/null
 qa_args="$(grep 'Write a QA plan' "$CLAUDE_ARGS")"
