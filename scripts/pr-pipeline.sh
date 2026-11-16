@@ -206,11 +206,12 @@ ci_logs() {
   done
 }
 
-# fix_run <task> — one confined fix attempt on the branch; sets NEW_SHA to the new remote head, or
-# empty. <task> says what to fix and where its evidence is. Globals, not $(...): a subshell would
+# fix_run <task> [<decline-file>] — one confined fix attempt on the branch; sets NEW_SHA to the new
+# remote head, or empty. <task> says what to fix and where its evidence is. With <decline-file>, the
+# run may record findings it decides not to fix there instead of changing the code. Globals, not $(...): a subshell would
 # not run cleanup when the watchdog fires.
 fix_run() {
-  local before after
+  local before after decline="${2:-}" declining=""
   NEW_SHA=""
   before="$(remote_head)"
   branch_worktree || { log "could not create a worktree on ${BRANCH}"; return 0; }
@@ -218,6 +219,10 @@ fix_run() {
   project_build_rules "$SLUG"
   project_validate_command "$SLUG"
   local tools=( Read Edit Write Glob Grep "${CONFINED_GIT_WRITE_RULES[@]}" ${BUILD_RULES[@]+"${BUILD_RULES[@]}"} "Bash(echo:*)" )
+  if [ -n "$decline" ]; then
+    rm -f "$decline"; tools+=( "Edit(/${decline})" )
+    declining="If you conclude a finding should not be fixed in this change (a false positive, or out of scope, e.g. deferred to another ticket), leave the code alone for it and list it in ${decline} as a JSON array of {\"title\": <the finding's exact title>, \"reason\": <one sentence>}; fix the rest. If you decline every finding, commit and push nothing. "
+  fi
   local merge=""
   # Bash starts the merge (the run has no `git merge`); the run resolves and finishes it with `git commit`.
   if [ "${MERGE_BASE:-0}" = 1 ]; then
@@ -229,7 +234,7 @@ fix_run() {
   fi
   local prompt="${merge}$1 \
 The current working directory is a git worktree checked out on ${BRANCH}; stay inside it. Reproduce the problem with the project's build/test commands where you can, fix the root cause, and commit. \
-$(validation_prompt) \
+${declining}$(validation_prompt) \
 Never skip, delete or weaken a test, lint rule or type check, and never suppress a finding instead of fixing it. Do not edit CI configuration. \
 PUSH ONLY with: ${PLUGIN_ROOT}/scripts/confined-push.sh --no-verify (plain git push is denied). Do not open, edit or comment on PRs. \
 ${NO_MEMORY_RULE} Be concise."
@@ -515,6 +520,9 @@ qa_publish() {
     skipped="$(jq length "$D/security/ac-skipped.json" 2>/dev/null)"
     [ -z "$skipped" ] || [ "$skipped" = 0 ] || printf 'Security: %s finding(s) not fixed because they contradict the ticket: %s\n' "$skipped" \
       "$(jq -r '[.[].title // "untitled"] | join("; ")' "$D/security/ac-skipped.json" | _neutral | cut -c1-300)"
+    skipped="$(jq length "$D/security/declined.json" 2>/dev/null)"
+    [ -z "$skipped" ] || [ "$skipped" = 0 ] || printf 'Security: %s finding(s) declined by the fix run: %s\n' "$skipped" \
+      "$(jq -r '[.[] | "\(.title): \(.reason)"] | join("; ")' "$D/security/declined.json" | _neutral | cut -c1-300)"
     [ -z "$NOTE_URL" ] || printf 'Full plan: %s\n' "$NOTE_URL"
   } > "$c"
   with_timeout "$GH_TIMEOUT" gh pr comment "$PR" --repo "$REPO" --body-file "$c" >>"$LOG_FILE" 2>&1 \
@@ -551,20 +559,30 @@ ac_guard() {
 # else the queue item (whose ticket text the implementation run may have rewritten away).
 ticket_source() { if [ -s "$D/ticket.md" ]; then echo "$D/ticket.md"; else echo "${AGENT_DIR}/queue/completed/${ITEM}"; fi; }
 
+# security_declined <decline-file> <findings-json> — the findings a fix run declined, as {title, file,
+# reason}: each entry it wrote that names one by title takes that finding's file. [] when the file is
+# missing or unreadable.
+security_declined() {
+  jq -c --argjson f "$2" '[.[] | objects | select((.title | type) == "string") | . as $d
+    | $f[] | select(.title == $d.title) | {title, file: (.file // ""), reason: (($d.reason // "") | tostring)}]
+    | unique_by([.title, .file])' "$1" 2>/dev/null || echo '[]'
+}
+
 pr_head() { with_timeout "$GH_TIMEOUT" gh pr view "$PR" --repo "$REPO" --json headRefOid --jq .headRefOid 2>/dev/null; }
 
 # security_stage — review, fix what the PR introduced, re-review; up to security.fix_attempts
 # rounds. Advances sha on a fix and sets REVIEWED_SHA to the head that came back clean (or, with
-# security.review_last_fix: false, to the last fix's head, unreviewed). Stops on
-# anything left, when a review cannot run, or when the head moved under a review (the adapter
+# security.review_last_fix: false, to the last fix's head, unreviewed). A fix run may decline
+# findings (security_declined); they are left in $D/security/declined.json and out of later rounds,
+# and a fix run that declines every finding needs no push. Stops on anything left, when a review cannot run, or when the head moved under a review (the adapter
 # reviews the PR's head at that moment, so the verdict would belong to another commit).
 security_stage() {
-  local cmd to tries round=0 fixes=0 rc out intro count
+  local cmd to tries round=0 fixes=0 rc out intro count dec
   cmd="$(_arc "$P.security.command")"; cmd="${cmd/#\~/$HOME}"
   [ -f "$cmd" ] && [ -x "$cmd" ] || stop "security.command '${cmd}' is not executable"
   to="$(jobs_duration_seconds "$(_arc "$P.security.timeout")")"; to="${to:-1800}"
   tries="$(_arc "$P.security.fix_attempts")"; tries="${tries:-1}"
-  mkdir -p "$D/security"
+  mkdir -p "$D/security"; echo '[]' > "$D/security/declined.json"
   while :; do
     round=$((round+1)); out="$D/security/round${round}"
     log "security review ${round} on ${sha:0:7}"
@@ -586,6 +604,8 @@ security_stage() {
       [ "$(jq length "$D/security/ac-skipped.json")" = 0 ] \
         || log "security review ${round}: $(jq length "$D/security/ac-skipped.json") finding(s) contradict the ticket, not fixed: $(jq -r '[.[].title // "untitled"] | join("; ")' "$D/security/ac-skipped.json" | _neutral | cut -c1-300)"
     fi
+    intro="$(printf '%s' "$intro" | jq -c --slurpfile d "$D/security/declined.json" \
+      '[.[] | select([.title, (.file // "")] as $k | $d[0] | map([.title, .file]) | index([$k]) | not)]')"
     count="$(printf '%s' "$intro" | jq length)"
     log "security review ${round}: ${count} introduced, $(jq length "$D/security/skipped.json") skipped"
     [ "$count" -gt 0 ] || { REVIEWED_SHA="$sha"; return 0; }
@@ -594,8 +614,18 @@ security_stage() {
     printf '%s' "$intro" | jq -r '.[] | "## \(.title // "untitled")\n- severity: \(.severity // "?")\n- file: \(.file // "?")\n- CWE: \(.cwe // "?")\n- impact: \(.impact // "")\n- evidence:\n```\n\(.evidence // "")\n```\n- remediation: \(.remediation // "")\n"' \
       > "$D/security/introduced.md"
     fixes=$((fixes+1))
-    fix_run "A security review of pull request #${PR} (branch ${BRANCH}) found ${count} issue(s) this change introduced, listed in ${D}/security/introduced.md — read it first. Fix every one in the code (add a regression test where the remediation calls for one); the full report is ${out}/report.md."
-    [ -n "$NEW_SHA" ] || stop "security fix attempt ${fixes} pushed nothing"
+    fix_run "A security review of pull request #${PR} (branch ${BRANCH}) found ${count} issue(s) this change introduced, listed in ${D}/security/introduced.md — read it first. Fix every one in the code (add a regression test where the remediation calls for one); the full report is ${out}/report.md." \
+      "$D/security/decline.json"
+    dec="$(security_declined "$D/security/decline.json" "$intro")"
+    if [ "$(printf '%s' "$dec" | jq length)" -gt 0 ]; then
+      jq -c --argjson n "$dec" '. + $n | unique_by([.title, .file])' "$D/security/declined.json" > "$D/security/declined.tmp" \
+        && mv "$D/security/declined.tmp" "$D/security/declined.json"
+      log "security fix ${fixes}: $(printf '%s' "$dec" | jq length) finding(s) declined: $(printf '%s' "$dec" | jq -r '[.[] | "\(.title): \(.reason)"] | join("; ")' | _neutral | cut -c1-300)"
+    fi
+    if [ -z "$NEW_SHA" ]; then
+      [ "$(printf '%s' "$dec" | jq length)" = "$count" ] || stop "security fix attempt ${fixes} pushed nothing"
+      REVIEWED_SHA="$sha"; return 0
+    fi
     sha="$NEW_SHA"
     if [ "$fixes" -ge "$tries" ] && [ "$(_arc "$P.security.review_last_fix")" = false ]; then
       log "security fix ${fixes} on ${sha:0:7} not re-reviewed (review_last_fix: false)"

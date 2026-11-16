@@ -963,8 +963,12 @@ or via Approve), `scripts/pr-pipeline.sh` runs detached:
    complete sentence) word for word from the ticket text the autopilot recorded at pick time (only
    after the trusted-author check passed), and the finding is `medium` or `low`. Skipped findings are listed in the QA comment. Without that ticket text (an Approve
    pick), or on any unusable verdict, every finding is fixed as before. Other findings are skipped and counted in the
-   QA comment. Anything introduced that survives, an auth failure, or a head that moved during a
-   review stops the pipeline.
+   QA comment. **Declines:** the fix run may decline a finding it judges a false positive or out of
+   scope (say, deferred to another ticket) by listing its title and a reason in a decline file
+   instead of changing the code. A declined finding (matched on title and file) is left out of
+   later rounds and listed in the QA comment, and a fix run that declines every finding needs no
+   push. Anything introduced that survives undeclined, a fix run that pushes nothing and leaves a
+   finding undeclined, an auth failure, or a head that moved during a review stops the pipeline.
 
    The plugin ships no reviewer. `security.command` is an executable you supply (absolute or `~/`
    path) that wraps your team's tool: it is called as `<cmd> <owner/repo> <pr-number> <outdir>`,
