@@ -342,4 +342,4 @@ Mirror the Step 6 split — the item is terminal only if its approval has actual
 - **Ticket too vague:** If acceptance criteria are missing or unclear, set the draft to say "Needs clarification" and set priority to `urgent`. Do not start implementing.
 - **Tests won't pass:** If you exhaust your iterations with failing tests, report partial progress and let the human decide whether to continue manually.
 - **Self-review fix breaks tests:** If fixing a Step 4 finding breaks the test suite and you can't reconcile the two, treat it like "Tests won't pass" — revert to the last green state if possible, record the finding as `deferred` in the ledger, mark the result `partial`, and let the human decide. Never ship the broken fix, and never silently drop the finding.
-- **Wrong repo:** If the target repo can't be determined, ask in the draft for the human to specify it.
+- **Wrong repo:** If the run's prompt has a `WRONG REPO HANDOFF` instruction and the work belongs to one of the projects it lists, follow it (write the verdict line, change no code). Otherwise, if the target repo can't be determined, ask in the draft for the human to specify it.

@@ -884,6 +884,11 @@ Jira `implement-next` picks the next ticket by its `rules` and implements it. Dr
    needs `exec.allowed_commands`), and opens a draft PR. An unattended run cannot read issue or PR
    text through `gh` and skips the QA follow-on; it pushes only through `scripts/confined-push.sh`. On failure the claim is rolled back and the
    item stays in `drafts/` until you act on it.
+5. If the run finds the ticket's code lives in another project that has its own `implement-next`
+   job for the same tracker, it hands the ticket off: the same item is re-run once in that
+   project's worktree and sandbox, and that job's `after_pr` follows. The claim stays with the
+   picking job. Unattended, the target job's `trusted_authors` must include every author the
+   picking job trusts; otherwise the handoff is refused and the run fails as above.
 
 Each rule's `jql` decides what is fetched; its `require` predicates are
 re-checked against every fetched ticket, the first rule with an eligible ticket wins, and a ticket

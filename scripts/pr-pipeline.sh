@@ -68,7 +68,8 @@ refuse() { log "not runnable: $1"; rm -f "$D/stopped_head" "$D/trusted_from"; re
 # --- resolve: ledger -> job -> project, branch, repo, PR (all bash-derived) ------------------------
 jobs_cfg_load   # here, not inside the first $(...), or every later lookup reloads and fails
 row="$(autopilot_lookup "$ITEM")" || refuse "not an autopilot item"
-IFS="	" read -r JOB _ KEY TRACKER <<< "$row"
+IFS="	" read -r _ _ KEY TRACKER <<< "$row"
+JOB="$(autopilot_pipeline_job "$ITEM")"
 IFS='|' read -r SLUG IDX _ <<< "$(jobs_enumerate | awk -F'|' -v k="$JOB" '($1 "." $3) == k { print; exit }')"
 [ -n "${SLUG:-}" ] || refuse "job ${JOB} is no longer configured"
 P="projects.${SLUG}.job.${IDX}.after_pr"

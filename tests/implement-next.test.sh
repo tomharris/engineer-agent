@@ -64,6 +64,10 @@ printf '%s markers=%s\n' "$item" "$(cat "$EA_AGENT_DIR"/state/implement-inflight
 case "${FAKE_IMPL:-ok}" in
   ok)   cp "$EA_AGENT_DIR/queue/drafts/$item" "$EA_AGENT_DIR/queue/completed/$item" ;;
   hang) touch "$EA_AGENT_DIR/hanging"; exec sleep 300 ;;
+  handoff)  # name HANDOFF_TO (with HANDOFF_NONCE_OVERRIDE if set) when offered; implement otherwise
+    v="$(printf '%s' "$*" | sed -nE "s/.*'HANDOFF ([0-9a-f]+) <project>' to ([^ ]+) and stop.*/\\1 \\2/p")"
+    if [ -n "$v" ]; then printf 'HANDOFF %s %s\n' "${HANDOFF_NONCE_OVERRIDE:-${v%% *}}" "$HANDOFF_TO" > "${v#* }"
+    else cp "$EA_AGENT_DIR/queue/drafts/$item" "$EA_AGENT_DIR/queue/completed/$item"; fi ;;
 esac
 exit 0
 EOF
@@ -115,7 +119,7 @@ mkissue() {  # mkissue <KEY> <type> [creator] [changelog-json]
 ALLOW='    exec:
       allowed_commands:
         - "make"'
-write_config() {  # write_config <auto_execute flow list> [daily_cap] [allowed_commands block] [trusted_authors]
+write_config() {  # write_config <auto_execute flow list> [daily_cap] [allowed_commands block] [trusted_authors] [extra projects yaml]
   cat > "$EA_CONFIG_FILE" <<YAML
 agent:
   autonomy:
@@ -148,11 +152,12 @@ ${3-    exec:
             jql: 'project = BILL AND assignee is EMPTY'
             claim: { assign: self, transition: "In Progress" }
             on_fail: { unassign: true, transition: "To Do" }
+${5:-}
 YAML
 }
 
 reset() {
-  rm -rf "$Q"/*/* "$EA_AGENT_DIR/state" "$ST"/*; mkdir -p "$EA_AGENT_DIR/state" "$TMP/repo"
+  rm -rf "$Q"/*/* "$EA_AGENT_DIR/state" "$ST"/*; mkdir -p "$EA_AGENT_DIR/state" "$TMP/repo" "$TMP/repo2"
   rm -f "$EA_AGENT_DIR/hanging"
   : > "$REQ_LOG"; : > "$NOTIFY_LOG"; : > "$CLAUDE_LOG"; : > "$CLAUDE_ARGS"
   mkissue BILL-1 Bug; mkissue BILL-2 Bug; echo "BILL-1 BILL-2" > "$ST/search"
@@ -243,6 +248,84 @@ run_job; eq "lost race exits ok" "0" "$?"
 eq "lost race: item moved to rejected/, nothing implemented" "1|0|0" \
   "$(ls "$Q/rejected" | grep -c ticket-BILL-1)|$(grep -c . "$CLAUDE_LOG")|$(ls "$Q/drafts" | wc -l | tr -d ' ')"
 eq "lost race: the other person's assignment is untouched" "acc-other" "$(cat "$ST/BILL-1.assignee")"
+
+echo "== wrong-project handoff"
+PAY_PROJECT() {  # PAY_PROJECT [trusted_authors] [after_pr line]
+  cat <<YAML
+  pay:
+    path: "$TMP/repo2"
+    jira:
+      project: "PAY"
+    exec:
+      allowed_commands:
+        - "npm"
+    routing:
+      description: "Payments service"
+    jobs:
+      - id: auto
+        integration: jira
+        action: implement-next
+        every: 30m
+        trusted_authors: ${1:-[acc-me, acc-lead]}
+${2:-}
+        rules:
+          - name: pay
+            jql: 'project = PAY AND assignee is EMPTY'
+            claim: { assign: self }
+YAML
+}
+handoff_run() { FAKE_IMPL=handoff HANDOFF_TO="$1" run_job; }
+
+reset; write_config "[implement, jira-claim]"
+run_job
+eq "no other implement-next project: no handoff offered" 0 "$(grep -c "WRONG REPO HANDOFF" "$CLAUDE_ARGS")"
+
+reset; write_config "[implement, jira-claim]" 5 "$ALLOW" "[acc-lead, acc-me]" "$(PAY_PROJECT)"
+handoff_run pay; eq "handed-off run exits ok" "0" "$?"
+ITEM="$(ls "$Q/completed")"
+grep -q "WRONG REPO HANDOFF.*'pay' (repos: none; Payments service)" "$CLAUDE_ARGS" \
+  && ok "the offer lists the configured candidate" || bad "offer: $(head -1 "$CLAUDE_ARGS")"
+eq "re-run in the named project, with no second offer" "${ITEM} markers=bill|${ITEM} markers=pay|1" \
+  "$(paste -sd'|' "$CLAUDE_LOG")|$(grep -c "WRONG REPO HANDOFF" "$CLAUDE_ARGS")"
+eq "completed record names the new project" '"pay"' "$(awk -F': ' '$1=="project" {print $2}' "$Q/completed/$ITEM")"
+eq "pipeline job recorded" "pay.auto" "$(cat "$EA_AGENT_DIR/state/pr-pipeline/${ITEM%.md}/handoff_job")"
+eq "claim kept" "acc-me|In Progress" "$(state BILL-1)"
+eq "verdict file consumed" "" "$(ls "$EA_AGENT_DIR/state/handoff")"
+grep -q "Autopilot implemented BILL-1" "$NOTIFY_LOG" && ok "success push after handoff" || bad "success push after handoff"
+
+refused_handoff() {  # refused_handoff <name> <log fragment>
+  eq "$1: no second run" 1 "$(grep -c . "$CLAUDE_LOG")"
+  eq "$1: claim rolled back, item left in drafts/" "|To Do|1" "$(state BILL-1)|$(ls "$Q/drafts" | grep -c ticket-BILL-1)"
+  grep -qF "$2" "$EA_AGENT_DIR/state/jobs.log" && ok "$1: reason logged" || bad "$1: reason logged"
+  eq "$1: no pipeline job recorded" 0 "$(find "$EA_AGENT_DIR/state" -name handoff_job | wc -l | tr -d ' ')"
+}
+reset; write_config "[implement, jira-claim]" 5 "$ALLOW" "[acc-lead, acc-me]" "$(PAY_PROJECT)"
+handoff_run nope; eq "unknown project exits 1" "1" "$?"
+refused_handoff "unknown project" "named project 'nope', which has no matching implement-next job"
+reset; write_config "[implement, jira-claim]" 5 "$ALLOW" "[acc-lead, acc-me]" "$(PAY_PROJECT)"
+handoff_run bill
+refused_handoff "own project" "named project 'bill', which has no matching implement-next job"
+reset; write_config "[implement, jira-claim]" 5 "$ALLOW" "[acc-lead, acc-me]" "$(PAY_PROJECT)"
+HANDOFF_NONCE_OVERRIDE=0000000000000000 handoff_run pay
+refused_handoff "wrong nonce" "ignoring a malformed handoff verdict"
+reset; write_config "[implement, jira-claim]" 5 "$ALLOW" "[acc-lead, acc-me]" "$(PAY_PROJECT "[acc-me]")"
+handoff_run pay
+refused_handoff "target trusts fewer authors" "pay.auto does not trust acc-lead, whom bill.auto trusts"
+
+reset; write_config "[]" 5 "$ALLOW" "[acc-lead, acc-me]" "$(PAY_PROJECT "[acc-me]")"
+run_job; ITEM="$(drafts)"
+( export FAKE_IMPL=handoff HANDOFF_TO=pay EA_NTFY_SERVER="https://example.invalid" EA_NTFY_TOPIC=t EA_NTFY_COMMAND_TOPIC=c EA_NTFY_AUTH_TOKEN=""
+  source "$REPO_ROOT/scripts/approval-listener.sh"
+  handle_line "$(jq -nc --arg m "approve|$ITEM" '{event:"message",id:"h1",time:1,message:$m}')" ) >/dev/null 2>&1
+eq "an approved run hands off without the target trust check" "${ITEM} markers=pay|1" \
+  "$(tail -1 "$CLAUDE_LOG")|$(ls "$Q/completed" | grep -c ticket-BILL-1)"
+
+: > "$TMP/pipeline.log"
+printf '#!/bin/bash\nprintf "%%s\\n" "$*" >> "%s"\n' "$TMP/pipeline.log" > "$TMP/bin/pipeline"; chmod +x "$TMP/bin/pipeline"
+reset; write_config "[implement, jira-claim]" 5 "$ALLOW" "[acc-lead, acc-me]" "$(PAY_PROJECT "" "        after_pr: { mark_ready: true }")"
+EA_PR_PIPELINE_BIN="$TMP/bin/pipeline" EA_PR_PIPELINE_FOREGROUND=1 handoff_run pay
+ITEM="$(ls "$Q/completed")"
+eq "the target job's after_pr starts the pipeline" "--item ${ITEM}" "$(cat "$TMP/pipeline.log")"
 
 echo "== trusted authorship (unattended)"
 untrusted_case() {  # untrusted_case <name> <expected reason fragment> [trusted_authors]
