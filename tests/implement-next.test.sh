@@ -312,13 +312,13 @@ reset; write_config "[implement, jira-claim]" 5 "$ALLOW" "[acc-lead, acc-me]" "$
 handoff_run pay
 refused_handoff "target trusts fewer authors" "pay.auto does not trust acc-lead, whom bill.auto trusts"
 
-reset; write_config "[]" 5 "$ALLOW" "[acc-lead, acc-me]" "$(PAY_PROJECT "[acc-me]")"
-run_job; ITEM="$(drafts)"
+reset; write_config "[]" 5 "$ALLOW" "[acc-lead, acc-me]" "$(PAY_PROJECT)"
+run_job; : > "$CLAUDE_ARGS"; ITEM="$(drafts)"
 ( export FAKE_IMPL=handoff HANDOFF_TO=pay EA_NTFY_SERVER="https://example.invalid" EA_NTFY_TOPIC=t EA_NTFY_COMMAND_TOPIC=c EA_NTFY_AUTH_TOKEN=""
   source "$REPO_ROOT/scripts/approval-listener.sh"
   handle_line "$(jq -nc --arg m "approve|$ITEM" '{event:"message",id:"h1",time:1,message:$m}')" ) >/dev/null 2>&1
-eq "an approved run hands off without the target trust check" "${ITEM} markers=pay|1" \
-  "$(tail -1 "$CLAUDE_LOG")|$(ls "$Q/completed" | grep -c ticket-BILL-1)"
+eq "an approved run is offered no handoff and stays in its project" "${ITEM} markers=bill|0" \
+  "$(tail -1 "$CLAUDE_LOG")|$(grep -c "WRONG REPO HANDOFF" "$CLAUDE_ARGS")"
 
 : > "$TMP/pipeline.log"
 printf '#!/bin/bash\nprintf "%%s\\n" "$*" >> "%s"\n' "$TMP/pipeline.log" > "$TMP/bin/pipeline"; chmod +x "$TMP/bin/pipeline"

@@ -111,8 +111,10 @@ Read-only: search + dev-panel reads, never an assign or transition. Four things 
   ticket whose code is in another project. The run's prompt lists the candidates — other projects
   with an implement-next job of the same integration, from config — and the run may write
   `HANDOFF <nonce> <slug>` to `state/handoff/<item>`. Bash honors it only for a listed slug, at most
-  once per item, under the target job's `max_in_flight`, and (unattended) only if the target job's
+  once per item, under the target job's `max_in_flight`, and only if the target job's
   `trusted_authors` ⊇ the source job's, so the trust gate's verdict carries over without a re-fetch.
+  **Unattended runs only**: an Approve tap vouched for one project's sandbox, possibly for
+  untrusted text, and the superset check says nothing about the ticket's actual authors.
   The ledger row is not rewritten: the claim and its `on_fail` stay the source rule's.
   `state/pr-pipeline/<item>/handoff_job` names the job whose `after_pr` and project run the
   pipeline (`autopilot_pipeline_job`); the queue item's `project` is rewritten for the re-run.

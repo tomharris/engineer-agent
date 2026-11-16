@@ -543,9 +543,8 @@ autopilot_release() { _autopilot_claim_cmd release "$1"; }
 # --- Project handoff --------------------------------------------------------------------------
 # A job's selection (e.g. a summary-based JQL) can pick a ticket whose code lives in another
 # project. The confined run may then name that project in a nonce-bearing verdict file, and bash
-# re-runs it there, at most once per item. The model only chooses among config-derived candidates:
-# other projects with an implement-next job of the same integration. Unattended, the target job
-# must trust every author the source job trusts, so text that passed the source gate passes the
+# re-runs it there, at most once per item, and only for an unattended run. The model only chooses among config-derived candidates:
+# other projects with an implement-next job of the same integration. The target job must trust every author the source job trusts, so text that passed the source gate passes the
 # target's. The claim stays the source job's (its rule's on_fail undoes it); after_pr and the
 # pipeline's project come from the target (state/pr-pipeline/<item>/handoff_job).
 HANDOFF_DIR="${EA_AGENT_DIR}/state/handoff"
@@ -615,16 +614,15 @@ _handoff_accept() {
   max="$(_jcfg "projects.${tslug}.job.${tidx}.max_in_flight")"
   [ "$(inflight_count "$tslug")" -lt "${max:-1}" ] \
     || { log "autopilot: ${tslug} is at max_in_flight; not handing ${item} off"; return 1; }
-  if [ "$unattended" = 1 ]; then
-    IFS='|' read -r sslug sidx _ <<< "$(_job_locate "$src")"
-    [ "$tracker" = github ] && ci=1
-    ttrust="$(_arcl "projects.${tslug}.job.${tidx}.trusted_authors")"
-    while IFS= read -r a; do
-      [ -n "$a" ] || continue
-      _ar_member "$a" "$ttrust" "$ci" \
-        || { log "autopilot: ${tgt#*|} does not trust ${a}, whom ${src} trusts; not handing ${item} off unattended"; return 1; }
-    done < <(_arcl "projects.${sslug}.job.${sidx}.trusted_authors")
-  fi
+  [ "$unattended" = 1 ] || return 1
+  IFS='|' read -r sslug sidx _ <<< "$(_job_locate "$src")"
+  [ "$tracker" = github ] && ci=1
+  ttrust="$(_arcl "projects.${tslug}.job.${tidx}.trusted_authors")"
+  while IFS= read -r a; do
+    [ -n "$a" ] || continue
+    _ar_member "$a" "$ttrust" "$ci" \
+      || { log "autopilot: ${tgt#*|} does not trust ${a}, whom ${src} trusts; not handing ${item} off"; return 1; }
+  done < <(_arcl "projects.${sslug}.job.${sidx}.trusted_authors")
   printf '%s\n' "$tgt"
 }
 
@@ -648,7 +646,10 @@ autopilot_implement() {
        autopilot_release "$item"
        return 1 ;;
   esac
-  _handoff_offer "$item"
+  # An Approve tap approved this project's sandbox for text that may be untrusted; only an
+  # unattended run (trust gate passed) may move to another project's.
+  HANDOFF_PROMPT="" HANDOFF_NONCE=""
+  [ "$unattended" = 1 ] && _handoff_offer "$item"
   run_ticket_implementation "$item" "$budget" "$unattended"
   if [ -e "$draft" ] && tgt="$(_handoff_accept "$item" "$unattended")"; then
     from="$(grep -m1 '^project:' "$draft" | sed 's/^project:[[:space:]]*//; s/["'\'' ]//g')"

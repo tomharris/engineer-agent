@@ -887,8 +887,9 @@ Jira `implement-next` picks the next ticket by its `rules` and implements it. Dr
 5. If the run finds the ticket's code lives in another project that has its own `implement-next`
    job for the same tracker, it hands the ticket off: the same item is re-run once in that
    project's worktree and sandbox, and that job's `after_pr` follows. The claim stays with the
-   picking job. Unattended, the target job's `trusted_authors` must include every author the
-   picking job trusts; otherwise the handoff is refused and the run fails as above.
+   picking job. Only unattended runs hand off (an Approve tap approves the picking project's
+   sandbox only), and the target job's `trusted_authors` must include every author the picking
+   job trusts; otherwise the run fails as above.
 
 Each rule's `jql` decides what is fetched; its `require` predicates are
 re-checked against every fetched ticket, the first rule with an eligible ticket wins, and a ticket
