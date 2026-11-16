@@ -143,7 +143,7 @@ branch_worktree() {
   WT="${AGENT_DIR}/worktrees/${ITEM%.md}-pr-$(date +%s)"
   mkdir -p "$(dirname "$WT")"
   git -C "$PROJECT_PATH" fetch --quiet origin "$BRANCH" >>"$LOG_FILE" 2>&1 || true
-  git -C "$PROJECT_PATH" worktree add "$WT" "$BRANCH" >>"$LOG_FILE" 2>&1 || { WT=""; return 1; }
+  git -C "$PROJECT_PATH" worktree add --quiet "$WT" "$BRANCH" >>"$LOG_FILE" 2>&1 || { WT=""; return 1; }
 }
 remote_head() { git -C "$PROJECT_PATH" ls-remote origin "refs/heads/${BRANCH}" 2>/dev/null | cut -f1; }
 # base_conflicts <sha> — true only when merging origin/<base> into <sha> conflicts (merge-tree exit 1).

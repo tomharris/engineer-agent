@@ -787,7 +787,7 @@ test_worktree_base_from_remote_head() {
   export FAKE_SUCCEED=1 FAKE_REMOTE_HEAD=master
   handle_line "$(msg_event id-remotehead "approve|$item")"
 
-  grep -q "worktree add --detach .* origin/master$" "$GIT_LOG" \
+  grep -q "worktree add --quiet --detach .* origin/master$" "$GIT_LOG" \
     && ok "worktree detached at origin/<remote default>" || bad "wrong base checked out (git log: $(cat "$GIT_LOG"))"
   grep -qF "base branch 'master'" "$CLAUDE_ARGS_LOG" \
     && ok "prompt names the resolved base" || bad "prompt does not name the base"
@@ -806,7 +806,7 @@ test_worktree_refuses_local_branch_fallback() {
   export FAKE_SUCCEED=1 FAKE_REMOTE_HEAD=stage FAKE_MISSING_REF=origin/stage
   handle_line "$(msg_event id-nobase "approve|$item")"
 
-  grep -q "worktree add --detach .* stage$" "$GIT_LOG" \
+  grep -q "worktree add --quiet --detach .* stage$" "$GIT_LOG" \
     && bad "fell back to the local branch (git log: $(cat "$GIT_LOG"))" || ok "no local-branch fallback"
   [ -s "$CLAUDE_ARGS_LOG" ] && bad "run started without a base" || ok "run refused"
   grep -q "refusing to fall back to a local branch" "$LOG_FILE" \

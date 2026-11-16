@@ -24,6 +24,8 @@ export EA_PR_PIPELINE_POLL=0 EA_PR_PIPELINE_NONE_GRACE=0
 export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t
 export HOME="$TMP/home"; mkdir -p "$HOME" "$TMP/bin" "$ST"
 export PATH="$TMP/bin:$PATH"
+# Real git emits \r-separated checkout progress into the log unless told to be quiet.
+export GIT_PROGRESS_DELAY=0
 ITEM="2025-11-10T10-00-00Z-ticket-gh-7.md"
 BR="tom/gh-7-fix-nav"
 PD="$EA_AGENT_DIR/state/pr-pipeline/${ITEM%.md}"
@@ -270,6 +272,7 @@ grep -q 'http://localhost:3999' "$CLAUDE_ARGS" && ok "browser run is told the se
 pid="$(cat "$TMP/srv.pid" 2>/dev/null)"
 [ -n "$pid" ] && ! kill -0 "$pid" 2>/dev/null && ok "dev server is stopped afterwards" || bad "server pid ${pid:-none} still alive"
 eq "worktrees are removed" 1 "$(git -C "$TMP/repo" worktree list | grep -c .)"
+eq "jobs.log has no carriage returns" 0 "$(LC_ALL=C tr -cd '\r' < "$EA_AGENT_DIR/state/jobs.log" | wc -c | tr -d ' ')"
 eq "no fix run when CI passes" 0 "$(fix_runs)"
 grep -qE 'Bash\(gh |Bash\(git push' "$CLAUDE_ARGS" && bad "a model run was granted gh or raw git push" || ok "model runs get no gh verbs or raw git push"
 

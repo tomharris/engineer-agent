@@ -42,6 +42,8 @@ for ((i=0;i<${#args[@]};i++)); do
     rev-parse) echo "deadbee"; exit 0;;
     worktree)
       if [ "${args[i+1]}" = "add" ]; then
+        # Like real git: \r-separated checkout progress on stderr unless quiet.
+        case " $* " in *" --quiet "*|*" -q "*) ;; *) printf 'Updating files:  50%% (1/2)\rUpdating files: 100%% (2/2), done.\n' >&2 ;; esac
         for ((j=i+2;j<${#args[@]};j++)); do [ "${args[j]}" = "--detach" ] && { mkdir -p "${args[j+1]}"; break; }; done
       fi
       exit 0;;
@@ -214,6 +216,7 @@ case "$(drafts)" in *-ticket-BILL-2.md) ok "an investigation-kind ticket is skip
 echo "== full autonomy"
 reset; write_config "[implement, jira-claim]"
 run_job; eq "implemented run exits ok" "0" "$?"
+eq "jobs.log has no carriage returns" 0 "$(LC_ALL=C tr -cd '\r' < "$EA_AGENT_DIR/state/jobs.log" | wc -c | tr -d ' ')"
 eq "ticket claimed and moved" "acc-me|In Progress" "$(state BILL-1)"
 ITEM="$(ls "$Q/completed")"
 case "$ITEM" in *-ticket-BILL-1.md) ok "completed/ record present" ;; *) bad "completed/ holds [$ITEM]" ;; esac
