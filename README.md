@@ -900,16 +900,18 @@ already in the queue (including completed or rejected) is never picked. See the 
 message starting with `CR/QA` (configurable) from a `trusted_slack_users` id that links one PR in the
 project's `github.repos` and one Jira ticket, claims it with 👀, then:
 
-1. reviews the PR (a read-only model review with an acceptance-criteria check, plus your
-   `security.command` adapter); any Medium+ finding ⇒ one PR comment and stop. A finding that
+1. reviews the PR (`/code-review high` in a read-only model run with an acceptance-criteria check,
+   plus your `security.command` adapter); any Medium+ finding ⇒ a changes-requested verdict and stop. A finding that
    contradicts the ticket (see the AC guard under `after_pr`) doesn't block; the comment lists it;
 2. QAs it: follows the ticket's written QA steps and runs the `.py`/`.sh` scripts attached to the
-   ticket by `trusted_authors` (bash runs them, from a run plan the model writes); a failure ⇒ one
-   Jira comment and stop;
+   ticket by `trusted_authors` (bash runs them, from a run plan the model writes); a failure ⇒ a
+   Jira comment, a QA-failed verdict and stop;
 3. on a pass, comments a QA summary on the ticket, reacts `:approve:` and moves the ticket to
-   `transition`.
+   `transition`, then posts the approved verdict.
 
-It needs the tiers `slack-react`, `pr-comment`, `jira-comment`, `jira-transition` and
+Each verdict is posted as a PR comment and as a reply in the request's Slack thread.
+
+It needs the tiers `slack-react`, `slack-post`, `pr-comment`, `jira-comment`, `jira-transition` and
 `security-review`, and should be `exclusive: true` so the global poll's status reactions don't land
 on requests first. A ticket written or edited by anyone outside `trusted_authors` is skipped with a
 comment before any model sees it.

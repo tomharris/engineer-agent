@@ -64,7 +64,7 @@ docs/architecture/          detailed design rationale (read before changing that
   one fetch; the confined run gets no tracker access. The listener trusts
   `state/autopilot-items.tsv`, never frontmatter.
 - **`cr-qa` (`job-slack-cr-qa.sh`) keeps every external write in bash** behind `slack-react`,
-  `pr-comment`, `jira-comment`, `jira-transition` and `security-review`. QA scripts run only from
+  `slack-post`, `pr-comment`, `jira-comment`, `jira-transition` and `security-review`. QA scripts run only from
   bash, from a nonce-checked run spec; model runs get `--setting-sources user --strict-mcp-config`
   and a credential-free env, and see only trusted ticket text.
 - **The AC guard only narrows review findings against trusted ticket text**: a finding is skipped

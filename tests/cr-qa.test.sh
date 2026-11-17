@@ -142,6 +142,8 @@ review && ok "review completes" || bad "review failed: $(cat "$TMP/rv/review.err
 eq "medium code finding blocks" 1 "$(blocking)"
 has "diff given to the review" "app/a.py" "$(cat "$TMP/rv/changed")"
 grep -q 'Bash' "$CLAUDE_CALLS" && bad "review run was granted Bash" || ok "review run has no Bash"
+has "review runs /code-review high against the base" 'skill "code-review", args "high origin/main"' "$(cat "$CLAUDE_CALLS")"
+has "review run may use the code-review skill" "Skill(code-review)" "$(cat "$CLAUDE_CALLS")"
 grep -q sekrit "${CLAUDE_CALLS}.env" && bad "credential env reached the model run" || ok "model run env has no credentials"
 grep -qE 'oauth-leak|key-leak' "${CLAUDE_CALLS}.env" && bad "Anthropic credential reached the model run" || ok "no Anthropic credential in the model run env"
 has "CLAUDE_CONFIG_DIR forwarded" "CLAUDE_CONFIG_DIR=$TMP/cfgdir" "$(cat "${CLAUDE_CALLS}.env")"
@@ -253,6 +255,7 @@ case "$1" in
   read)  cat "$E2E/msgs.json" ;;
   thread) if [ -f "$E2E/thread.json" ]; then cat "$E2E/thread.json"; else jq --arg t "$3" '[.[] | select(.ts == $t)][:1]' "$E2E/msgs.json"; fi ;;
   react) echo "$4" >> "$E2E/reactions"; exit "${SLACK_REACT_RC:-0}" ;;
+  send)  [ "$4" = --thread ] && printf '%s %s\n%s\n--8<--\n' "$2" "$5" "$3" >> "$E2E/slack-replies"; exit "${SLACK_SEND_RC:-0}" ;;
   *) exit 64 ;;
 esac
 SH
@@ -283,7 +286,7 @@ esac
 SH
 chmod +x "$H/bin/"*
 export E2E="$H" PR_SHA JIRA_TOKEN_TEST=tok
-TIERS='[slack-react, pr-comment, jira-comment, jira-transition, security-review]'
+TIERS='[slack-react, slack-post, pr-comment, jira-comment, jira-transition, security-review]'
 e2e_config() {
   cat > "$EA_AGENT_DIR/engineer.yaml" <<YAML
 agent:
@@ -327,8 +330,8 @@ e2e_issue() {  # e2e_issue <description editor>
     changelog: {total: 1, histories: [{author: {accountId: $e}, items: [{fieldId: "description"}]}]}}' > "$H/issue.json"
 }
 e2e_reset() {  # e2e_reset <code findings json> <script exit> [verdict result]
-  rm -f "$H"/thread.json "$H"/views "$H"/reactions "$H"/gh.calls "$H"/pr-comments "$H"/jira-comments "$H"/transitions "$H"/errs "$H"/items
-  : > "$CLAUDE_CALLS"; unset EA_JOBS_CFG SLACK_REACT_RC
+  rm -f "$H"/thread.json "$H"/views "$H"/reactions "$H"/gh.calls "$H"/pr-comments "$H"/jira-comments "$H"/transitions "$H"/errs "$H"/items "$H"/slack-replies
+  : > "$CLAUDE_CALLS"; unset EA_JOBS_CFG SLACK_REACT_RC SLACK_SEND_RC
   rm -rf "$EA_AGENT_DIR/state/jobs"
   msg 1700000001.000000 U0TRUSTED "CR/QA request for: <https://github.com/acme/web/pull/7|pr> - <https://acme.atlassian.net/browse/ENG-7|ENG-7>" '[]' | jq -s . > "$H/msgs.json"
   e2e_issue acc-tom; e2e_config
@@ -351,7 +354,11 @@ eq "claim then approve reactions" "eyes,approve" "$(paste -sd, - < "$H/reactions
 eq "one Jira comment, QA passed" "QA passed for https://github.com/acme/web/pull/7" "$(head -1 "$H/jira-comments" 2>/dev/null)"
 has "comment reports the script" "ENG-7-qa.sh: exit 0" "$(cat "$H/jira-comments" 2>/dev/null)"
 has "transitioned to Ready for Upload" '"41"' "$(cat "$H/transitions" 2>/dev/null)"
-eq "no PR comment" "" "$(cat "$H/pr-comments" 2>/dev/null)"
+eq "approved verdict on the PR" "CR/QA: approved" "$(head -1 "$H/pr-comments" 2>/dev/null)"
+has "PR verdict carries the QA summary" "QA passed for https://github.com/acme/web/pull/7" "$(cat "$H/pr-comments" 2>/dev/null)"
+eq "approved verdict replies in the request's thread" "C0123456789 1700000001.000000|CR/QA: approved" \
+  "$(sed -n 1p "$H/slack-replies" 2>/dev/null)|$(sed -n 2p "$H/slack-replies" 2>/dev/null)"
+has "thread verdict carries the reviewed commit" "Reviewed commit: ${PR_SHA}" "$(cat "$H/slack-replies" 2>/dev/null)"
 eq "ledger approved" approved "$(outcome)"
 eq "worktree removed" "$WT0" "$(wts)"
 : > "$CLAUDE_CALLS"; rm -f "$H/reactions"; unset EA_JOBS_CFG
@@ -361,6 +368,10 @@ e2e_reset '[{"title":"Race in scheduler","severity":"medium","file":"app/a.py","
 run_job; eq "review stop exits 0" 0 "$?"
 eq "review stop: PR comment" "CR/QA: changes requested" "$(head -1 "$H/pr-comments" 2>/dev/null)"
 eq "review stop: claim only" "eyes" "$(paste -sd, - < "$H/reactions")"
+eq "review stop: thread verdict" "1700000001.000000|CR/QA: changes requested" \
+  "$(sed -n 1p "$H/slack-replies" 2>/dev/null | cut -d' ' -f2)|$(sed -n 2p "$H/slack-replies" 2>/dev/null)"
+has "review stop: thread names the finding" "Race in scheduler" "$(cat "$H/slack-replies" 2>/dev/null)"
+has "review stop: QA not run" "QA: not run" "$(cat "$H/pr-comments" 2>/dev/null)"
 grep -q '/verdict.json' "$CLAUDE_CALLS" && bad "QA ran after a review stop" || ok "no QA run after a review stop"
 eq "review stop: no Jira comment" "" "$(cat "$H/jira-comments" 2>/dev/null)"
 eq "ledger review-stopped" review-stopped "$(outcome)"
@@ -385,6 +396,9 @@ e2e_reset "$CLEAN" 1
 run_job; eq "QA stop exits 0" 0 "$?"
 eq "QA stop: Jira comment" "QA failed for https://github.com/acme/web/pull/7" "$(head -1 "$H/jira-comments" 2>/dev/null)"
 eq "QA stop: claim only" "eyes" "$(paste -sd, - < "$H/reactions")"
+eq "QA stop: PR verdict" "CR/QA: QA failed" "$(head -1 "$H/pr-comments" 2>/dev/null)"
+eq "QA stop: thread verdict" "CR/QA: QA failed" "$(sed -n 2p "$H/slack-replies" 2>/dev/null)"
+has "QA stop: thread names the failing script" "ENG-7-qa.sh: exit 1" "$(cat "$H/slack-replies" 2>/dev/null)"
 eq "QA stop: no transition" "" "$(cat "$H/transitions" 2>/dev/null)"
 eq "ledger qa-stopped" qa-stopped "$(outcome)"
 
@@ -439,6 +453,16 @@ run_job
 eq "killed mid-run: ledger error, not claimed" error "$(outcome)"
 eq "killed mid-run: worktree removed" "$WT0" "$(wts)"
 unset ADAPTER_KILL_PARENT
+
+e2e_reset "$CLEAN" 0; export SLACK_SEND_RC=1
+run_job
+eq "thread reply failure: still approved" approved "$(outcome)"
+has "thread reply failure reported" "Slack reply in thread 1700000001.000000 failed" "$(cat "$H/errs")"
+
+e2e_reset "$CLEAN" 0; e2e_config '[slack-react, pr-comment, jira-comment, jira-transition, security-review]'
+run_job; eq "missing slack-post exits 1" 1 "$?"
+has "missing slack-post named" "slack-post" "$(cat "$H/errs")"
+eq "missing slack-post: no reaction" "" "$(cat "$H/reactions" 2>/dev/null)"
 
 e2e_reset "$CLEAN" 0; export SLACK_REACT_RC=1
 run_job; eq "claim failure exits 1" 1 "$?"
