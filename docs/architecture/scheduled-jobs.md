@@ -301,11 +301,13 @@ was posted by a `trusted_slack_users` id, holds exactly one PR URL and one Jira 
 in one of the project's `github.repos`, and its ts is not in the job's ledger. One request per run,
 oldest first.
 
-Sequence: tiers (`slack-react`, `pr-comment`, `jira-comment`, `jira-transition`,
+Sequence: tiers (`slack-react`, `slack-post`, `pr-comment`, `jira-comment`, `jira-transition`,
 `security-review`; any missing ⇒ error before anything is claimed) → ticket fetch +
 `jira_untrusted_reason` (untrusted ⇒ ledger `untrusted`, one ticket comment, no reaction, no model
 run) → ledger `claimed`, claim reaction → worktree of the PR head (`refs/pull/<n>/head`, checked
-against `headRefOid`) → review → QA → approve.
+against `headRefOid`) → review → QA → approve. Every verdict (changes requested, review could not
+complete, QA failed, approved) is posted as a PR comment and as a reply in the request's Slack
+thread; a failed thread reply is an error but does not change the outcome.
 
 Things a reader will otherwise "fix" back:
 
@@ -320,11 +322,12 @@ Things a reader will otherwise "fix" back:
   trusted request lives there), so a forged header can neither inject nor suppress a request.
 - **Pair it with `exclusive: true`.** The global poll's own "detected" status reaction defaults to
   `eyes`; without exclusivity it would mark requests claimed before cr-qa sees them.
-- **Review.** One read-only model run (Read on the worktree and workdir only — `Read(...)` also
-  scopes Grep/Glob, so neither is granted bare) writes nonce-bearing findings; an unmet AC is
+- **Review.** One read-only model run runs `/code-review high origin/<base>` through the Skill
+  tool (granted `Skill(code-review)`, `Agent`, `ReportFindings`, and Read on the worktree and workdir
+  only — `Read(...)` also scopes Grep/Glob, so neither is granted bare) and writes nonce-bearing findings; an unmet AC is
   `high`. The `security.command` adapter runs as in `after_pr`, and only findings the PR introduced
   count (`security_introduced`). Severity is case-insensitive; unknown or missing counts as `high`.
-  Anything `medium`+ ⇒ one PR comment, ledger `review-stopped`, after the AC guard below. A review
+  Anything `medium`+ ⇒ the changes-requested verdict, ledger `review-stopped`, after the AC guard below. A review
   that cannot complete is an error, never a pass.
 - **AC guard (cr-qa review and `after_pr` security).** Reviewers flag behaviour a ticket asks for
   (AIA-536: the publisher fallback without a permission recheck, per-reason error codes), and fix

@@ -1,12 +1,13 @@
 #!/bin/bash
 # job-slack-cr-qa.sh — the slack / cr-qa scheduled job: pick the oldest trusted "CR/QA" request in
-# the job's channel for one of the project's repos, review the PR, QA it against the ticket, and
-# either stop with one comment or approve (Jira QA summary, approve reaction, transition).
+# the job's channel for one of the project's repos, review the PR (`/code-review high`), QA it against
+# the ticket, and either stop or approve (Jira QA summary, approve reaction, transition). Each
+# verdict is posted on the PR and as a reply in the request's Slack thread.
 #
 # Usage: job-slack-cr-qa.sh --job <project>.<id> --errors <file> --items <file> [--budget <usd>]
 # Exit: 0 ok (nothing eligible, a review/QA stop, or approved), 1 error, 3 Slack/Jira unavailable.
 #
-# Every external write is bash behind its own tier (slack-react, pr-comment, jira-comment,
+# Every external write is bash behind its own tier (slack-react, slack-post, pr-comment, jira-comment,
 # jira-transition, security-review), checked before the claim. The ledger
 # (state/jobs/<key>.requests.tsv) is the dedup key: a request is handled at most once.
 set -uo pipefail
@@ -57,7 +58,7 @@ cap="$(_jcfg "$P.daily_cap")"; cap="${cap:-10}"
 n="$(job_picks_today "$JOB")"
 [ "$n" -lt "$cap" ] || { log "skipped: daily_cap ${cap} reached (${n} today)"; exit 0; }
 missing=""
-for t in slack-react pr-comment jira-comment jira-transition security-review; do
+for t in slack-react slack-post pr-comment jira-comment jira-transition security-review; do
   jobs_autonomy_allows "$t" || missing="${missing}${missing:+, }${t}"
 done
 [ -z "$missing" ] || { err "cr-qa needs autonomy tier(s): ${missing}"; exit 1; }
@@ -134,6 +135,14 @@ pr_comment() {
   with_timeout "$GH_TIMEOUT" gh pr comment "$PR" --repo "$REPO" --body-file "$1" >>"$LOG_FILE" 2>&1 \
     || err "PR comment on ${PR_URL} failed"
 }
+slack_reply() {
+  with_timeout "$GH_TIMEOUT" "$SLACK_BIN" send "$CHANNEL" "$(head -n 40 "$1")" --thread "$TS" --json ${SLACK_WS[@]+"${SLACK_WS[@]}"} >>"$LOG_FILE" 2>&1 \
+    || err "Slack reply in thread ${TS} failed"
+}
+post_verdict() { pr_comment "$1"; slack_reply "$1"; }
+verdict() {  # verdict <header> <body.md> <out.md> — a verdict once the review found nothing blocking
+  { echo "$1"; echo; echo "Review: no blocking findings"; echo; cat "$2"; } > "$3"
+}
 jira_comment() { jira_add_comment "$KEY" "$1" || err "Jira comment on ${KEY} failed (HTTP ${JIRA_HTTP})"; }
 
 # --- checkout of the PR head -----------------------------------------------------------------------
@@ -159,19 +168,21 @@ done < "$W/scripts.tsv"
 # --- review ---------------------------------------------------------------------------------------
 if ! crqa_review "$WT" "$W" "$REPO" "$PR" "$BASE" "$SEC_CMD" "$SEC_TO" "$BUDGET"; then
   printf 'CR/QA: review could not complete — %s\n' "$(cat "$W/review.err")" > "$TMPD/c.md"
-  pr_comment "$TMPD/c.md"; err "review of ${PR_URL} could not complete: $(cat "$W/review.err")"
+  post_verdict "$TMPD/c.md"; err "review of ${PR_URL} could not complete: $(cat "$W/review.err")"
   finish error 1
 fi
 crqa_blocking "$W" > "$W/blocking.json" || { err "unreadable review findings"; finish error 1; }
 crqa_ac_guard "$W" "${EA_AC_GUARD_BUDGET_USD:-0.50}"
 if [ "$(jq length "$W/blocking.json")" -gt 0 ]; then
-  crqa_review_comment "$W/blocking.json" "$TMPD/c.md"; pr_comment "$TMPD/c.md"
+  crqa_review_comment "$W/blocking.json" "$TMPD/c.md"; printf '\nQA: not run\n' >> "$TMPD/c.md"
+  post_verdict "$TMPD/c.md"
   finish review-stopped 0
 fi
 
 # --- QA -------------------------------------------------------------------------------------------
 if ! crqa_qa "$WT" "$W" "$ALLOWED" "$QA_TO" "$BUDGET"; then
   crqa_qa_comment "$W" fail "$PR_URL" "$TMPD/c.md"; jira_comment "$TMPD/c.md"
+  verdict "CR/QA: QA failed" "$TMPD/c.md" "$TMPD/v.md"; post_verdict "$TMPD/v.md"
   finish qa-stopped 0
 fi
 
@@ -189,4 +200,5 @@ case "$rc" in
   4) err "no transition to '${TRANSITION}' from ${KEY}'s current status"; finish error 1 ;;
   *) err "transition of ${KEY} failed (HTTP ${JIRA_HTTP})"; finish error 1 ;;
 esac
+verdict "CR/QA: approved" "$TMPD/c.md" "$TMPD/v.md"; post_verdict "$TMPD/v.md"
 finish approved 0

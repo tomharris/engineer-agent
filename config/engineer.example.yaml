@@ -407,7 +407,7 @@ projects:
     #       pause_after_failures: 3      # consecutive failed runs before the job pauses itself
     #
     #   # Reviews and QAs PRs requested in a channel ("CR/QA <PR url> <Jira url>"). Needs tiers
-    #   # slack-react, pr-comment, jira-comment, jira-transition, security-review.
+    #   # slack-react, slack-post, pr-comment, jira-comment, jira-transition, security-review.
     #   - id: cr-qa
     #     integration: slack
     #     action: cr-qa
