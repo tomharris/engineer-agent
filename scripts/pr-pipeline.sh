@@ -159,8 +159,16 @@ base_conflicts() {
 ci_state() {
   local rows
   # statusCheckRollup, not `gh pr checks --json`: that flag is missing from older gh (Ubuntu 2.45).
+  # A cancelled check run is dropped when another run of the same check exists on the head: a
+  # workflow's concurrency group cancels older runs when a PR edit retriggers it, and the newer
+  # run decides. A cancel with no other run still counts as a failure.
   rows="$(with_timeout "$GH_TIMEOUT" gh pr view "$PR" --repo "$REPO" --json statusCheckRollup --jq '
-    .statusCheckRollup[]? |
+    (.statusCheckRollup // []) as $all |
+    $all[] |
+    (.name // "") as $n |
+    select(.__typename == "StatusContext" or .conclusion != "CANCELLED"
+      or ([$all[] | select(.__typename != "StatusContext" and .name == $n and .conclusion != "CANCELLED")]
+          | length) == 0) |
     (if .__typename == "StatusContext" then
        ({"SUCCESS": "pass", "PENDING": "pending", "EXPECTED": "pending"}[.state // ""] // "fail")
      elif (.status // "") != "COMPLETED" then "pending"
