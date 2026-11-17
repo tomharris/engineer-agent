@@ -381,10 +381,17 @@ eq "review stop: claim only" "eyes" "$(paste -sd, - < "$H/reactions")"
 eq "review stop: thread verdict" "1700000001.000000|CR/QA: changes requested" \
   "$(sed -n 1p "$H/slack-replies" 2>/dev/null | cut -d' ' -f2)|$(sed -n 2p "$H/slack-replies" 2>/dev/null)"
 has "review stop: thread names the finding" "Race in scheduler" "$(cat "$H/slack-replies" 2>/dev/null)"
-has "review stop: QA not run" "QA: not run" "$(cat "$H/pr-comments" 2>/dev/null)"
-grep -q '/verdict.json' "$CLAUDE_CALLS" && bad "QA ran after a review stop" || ok "no QA run after a review stop"
-eq "review stop: no Jira comment" "" "$(cat "$H/jira-comments" 2>/dev/null)"
+has "review stop: PR verdict carries the QA result" "QA passed for https://github.com/acme/web/pull/7" "$(cat "$H/pr-comments" 2>/dev/null)"
+has "review stop: thread carries the QA result" "ENG-7-qa.sh: exit 0" "$(cat "$H/slack-replies" 2>/dev/null)"
+eq "review stop: Jira gets the QA result" "QA passed for https://github.com/acme/web/pull/7" "$(head -1 "$H/jira-comments" 2>/dev/null)"
+eq "review stop: no transition" "" "$(cat "$H/transitions" 2>/dev/null)"
 eq "ledger review-stopped" review-stopped "$(outcome)"
+
+e2e_reset '[{"title":"Race in scheduler","severity":"medium","file":"app/a.py","detail":"lock it"},{"nonce":"NONCE"}]' 1
+run_job; eq "review and QA stop: PR verdict" "CR/QA: changes requested" "$(head -1 "$H/pr-comments" 2>/dev/null)"
+has "review and QA stop: verdict carries the QA failure" "QA failed for https://github.com/acme/web/pull/7" "$(cat "$H/pr-comments" 2>/dev/null)"
+eq "review and QA stop: Jira gets the QA failure" "QA failed for https://github.com/acme/web/pull/7" "$(head -1 "$H/jira-comments" 2>/dev/null)"
+eq "review and QA stop: ledger review-stopped" review-stopped "$(outcome)"
 eq "worktree removed after review stop" "$WT0" "$(wts)"
 
 e2e_reset '[{"title":"Schedule should not be registered","severity":"medium","file":"app/a.py","detail":"drop it"},{"nonce":"NONCE"}]' 0

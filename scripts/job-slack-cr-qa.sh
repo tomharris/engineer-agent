@@ -173,14 +173,16 @@ if ! crqa_review "$WT" "$W" "$REPO" "$PR" "$BASE" "$SEC_CMD" "$SEC_TO" "$BUDGET"
 fi
 crqa_blocking "$W" > "$W/blocking.json" || { err "unreadable review findings"; finish error 1; }
 crqa_ac_guard "$W" "${EA_AC_GUARD_BUDGET_USD:-0.50}"
+# --- QA (runs even with blocking findings, so the author gets both in one pass) -------------------
+QA_OK=1; crqa_qa "$WT" "$W" "$ALLOWED" "$QA_TO" "$BUDGET" || QA_OK=0
 if [ "$(jq length "$W/blocking.json")" -gt 0 ]; then
-  crqa_review_comment "$W/blocking.json" "$TMPD/c.md"; printf '\nQA: not run\n' >> "$TMPD/c.md"
+  if [ "$QA_OK" = 1 ]; then crqa_qa_comment "$W" pass "$PR_URL" "$TMPD/q.md"; else crqa_qa_comment "$W" fail "$PR_URL" "$TMPD/q.md"; fi
+  jira_comment "$TMPD/q.md"
+  crqa_review_comment "$W/blocking.json" "$TMPD/c.md"; { echo; cat "$TMPD/q.md"; } >> "$TMPD/c.md"
   post_verdict "$TMPD/c.md"
   finish review-stopped 0
 fi
-
-# --- QA -------------------------------------------------------------------------------------------
-if ! crqa_qa "$WT" "$W" "$ALLOWED" "$QA_TO" "$BUDGET"; then
+if [ "$QA_OK" = 0 ]; then
   crqa_qa_comment "$W" fail "$PR_URL" "$TMPD/c.md"; jira_comment "$TMPD/c.md"
   verdict "CR/QA: QA failed" "$TMPD/c.md" "$TMPD/v.md"; post_verdict "$TMPD/v.md"
   finish qa-stopped 0
