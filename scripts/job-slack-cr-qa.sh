@@ -96,7 +96,7 @@ again="$(jq -r --arg t "$TS" '.[0] | select(.ts == $t) | .text // empty' "$TMPD/
 verified="$(crqa_parse "$again")"
 if ! _arcl "$P.trusted_slack_users" | grep -qxF -- "$poster" \
    || [ -z "$verified" ] || ! gr_project_repos "$SLUG" | grep -qxF -- "$(printf '%s' "$verified" | cut -f2)" \
-   || [ "$(printf '%s' "$again" | sed -E 's/^[[:space:]]+//' | cut -c1-${#PREFIX})" != "$PREFIX" ]; then
+   || [ "$(printf '%s' "$again" | sed -E 's/^[[:space:]]+//' | head -n1 | cut -c1-${#PREFIX})" != "$PREFIX" ]; then
   crqa_ledger_set "$LEDGER" "$TS" "$PR_URL" "$KEY" untrusted
   log "request ${TS} did not verify (poster ${poster:-unknown}); skipped"
   exit 0

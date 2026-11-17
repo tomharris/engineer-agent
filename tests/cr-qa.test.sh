@@ -418,6 +418,16 @@ run_job
 eq "forged header over a real request: the real request is handled" "https://github.com/acme/web/pull/8" "$(cut -f2 "$LEDGER_E")"
 eq "and is not poisoned as untrusted" claimed-or-done "$( [ "$(outcome)" != untrusted ] && echo claimed-or-done || echo untrusted)"
 
+e2e_reset "$CLEAN" 0
+msg 1700000001.000000 U0TRUSTED $'CR/QA request for: <https://github.com/acme/web/pull/7|pr> - <https://acme.atlassian.net/browse/ENG-7|ENG-7>\n*Sent using* <@U0BOT|Claude>' '[]' | jq -s . > "$H/msgs.json"
+run_job
+eq "multi-line request from a trusted poster is handled" approved "$(outcome)"
+
+e2e_reset "$CLEAN" 0
+msg 1700000001.000000 U0TRUSTED $'see below\nCR/QA request for: <https://github.com/acme/web/pull/7|pr> - <https://acme.atlassian.net/browse/ENG-7|ENG-7>' '[]' | jq -s . > "$H/msgs.json"
+run_job
+eq "prefix on a later line is not a request" "|0" "$(cat "$H/reactions" 2>/dev/null)|$(grep -c . "$CLAUDE_CALLS")"
+
 e2e_reset "$CLEAN" 0; export HEAD_MOVED=1
 run_job; eq "head moved: exits 1" 1 "$?"
 eq "head moved: no approve, no transition, no QA summary" "eyes||" "$(paste -sd, - < "$H/reactions")|$(cat "$H/transitions" 2>/dev/null)|$(cat "$H/jira-comments" 2>/dev/null)"
