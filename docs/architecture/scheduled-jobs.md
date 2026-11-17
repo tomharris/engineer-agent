@@ -324,7 +324,10 @@ Things a reader will otherwise "fix" back:
   `eyes`; without exclusivity it would mark requests claimed before cr-qa sees them.
 - **Review.** One read-only model run runs `/code-review high origin/<base>` through the Skill
   tool (granted `Skill(code-review)`, `Agent`, `ReportFindings`, and Read on the worktree and workdir
-  only — `Read(...)` also scopes Grep/Glob, so neither is granted bare) and writes nonce-bearing findings; an unmet AC is
+  only — `Read(...)` also scopes Grep/Glob, so neither is granted bare) and replies with nonce-bearing
+  findings on stdout. It denies Bash, Edit, Write, NotebookEdit, WebFetch and WebSearch: the PR checkout
+  can ship skill or agent definitions whose `allowed-tools` or `permissionMode` would widen the run,
+  and deny rules hold in every mode; an unmet AC is
   `high`. The `security.command` adapter runs as in `after_pr`, and only findings the PR introduced
   count (`security_introduced`). Severity is case-insensitive; unknown or missing counts as `high`.
   Anything `medium`+ ⇒ the changes-requested verdict, ledger `review-stopped`, after the AC guard below. A review

@@ -119,6 +119,9 @@ target="\$(printf '%s\\n' "\$@" | sed -n 's#^Edit(/\\(/.*\\))\$#\\1#p' | head -1
 nonce="\$(printf '%s\\n' "\$*" | grep -oE 'NONCE: [0-9a-f]+' | head -1 | cut -d' ' -f2)"
 fx="$TMP/fx.\$(basename "\$target" .json)"
 [ -n "\$target" ] && [ -f "\$fx" ] && sed "s/NONCE/\$nonce/" "\$fx" > "\$target"
+# The review run has no Edit grant: it replies with its findings on stdout.
+[ -z "\$target" ] && [ -f "$TMP/fx.code" ] && printf '%s\\n' "\$*" | grep -q 'Skill(code-review)' \\
+  && { echo '\`\`\`json'; sed "s/NONCE/\$nonce/" "$TMP/fx.code"; echo '\`\`\`'; }
 exit 0
 SH
 chmod +x "$TMP/bin/claude"
@@ -141,9 +144,11 @@ export ADAPTER_FINDINGS='[]' ADAPTER_RC=0
 review && ok "review completes" || bad "review failed: $(cat "$TMP/rv/review.err" 2>/dev/null)"
 eq "medium code finding blocks" 1 "$(blocking)"
 has "diff given to the review" "app/a.py" "$(cat "$TMP/rv/changed")"
-grep -q 'Bash' "$CLAUDE_CALLS" && bad "review run was granted Bash" || ok "review run has no Bash"
+sed -n 's/.*--allowedTools \(.*\) --disallowedTools.*/\1/p' "$CLAUDE_CALLS" | grep -q 'Bash' && bad "review run was granted Bash" || ok "review run has no Bash"
 has "review runs /code-review high against the base" 'skill "code-review", args "high origin/main"' "$(cat "$CLAUDE_CALLS")"
 has "review run may use the code-review skill" "Skill(code-review)" "$(cat "$CLAUDE_CALLS")"
+has "review run denies write, shell and network tools" "--disallowedTools Bash Edit Write NotebookEdit WebFetch WebSearch" "$(cat "$CLAUDE_CALLS")"
+grep 'Skill(code-review)' "$CLAUDE_CALLS" | grep -q 'Edit(' && bad "review run was granted Edit" || ok "review run has no Edit grant"
 grep -q sekrit "${CLAUDE_CALLS}.env" && bad "credential env reached the model run" || ok "model run env has no credentials"
 grep -qE 'oauth-leak|key-leak' "${CLAUDE_CALLS}.env" && bad "Anthropic credential reached the model run" || ok "no Anthropic credential in the model run env"
 has "CLAUDE_CONFIG_DIR forwarded" "CLAUDE_CONFIG_DIR=$TMP/cfgdir" "$(cat "${CLAUDE_CALLS}.env")"
