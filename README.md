@@ -905,7 +905,8 @@ project's `github.repos` and one Jira ticket, claims it with 👀, then:
    contradicts the ticket (see the AC guard under `after_pr`) doesn't block; the comment lists it;
 2. QAs it: follows the ticket's written QA steps and runs the `.py`/`.sh` scripts attached to the
    ticket by `trusted_authors` (bash runs them, from a run plan the model writes). QA runs even
-   when the review blocked: then the QA result goes on the ticket and into one changes-requested
+   when the review blocked, unless a finding is from the security adapter or `critical` (QA
+   scripts can execute PR code); then the QA result goes on the ticket and into one changes-requested
    verdict, and the job stops. Otherwise a failure ⇒ a Jira comment, a QA-failed verdict and stop;
 3. on a pass, comments a QA summary on the ticket, reacts `:approve:` and moves the ticket to
    `transition`, then posts the approved verdict.

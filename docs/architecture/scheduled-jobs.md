@@ -331,7 +331,8 @@ Things a reader will otherwise "fix" back:
   `high`. The `security.command` adapter runs as in `after_pr`, and only findings the PR introduced
   count (`security_introduced`). Severity is case-insensitive; unknown or missing counts as `high`.
   Anything `medium`+ ⇒ the changes-requested verdict, ledger `review-stopped`, after the AC guard below.
-  QA still runs first: its result goes on the ticket and into that verdict, never to an approve. A review
+  QA still runs first: its result goes on the ticket and into that verdict, never to an approve.
+  Not when a finding is from the security adapter or `critical`: QA scripts can execute PR code. A review
   that cannot complete is an error, never a pass.
 - **AC guard (cr-qa review and `after_pr` security).** Reviewers flag behaviour a ticket asks for
   (AIA-536: the publisher fallback without a permission recheck, per-reason error codes), and fix

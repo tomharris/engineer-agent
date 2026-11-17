@@ -392,6 +392,20 @@ run_job; eq "review and QA stop: PR verdict" "CR/QA: changes requested" "$(head 
 has "review and QA stop: verdict carries the QA failure" "QA failed for https://github.com/acme/web/pull/7" "$(cat "$H/pr-comments" 2>/dev/null)"
 eq "review and QA stop: Jira gets the QA failure" "QA failed for https://github.com/acme/web/pull/7" "$(head -1 "$H/jira-comments" 2>/dev/null)"
 eq "review and QA stop: ledger review-stopped" review-stopped "$(outcome)"
+
+e2e_reset '[{"nonce":"NONCE"}]' 0
+export ADAPTER_FINDINGS='[{"title":"injection","severity":"medium","file":"app/a.py"}]'
+run_job
+grep -q '/verdict.json' "$CLAUDE_CALLS" && bad "QA ran on a security-flagged PR" || ok "no QA run on a security-flagged PR"
+has "security stop: QA not run" "QA: not run" "$(cat "$H/pr-comments" 2>/dev/null)"
+eq "security stop: no Jira comment" "" "$(cat "$H/jira-comments" 2>/dev/null)"
+eq "security stop: ledger review-stopped" review-stopped "$(outcome)"
+export ADAPTER_FINDINGS='[]'
+
+e2e_reset '[{"title":"Runs rm -rf on install","severity":"critical","file":"app/a.py","detail":"d"},{"nonce":"NONCE"}]' 0
+run_job
+grep -q '/verdict.json' "$CLAUDE_CALLS" && bad "QA ran after a critical finding" || ok "no QA run after a critical finding"
+has "critical stop: QA not run" "QA: not run" "$(cat "$H/pr-comments" 2>/dev/null)"
 eq "worktree removed after review stop" "$WT0" "$(wts)"
 
 e2e_reset '[{"title":"Schedule should not be registered","severity":"medium","file":"app/a.py","detail":"drop it"},{"nonce":"NONCE"}]' 0
