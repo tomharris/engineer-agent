@@ -106,7 +106,7 @@ case "$1 $2" in
             if .[0] == "status-fail" then {__typename: "StatusContext", context: .[1], state: "ERROR", targetUrl: .[2], description: .[3]}
             else {__typename: "CheckRun", name: .[1], detailsUrl: .[2],
                   status: (if .[0] == "pending" then "IN_PROGRESS" else "COMPLETED" end),
-                  conclusion: ({"pass": "SUCCESS", "fail": "FAILURE", "skipping": "SKIPPED"}[.[0]] // null)} end]}' \
+                  conclusion: ({"pass": "SUCCESS", "fail": "FAILURE", "skipping": "SKIPPED", "cancel": "CANCELLED"}[.[0]] // null)} end]}' \
           | jq -r "$2" ;;
     esac ;;
   "run view")  echo "log of run $3: expected 1 got 2" ;;
@@ -783,6 +783,17 @@ reset; write_config '["pr-ready"]' '{ mark_ready: true, ci: { fix_attempts: 0 } 
 printf 'pass\tlint\thttps://x\nstatus-fail\tci/ext\thttps://x\n' > "$ST/checks.default"
 eq "a failed commit status is a failure" 1 "$(run)"
 grep -q 'ci/ext' "$PD/result" && ok "reason names the status context" || bad "result: $(cat "$PD/result")"
+
+reset; write_config '["pr-ready"]' '{ mark_ready: true, ci: { fix_attempts: 0 } }'
+printf 'cancel\tpr-size\thttps://x/1\npass\tpr-size\thttps://x/2\npass\tlint\thttps://x\n' > "$ST/checks.default"
+eq "a cancelled run superseded by a passing run of the same check passes" 0 "$(run)"
+reset; write_config '["pr-ready"]' '{ mark_ready: true, ci: { fix_attempts: 0 } }'
+printf 'cancel\tpr-size\thttps://x/1\npass\tlint\thttps://x\n' > "$ST/checks.default"
+eq "a cancelled check with no other run is a failure" 1 "$(run)"
+grep -q 'pr-size' "$PD/result" && ok "reason names the cancelled check" || bad "result: $(cat "$PD/result")"
+reset; write_config '["pr-ready"]' '{ mark_ready: true, ci: { fix_attempts: 0 } }'
+printf 'cancel\tpr-size\thttps://x/1\nfail\tpr-size\thttps://x/2\n' > "$ST/checks.default"
+eq "a cancelled run beside a failing run of the same check still fails" 1 "$(run)"
 
 reset; write_config '["pr-ready"]'
 echo none > "$ST/checks.default"
