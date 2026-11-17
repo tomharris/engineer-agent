@@ -172,10 +172,13 @@ if ! crqa_review "$WT" "$W" "$REPO" "$PR" "$BASE" "$SEC_CMD" "$SEC_TO" "$BUDGET"
   finish error 1
 fi
 crqa_blocking "$W" > "$W/blocking.json" || { err "unreadable review findings"; finish error 1; }
+# QA scripts can execute PR code, so a security or critical finding keeps QA from running. Decided
+# before the AC guard, which may drop a medium security finding.
+NO_QA=0
+jq -e 'any(.[]; .source == "security" or ((.severity // "") | tostring | ascii_downcase) == "critical")' "$W/blocking.json" >/dev/null && NO_QA=1
 crqa_ac_guard "$W" "${EA_AC_GUARD_BUDGET_USD:-0.50}"
 # --- QA (runs even with blocking findings, so the author gets both in one pass) -------------------
-# QA scripts can execute PR code, so a security or critical finding still keeps QA from running.
-if jq -e 'any(.[]; .source == "security" or ((.severity // "") | tostring | ascii_downcase) == "critical")' "$W/blocking.json" >/dev/null; then
+if [ "$NO_QA" = 1 ]; then
   crqa_review_comment "$W/blocking.json" "$TMPD/c.md"; printf '\nQA: not run\n' >> "$TMPD/c.md"
   post_verdict "$TMPD/c.md"
   finish review-stopped 0

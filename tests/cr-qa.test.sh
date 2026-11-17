@@ -400,6 +400,14 @@ grep -q '/verdict.json' "$CLAUDE_CALLS" && bad "QA ran on a security-flagged PR"
 has "security stop: QA not run" "QA: not run" "$(cat "$H/pr-comments" 2>/dev/null)"
 eq "security stop: no Jira comment" "" "$(cat "$H/jira-comments" 2>/dev/null)"
 eq "security stop: ledger review-stopped" review-stopped "$(outcome)"
+
+e2e_reset '[{"nonce":"NONCE"}]' 0
+export ADAPTER_FINDINGS='[{"title":"injection","severity":"medium","file":"app/a.py"}]'
+fx ac-verdict '[{"index":0,"ac":"AC1: schedule is registered.","reason":"r"},{"nonce":"NONCE"}]'
+run_job
+grep -q '/verdict.json' "$CLAUDE_CALLS" && bad "QA ran on a security finding the AC guard skipped" || ok "AC guard cannot unlock QA on a security finding"
+eq "AC-skipped security finding: ledger review-stopped" review-stopped "$(outcome)"
+rm -f "$TMP/fx.ac-verdict"
 export ADAPTER_FINDINGS='[]'
 
 e2e_reset '[{"title":"Runs rm -rf on install","severity":"critical","file":"app/a.py","detail":"d"},{"nonce":"NONCE"}]' 0
