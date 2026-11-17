@@ -181,6 +181,11 @@ has "finding line" "- [HIGH] Bad link (app/a.py) — see [link removed] now" "$(
 has "links removed" "[link removed]" "$(cat "$TMP/rv/comment.md")"
 grep -q 'https://' "$TMP/rv/comment.md" && bad "URL survived" || ok "no URL in comment"
 
+LONG="$(printf 'word %.0s' $(seq 1 120))so neither user can act END"
+code_fixture "[{\"title\":\"Long — detail\",\"severity\":\"medium\",\"file\":\"app/b.php\",\"detail\":\"$LONG\"},{\"nonce\":\"NONCE\"}]"
+review; crqa_blocking "$TMP/rv" > "$TMP/rv/blocking.json"; crqa_review_comment "$TMP/rv/blocking.json" "$TMP/rv/comment.md"
+has "long finding kept whole" "- [MEDIUM] Long — detail (app/b.php) — ${LONG}" "$(cat "$TMP/rv/comment.md")"
+
 echo "== crqa_exec_scripts / crqa_qa"
 rm -f "$TMP"/fx.*
 qa_setup() {  # qa_setup <script exit code>

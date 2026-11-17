@@ -144,7 +144,7 @@ crqa_ac_guard() {
 _crqa_ac_lines() {
   jq -r '.[] | [(.title // "untitled"), (.ac_conflict.ac // "")] | map(gsub("[\t\n]"; " ")) | @tsv' "$1/ac-skipped.json" 2>/dev/null \
   | while IFS="	" read -r title ac; do
-      printf 'Not blocking, contradicts the ticket: %s — %s\n' "$(printf '%s' "$title" | _neutral)" "$(printf '%s' "$ac" | _neutral)" | cut -c1-300
+      printf 'Not blocking, contradicts the ticket: %s — %s\n' "$(printf '%s' "$title" | _neutral)" "$(printf '%s' "$ac" | _neutral)"
     done
 }
 
@@ -157,7 +157,7 @@ crqa_review_comment() {
                   (.detail // .impact // "")] | map(gsub("[\t\n]"; " ")) | @tsv' "$1" \
     | while IFS="	" read -r sev title file detail; do
         printf -- '- [%s] %s (%s) — %s\n' "$(printf '%s' "$sev" | _neutral)" "$(printf '%s' "$title" | _neutral)" \
-          "$(printf '%s' "$file" | _neutral)" "$(printf '%s' "$detail" | _neutral)" | cut -c1-300
+          "$(printf '%s' "$file" | _neutral)" "$(printf '%s' "$detail" | _neutral)"
       done
     _crqa_ac_lines "$(dirname "$1")"
   } > "$2"
