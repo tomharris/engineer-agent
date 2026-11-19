@@ -55,7 +55,7 @@ if [ "$(uname)" = "Darwin" ] && command -v launchctl >/dev/null 2>&1; then
     <key>EnvironmentVariables</key>
     <dict>
 ${LAUNCHD_ENV}        <key>PATH</key>
-        <string>${HOME}/.local/bin:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin</string>
+        <string>${HOME}/.local/bin:${HOME}/.rd/bin:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin</string>
     </dict>
     <key>StartInterval</key>
     <integer>60</integer>
@@ -88,7 +88,7 @@ else
   fi
   CLAUDE_BIN_PREFIX=""
   [ -n "${CLAUDE_BIN:-}" ] && CLAUDE_BIN_PREFIX="CLAUDE_BIN=${CLAUDE_BIN} "
-  CRON_CMD="* * * * * ${CLAUDE_BIN_PREFIX}PATH=${HOME}/.local/bin:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin ${TICK_SCRIPT} >/dev/null 2>&1"
+  CRON_CMD="* * * * * ${CLAUDE_BIN_PREFIX}PATH=${HOME}/.local/bin:${HOME}/.rd/bin:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin ${TICK_SCRIPT} >/dev/null 2>&1"
   (crontab -l 2>/dev/null | grep -v "engineer-agent.*jobs-tick.sh" || true; echo "$CRON_CMD") | crontab -
   echo "Scheduled-jobs dispatcher installed as a crontab entry (every minute):"
   echo "  Script: ${TICK_SCRIPT}"
