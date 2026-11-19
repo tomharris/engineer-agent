@@ -28,9 +28,19 @@ eq "files suffix is the same PR" "$WANT" \
   "$(crqa_parse 'CR/QA https://github.com/Acme/Web/pull/253/files https://acme.atlassian.net/browse/ENG-495 https://github.com/acme/web/pull/253')"
 crqa_parse 'CR/QA https://github.com/acme/web/pull/253 https://github.com/acme/web/pull/254 https://acme.atlassian.net/browse/ENG-1' >/dev/null \
   && bad "two PRs accepted" || ok "two PRs refused"
-crqa_parse 'CR/QA https://github.com/acme/web/pull/253' >/dev/null && bad "no Jira accepted" || ok "no Jira refused"
+eq "no Jira leaves the ticket empty" "https://github.com/acme/web/pull/253${TAB}acme/web${TAB}253${TAB}${TAB}" \
+  "$(crqa_parse 'CR/QA <https://github.com/acme/web/pull/253|github.com/acme/web/pull/253>')"
 crqa_parse 'CR/QA https://github.com/acme/web/pull/253 https://acme.atlassian.net/browse/ENG-1 https://acme.atlassian.net/browse/ENG-2' >/dev/null \
   && bad "two tickets accepted" || ok "two tickets refused"
+
+echo "== crqa_ticket_from_pr"
+eq "key in title" "ENG-813" "$(crqa_ticket_from_pr 'ENG-813: External Tasks' 'jh/cleanup')"
+eq "key in branch" "ENG-813" "$(crqa_ticket_from_pr 'External Tasks' 'jh/ENG-813')"
+eq "same key in both" "ENG-813" "$(crqa_ticket_from_pr 'ENG-813: External Tasks' 'jh/ENG-813')"
+crqa_ticket_from_pr 'ENG-1 and ENG-2' 'jh/x' >/dev/null && bad "two keys accepted" || ok "two keys refused"
+crqa_ticket_from_pr 'ENG-1' 'jh/ENG-2' >/dev/null && bad "title and branch disagree accepted" || ok "title and branch disagree refused"
+crqa_ticket_from_pr 'External Tasks' 'jh/cleanup' >/dev/null && bad "no key accepted" || ok "no key refused"
+eq "key inside a word is not a key" "" "$(crqa_ticket_from_pr 'xENG-1' 'b')"
 
 echo "== crqa_pick"
 msg() { jq -nc --arg ts "$1" --arg u "$2" --arg t "$3" --argjson r "$4" '{ts:$ts, user_id:$u, text:$t, reactions:$r}'; }
@@ -275,7 +285,8 @@ echo "$*" >> "$E2E/gh.calls"
 case "$1 $2" in
   "pr view") n=$(cat "$E2E/views" 2>/dev/null || echo 0); echo $((n+1)) > "$E2E/views"
              sha="$PR_SHA"; [ -n "${HEAD_MOVED:-}" ] && [ "$n" -ge 1 ] && sha=0000000000000000000000000000000000000000
-             printf '{"baseRefName":"main","headRefOid":"%s"}\n' "$sha" ;;
+             jq -nc --arg s "$sha" --arg t "${PR_TITLE:-ENG-7: Hourly schedule}" --arg b "${PR_BRANCH:-tom/ENG-7}" \
+               '{baseRefName:"main", headRefOid:$s, title:$t, headRefName:$b}' ;;
   "pr comment") while [ $# -gt 0 ]; do [ "$1" = --body-file ] && { cat "$2" >> "$E2E/pr-comments"; echo "--8<--" >> "$E2E/pr-comments"; }; shift; done ;;
 esac
 SH
@@ -502,6 +513,22 @@ e2e_reset "$CLEAN" 0; e2e_config '[slack-react, pr-comment, jira-comment, jira-t
 run_job; eq "missing slack-post exits 1" 1 "$?"
 has "missing slack-post named" "slack-post" "$(cat "$H/errs")"
 eq "missing slack-post: no reaction" "" "$(cat "$H/reactions" 2>/dev/null)"
+
+e2e_reset "$CLEAN" 0
+msg 1700000001.000000 U0TRUSTED "CR/QA <https://github.com/acme/web/pull/7|pr>" '[]' | jq -s . > "$H/msgs.json"
+run_job
+eq "no Jira link: ticket from the PR title is approved" "ENG-7|approved" "$(cut -f3 "$LEDGER_E")|$(outcome)"
+
+e2e_reset "$CLEAN" 0; export PR_TITLE="Hourly schedule" PR_BRANCH="tom/cleanup"
+msg 1700000001.000000 U0TRUSTED "CR/QA <https://github.com/acme/web/pull/7|pr>" '[]' | jq -s . > "$H/msgs.json"
+run_job; eq "no ticket anywhere exits 0" 0 "$?"
+eq "no ticket: no reaction, no model run" "|0" "$(cat "$H/reactions" 2>/dev/null)|$(grep -c . "$CLAUDE_CALLS")"
+eq "no ticket: ledger" no-ticket "$(outcome)"
+eq "no ticket: thread reply" "CR/QA skipped: no Jira ticket. Link one in the request, or name exactly one in the PR title or branch, and post a new request." \
+  "$(sed -n 2p "$H/slack-replies" 2>/dev/null)"
+: > "$CLAUDE_CALLS"; rm -f "$H/slack-replies"; unset EA_JOBS_CFG
+run_job; eq "no ticket: not retried" "" "$(cat "$H/slack-replies" 2>/dev/null)"
+unset PR_TITLE PR_BRANCH
 
 e2e_reset "$CLEAN" 0; export SLACK_REACT_RC=1
 run_job; eq "claim failure exits 1" 1 "$?"

@@ -3,16 +3,26 @@
 # is untrusted: it is only ever matched against fixed patterns, never evaluated.
 
 # crqa_parse <text> — "<pr url>\t<owner/repo>\t<pr>\t<jira key>\t<jira site>" when the text holds
-# exactly one distinct PR and one distinct Jira browse URL; rc 1 otherwise.
+# exactly one distinct PR and at most one distinct Jira browse URL; rc 1 otherwise. With no Jira URL
+# the key and site are empty (see crqa_ticket_from_pr).
 crqa_parse() {
   local prs jiras
   prs="$(printf '%s' "$1" | grep -oE 'https://github\.com/[A-Za-z0-9._-]+/[A-Za-z0-9._-]+/pull/[0-9]+' \
     | sed -E 's#https://github\.com/([^/]+)/([^/]+)/pull/([0-9]+)#\1/\2 \3#' | tr '[:upper:]' '[:lower:]' | sort -u)"
   jiras="$(printf '%s' "$1" | grep -oE 'https://[A-Za-z0-9.-]+/browse/[A-Z][A-Z0-9]+-[0-9]+' | sort -u)"
   [ -n "$prs" ] && [ "$(printf '%s\n' "$prs" | wc -l | tr -d ' ')" = 1 ] || return 1
-  [ -n "$jiras" ] && [ "$(printf '%s\n' "$jiras" | wc -l | tr -d ' ')" = 1 ] || return 1
+  [ -z "$jiras" ] || [ "$(printf '%s\n' "$jiras" | wc -l | tr -d ' ')" = 1 ] || return 1
   printf '%s\n' "$prs $jiras" | awk '{
     split($3, u, "/"); print "https://github.com/" $1 "/pull/" $2 "\t" $1 "\t" $2 "\t" u[5] "\t" u[3] }'
+}
+
+# crqa_ticket_from_pr <title> <head branch> — the one distinct Jira key named across both; rc 1 when
+# there is none or more than one.
+crqa_ticket_from_pr() {
+  local keys
+  keys="$(printf '%s\n%s\n' "$1" "$2" | grep -oE '(^|[^A-Za-z0-9])[A-Z][A-Z0-9]+-[0-9]+' | sed -E 's/^[^A-Z]//' | sort -u)"
+  [ -n "$keys" ] && [ "$(printf '%s\n' "$keys" | wc -l | tr -d ' ')" = 1 ] || return 1
+  printf '%s\n' "$keys"
 }
 
 # crqa_pick <messages.json> <prefix> <claim-emoji> <trusted-users-nl> <repos-nl> <ledger> —

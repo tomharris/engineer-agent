@@ -317,9 +317,10 @@ security → CI → browser → QA → ready → transition → announce. Things
 Reviews and QAs other people's PRs on request. Spec:
 `docs/superpowers/specs/2026-11-11-cr-qa-job-design.md`. A message in `channel` is a request when
 it starts with `trigger_prefix` (default `CR/QA`), has no `reactions.claim` emoji (default `eyes`),
-was posted by a `trusted_slack_users` id, holds exactly one PR URL and one Jira browse URL, the PR is
-in one of the project's `github.repos`, and its ts is not in the job's ledger. One request per run,
-oldest first.
+was posted by a `trusted_slack_users` id, holds exactly one PR URL and at most one Jira browse URL, the
+PR is in one of the project's `github.repos`, and its ts is not in the job's ledger. One request per
+run, oldest first. With no Jira URL the ticket is the one key named across the PR title and head
+branch; none or several ⇒ ledger `no-ticket` and a reply in the request's thread.
 
 Sequence: tiers (`slack-react`, `slack-post`, `pr-comment`, `jira-comment`, `jira-transition`,
 `security-review`; any missing ⇒ error before anything is claimed) → ticket fetch +
