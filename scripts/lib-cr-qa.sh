@@ -52,7 +52,7 @@ crqa_ledger_set() {
 
 # crqa_qa_inputs <issue.json> <trusted-ids-nl> <outdir> — writes <outdir>/ticket.md (summary,
 # description, and only the comments a trusted account wrote and, if edited, last edited) and <outdir>/scripts.tsv
-# ("<attachment id>\t<filename>") for .py/.sh attachments a trusted account uploaded. The caller has
+# ("<attachment id>\t<filename>") for .py/.sh/.php attachments a trusted account uploaded. The caller has
 # already passed the ticket through jira_untrusted_reason (summary/description authorship).
 crqa_qa_inputs() {
   jq -r --arg t "$2" '($t | split("\n") | map(select(. != ""))) as $ok
@@ -63,7 +63,7 @@ crqa_qa_inputs() {
   jq -r --arg t "$2" '($t | split("\n") | map(select(. != ""))) as $ok
     | .fields.attachment // [] | .[]
     | select(.author.accountId as $a | $ok | index($a))
-    | select((.id | tostring | test("^[0-9]+$")) and (.filename | test("^[A-Za-z0-9_-][A-Za-z0-9._-]*\\.(py|sh)$")))
+    | select((.id | tostring | test("^[0-9]+$")) and (.filename | test("^[A-Za-z0-9_-][A-Za-z0-9._-]*\\.(py|sh|php)$")))
     | "\(.id)\t\(.filename)"' "$1" > "$3/scripts.tsv"
 }
 

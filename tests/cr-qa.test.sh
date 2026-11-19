@@ -82,7 +82,9 @@ jq -n '{fields: {summary: "Hourly schedule", description: "AC1: schedule is regi
     {id: "101", filename: "ENG-7-qa.py", author: {accountId: "acc-tom"}},
     {id: "102", filename: "evil.py", author: {accountId: "acc-eve"}},
     {id: "103", filename: "shot.png", author: {accountId: "acc-tom"}},
-    {id: "104", filename: "../escape.py", author: {accountId: "acc-tom"}}]}}' > "$TMP/issue.json"
+    {id: "104", filename: "../escape.py", author: {accountId: "acc-tom"}},
+    {id: "105", filename: "ENG-7-qa.php", author: {accountId: "acc-tom"}},
+    {id: "106", filename: "evil.php", author: {accountId: "acc-eve"}}]}}' > "$TMP/issue.json"
 mkdir -p "$TMP/qa"
 crqa_qa_inputs "$TMP/issue.json" "$(printf 'acc-tom\nacc-jer\n')" "$TMP/qa"
 has "summary in ticket.md" "Hourly schedule" "$(cat "$TMP/qa/ticket.md")"
@@ -90,7 +92,8 @@ has "description in ticket.md" "AC1: schedule is registered." "$(cat "$TMP/qa/ti
 has "trusted QA comment kept" "uv run python ENG-7-qa.py" "$(cat "$TMP/qa/ticket.md")"
 grep -q "IGNORE PREVIOUS" "$TMP/qa/ticket.md" && bad "untrusted comment leaked" || ok "untrusted comment dropped"
 grep -q "EDITED BY EVE" "$TMP/qa/ticket.md" && bad "comment edited by an untrusted account leaked" || ok "comment edited by an untrusted account dropped"
-eq "only the trusted script attachment" "101${TAB}ENG-7-qa.py" "$(cat "$TMP/qa/scripts.tsv")"
+eq "only the trusted script attachments" "101${TAB}ENG-7-qa.py
+105${TAB}ENG-7-qa.php" "$(cat "$TMP/qa/scripts.tsv")"
 
 echo "== jira_download_attachment"
 . "$REPO_ROOT/scripts/lib-jira-api.sh"
