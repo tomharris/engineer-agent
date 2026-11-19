@@ -103,6 +103,20 @@ if ! _arcl "$P.trusted_slack_users" | grep -qxF -- "$poster" \
   exit 0
 fi
 IFS="	" read -r PR_URL REPO PR KEY _ <<< "$verified"
+if [ -z "$KEY" ]; then
+  meta="$(with_timeout "$GH_TIMEOUT" gh pr view "$PR" --repo "$REPO" --json title,headRefName 2>>"$LOG_FILE")" \
+    || { err "could not read ${PR_URL}"; exit 1; }
+  KEY="$(crqa_ticket_from_pr "$(printf '%s' "$meta" | jq -r '.title // empty')" "$(printf '%s' "$meta" | jq -r '.headRefName // empty')")"
+  if [ -z "$KEY" ]; then
+    crqa_ledger_set "$LEDGER" "$TS" "$PR_URL" "" no-ticket
+    printf 'CR/QA skipped: no Jira ticket. Link one in the request, or name exactly one in the PR title or branch, and post a new request.\n' > "$TMPD/c.md"
+    with_timeout "$GH_TIMEOUT" "$SLACK_BIN" send "$CHANNEL" "$(cat "$TMPD/c.md")" --thread "$TS" --json ${SLACK_WS[@]+"${SLACK_WS[@]}"} >>"$LOG_FILE" 2>&1 \
+      || err "Slack reply in thread ${TS} failed"
+    log "request ${TS} names no single Jira ticket (${PR_URL}); skipped"
+    exit 0
+  fi
+  log "ticket ${KEY} taken from ${PR_URL}"
+fi
 
 # --- ticket trust (before any reaction or model run) ------------------------------------------------
 ar_jira_init || { err "Jira unavailable: ${AR_ERR}"; exit 3; }
