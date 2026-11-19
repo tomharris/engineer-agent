@@ -118,5 +118,9 @@ Body sections:
   `### Findings & Disposition` ledger (Source | Finding | Disposition | Note) that records how
   each surfaced finding was resolved (`fixed` / `accepted-risk` / `deferred` / `real-bug-filed`
   / `not-executed` / `n/a`), closing the verify→integrate loop; `execute-item` ensures it is
-  filled before an item moves to `completed/`.
+  filled before an item moves to `completed/`. Some sections are approver-only and never
+  posted: a `pr-review`'s trailing `### Dismissed` (findings filtered out, with the rule that
+  dropped each) and a `slack-question`'s `### Confidence` / `### Claims` / `### Unknowns`
+  (per-claim confidence tiers from `references/epistemics.md`); only `### Proposed Slack Message`
+  is sent.
 

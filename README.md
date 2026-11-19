@@ -1206,6 +1206,7 @@ references/
   routing-ladder.md            Shared ticket→project routing logic (poll-jira, poll-github-issues, add-ticket)
   ticket-kind.md               Shared code-work vs investigation logic (same callers + review-queue)
   queue-reconciliation.md      Shared skip/update/create rule every poller follows
+  epistemics.md                Confidence tiers for evidence-based answers (answer-slack, investigate-ticket)
 hooks/
   hooks.json                   Claude Code hook registrations (turn-completion pushes)
 scripts/

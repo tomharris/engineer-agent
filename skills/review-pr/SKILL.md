@@ -78,7 +78,26 @@ Analyze the PR diff for:
 - Does it use the team's preferred libraries/patterns?
 - Are naming conventions consistent?
 
-### 4. Structure the Review
+### 4. Filter Findings
+
+A review is useful, not comprehensive. Before structuring, test every candidate finding; drop
+the ones that fail into **Dismissed** with a one-line reason:
+
+- **Hypothetical, not actual.** "What if X is null?" counts only if a real caller can pass null.
+  Trace the call site; dismiss if upstream validation or the type system rules it out.
+- **"I'd have done it differently."** A preference without a concrete failure is not a finding.
+- **Premature abstraction.** Suggesting an extraction/interface counts only if the code must vary
+  a second way now.
+- **Missing context.** Code the PR didn't touch, or a pattern consistent with the rest of the
+  repo, is not this PR's finding.
+- **Nitpick gravity.** If every remaining finding is style, the PR is probably fine. Say so and
+  recommend APPROVE rather than inflating nits to fill the review.
+
+Never dismiss a security or correctness finding with a concrete execution path for being
+uncomfortable or single-sourced. If Critical + Important exceeds 5, filter harder: either some
+are Suggestions, or the PR needs REQUEST_CHANGES with the top few, not an exhaustive list.
+
+### 5. Structure the Review
 
 Organize findings by severity:
 
@@ -96,7 +115,7 @@ For each finding, include:
   (`fixed` / `accepted-risk` / `deferred` / `n/a`) with a one-line note. This closes the
   integrate loop: the completed review becomes an auditable "found X → did Y" record.
 
-### 5. Write the Draft
+### 6. Write the Draft
 
 If working from a queue item, update the file:
 
@@ -139,8 +158,16 @@ and are filled as findings are resolved, so the completed item records how each 
 | Source | Finding | Disposition | Note |
 |---|---|---|---|
 | pr-review | {finding} | fixed / accepted-risk / deferred / n/a | {commit or rationale} |
+
+### Dismissed
+
+{Approver-only; never posted to the PR. One line per dropped candidate:
+`file:line — {finding} — {rule from Step 4}`. Lets the approver restore one they disagree with.
+"None" if nothing was dropped.}
 ```
 
-### 6. Report
+`### Dismissed` must stay the last section: `execute-item` posts everything above it.
 
-Report: "PR review drafted for {source_id}. Review has {N} critical, {N} important, {N} suggestion findings."
+### 7. Report
+
+Report: "PR review drafted for {source_id}. Review has {N} critical, {N} important, {N} suggestion findings ({N} dismissed)."

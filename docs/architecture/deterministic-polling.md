@@ -314,6 +314,11 @@ a guarantee about the interface, not about truth — validate the thresholds on 
 - **`routing.description` is written as a folded block scalar (`>-`) in a real config**, and the
   reader returned the literal `>-` as the value. Tier 3b of the routing ladder has no other input,
   so the tier looked configured while deciding on two characters of punctuation.
+- **`git merge-tree --write-tree --quiet` needs git 2.45+.** Older git (Ubuntu 24.04 ships 2.43)
+  rejects the flag with exit 129. `pr-pipeline.sh`'s `base_conflicts` tests for exit 1, so it read
+  129 as "no conflict" and a CI fix run on a conflicting branch never merged its base. Drop the flag
+  and send stdout to `/dev/null`. More generally, a check that treats "exit != N" as a negative
+  answer turns any usage error into a silent "no".
 
 ### A spec ambiguity this surfaced
 

@@ -20,7 +20,8 @@ This repo IS the plugin.
 commands/                      — Slash commands (/engineer-agent <command>)
 skills/                        — Auto-invoked skills by task type
 references/                    — Shared procedural docs skills Read at runtime (routing-ladder.md,
-                                 ticket-kind.md, queue-reconciliation.md). These are the SPEC;
+                                 ticket-kind.md, queue-reconciliation.md,
+                                 epistemics.md). These are the SPEC;
                                  scripts/lib-routing.sh and scripts/lib-ticket-kind.sh are the
                                  executable implementation of their deterministic tiers.
 hooks/hooks.json               — Claude Code hook registrations (turn-completion pushes)
@@ -32,8 +33,9 @@ config/engineer.example.yaml   — Config template
 ```
 
 `references/` holds logic that several skills must apply *identically* — today `routing-ladder.md`
-(which project), `ticket-kind.md` (what the ticket delivers), and `queue-reconciliation.md` (whether
-an item enters the queue). It is plain markdown read
+(which project), `ticket-kind.md` (what the ticket delivers), `queue-reconciliation.md` (whether
+an item enters the queue), and `epistemics.md` (how confidently an evidence-based answer may word
+each claim). It is plain markdown read
 with `Read`, deliberately not a skill or subagent: `scripts/cron-poll.sh` allowlists `Read` but not
 `Skill`/`Agent`, so anything shaped that way is unreachable from the cron — the one path with no
 human fallback.

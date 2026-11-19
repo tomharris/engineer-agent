@@ -150,7 +150,8 @@ remote_head() { git -C "$PROJECT_PATH" ls-remote origin "refs/heads/${BRANCH}" 2
 # base_conflicts <sha> — true only when merging origin/<base> into <sha> conflicts (merge-tree exit 1).
 base_conflicts() {
   git -C "$PROJECT_PATH" fetch --quiet origin "$BASE" >>"$LOG_FILE" 2>&1 || true
-  git -C "$PROJECT_PATH" merge-tree --write-tree --quiet "origin/${BASE}" "$1" >/dev/null 2>>"$LOG_FILE"
+  # No --quiet: it needs git 2.45+, and older git exits 129, which reads as "no conflict".
+  git -C "$PROJECT_PATH" merge-tree --write-tree "origin/${BASE}" "$1" >/dev/null 2>>"$LOG_FILE"
   [ $? = 1 ]
 }
 
