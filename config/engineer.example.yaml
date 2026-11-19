@@ -383,7 +383,9 @@ projects:
       # implementation (ntfy) auto-drafts a qa-test-plan for the new branch after the draft PR
       # (best-effort). Omit the block and that step is skipped quietly.
       base_url: "http://localhost:3000"  # base URL for curl commands in QA test scripts
-      console_command: ""                # e.g. "rails console", "python manage.py shell", "node" (optional)
+      test_command: ""                   # runs generated unit tests, test dir appended: "uv run pytest -q", "bundle exec rspec" (optional; inferred)
+      repl_command: ""                   # runs a generated REPL script from stdin: "uv run python -", "bin/rails runner -" (optional; inferred)
+      console_command: ""                # legacy; used as repl_command when that is empty
       document_to: ""                    # where to document completed QA plans: "slite" | "" (empty/absent disables)
       document_parent: ""                # Slite channel/note id for the QA doc; empty → user's private (personal) channel
     # Scheduled jobs: per-integration work on its own interval, dispatched every minute by
@@ -528,6 +530,9 @@ projects:
     #           insecure: true           #   -k for a self-signed local certificate
     #         auth:                      # optional; a check may set "auth": "<name>"
     #           session: "~/bin/qa-login"   # `<cmd> <base-url>` prints "Name: value" header lines
+    #         unit:                      # optional; the QA run writes unit tests under ea_qa/ and
+    #           command: "uv run pytest -q"  #   bash runs `<command> ea_qa` in the branch worktree
+    #           timeout: 10m             #   (default 10m); a failure stops like a failed check
     #       transition: "Code Review"    # Jira jobs; tier "jira-transition"; after the PR is ready
     #       announce:                    # tier "slack-post": "CR+QA: <PR urls> <ticket url>"
     #         channel: C12345678         #   must be one of projects.<slug>.slack.channels

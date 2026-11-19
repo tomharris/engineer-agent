@@ -100,7 +100,8 @@ branch. It is a deliberately *different* allowlist from the implementation run: 
 `Bash(curl *)` (Pass 3 script execution) and `mcp__atlassian__getJiraIssue` (Jira AC) and **drops**
 the build-command rules — QA writes no code, so widening the code-writing sandbox with network
 egress is avoided; the implementation run, symmetrically, keeps the build rules but never gets
-`curl`. QA is read + queue-draft only (it posts nothing external — Slite publishing still happens
+`curl`. Without a build rule this run cannot execute the plan's unit or REPL tests; `generate-qa`
+records them as "not executed" and they run at review-queue Phase 1. QA is read + queue-draft only (it posts nothing external — Slite publishing still happens
 later at review-queue/execute-item), so it needs no approval gate, and its result is surfaced as an
 informational FYI push (`qa-test-plan` is interactive-only for approval, so it is *never* an
 actionable Approve/Reject). It is **best-effort and decoupled**: a failure or an absent qa config

@@ -266,7 +266,18 @@ security → CI → browser → QA → ready → transition → announce. Things
 - **The QA run's scripted tests are data.** A JSON list of `{method, path, body, expect_status,
   expect_contains}` run by `qa_checks` with curl: allowlisted methods, a path that must start with
   `/` and has no `..`, bodies on stdin (`@file` in a body is text). Model-written shell would run
-  unconfined with your environment, a bigger residual than `browser.serve`.
+  unconfined with your environment, a bigger residual than `browser.serve`. A plan with an empty
+  list reports "no scripted tests", not a missing server.
+- **`qa.unit` is the one QA step that runs model-written code, and it is opt-in.** Library and
+  service changes have no endpoint, so without it their checks landed in the manual list. With
+  `qa.unit.command` the QA run may also write files under `ea_qa/` in its own worktree (an `Edit`
+  rule on that directory only), and bash runs `<command> ea_qa` there under `with_timeout`, with
+  `env -i` keeping only `PATH`, `HOME`, `USER`, `LANG`, `TMPDIR`: no credential env vars reach it.
+  A link or special file in `ea_qa/` refuses the run and stops the pipeline. Residual, accepted:
+  the tests run unconfined as you and can read files under `HOME`. That is the same reach as
+  `serve`/`setup`, which already execute the branch's model-written code; the QA run's inputs (its
+  worktree, the trust-checked ticket text, the diff) are no wider than the implementation's.
+  Output reaches the Slite note only neutralized and capped (last 60 lines, 6000 bytes).
 - **QA checks have their own server, and auth is a name, not a credential.** `qa.server` serves the
   branch for the checks without turning on the Chrome browser test (it falls back to `browser`).
   Its `url` may name any host, because bash pins that host to 127.0.0.1 with `--resolve`; `insecure`

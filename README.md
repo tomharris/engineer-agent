@@ -13,7 +13,7 @@ A Claude Code plugin that automates senior software engineer tasks with an appro
 - **Ticket Refinement** — Analyzes existing tickets for scope clarity, feasibility, testability, and Fibonacci sizing
 - **Design Doc Generation** — Creates engineering design docs from refined specs
 - **Ticket Breakdown** — Breaks design docs into phased implementation tickets with dependencies
-- **QA Test Plans** — Generates hybrid test plans (runnable scripts + manual checklists) from ticket acceptance criteria and branch code changes, then runs the scripts and self-fixes failing tests (surfacing genuine code bugs) when the app is reachable
+- **QA Test Plans** — Generates hybrid test plans (curl checks, unit tests, REPL scripts + manual checklists) from ticket acceptance criteria and branch code changes, then runs them and self-fixes failing tests (surfacing genuine code bugs)
 - **Code Audit** — Proactive bug/security scan: Sonnet finds candidates across OWASP-style security, correctness, secrets, and dependency CVEs; Opus verifies each one before it enters the queue
 - **Pipeline Gap Audit** — Bidirectional comparison of spec ↔ design doc ↔ tickets to detect mismatches
 - **Standup Generation** — Creates daily standup updates from activity history
@@ -122,7 +122,9 @@ projects:
       doc_labels: ["needs-review"]
     qa:
       base_url: "http://localhost:3000"  # base URL for curl commands in QA test scripts
-      console_command: ""                # e.g. "rails console", "python manage.py shell", "node" (optional)
+      test_command: ""                   # runs generated unit tests, test dir appended: "uv run pytest -q", "bundle exec rspec" (optional; inferred)
+      repl_command: ""                   # runs a generated REPL script from stdin: "uv run python -", "bin/rails runner -" (optional; inferred)
+      console_command: ""                # legacy; used as repl_command when that is empty
       document_to: ""                    # where to document completed QA plans: "slite" | "" (empty/absent disables)
       document_parent: ""                # Slite channel/note id for the QA doc; empty → user's private (personal) channel
     exec:                                 # optional — only for remote (ntfy) ticket approval
@@ -466,7 +468,7 @@ Generate a QA test plan for a feature branch.
 /engineer-agent qa ENG-123 --base develop                   # Custom base branch for diff
 ```
 
-Cross-references ticket acceptance criteria, PR testing notes, and branch code changes to produce a hybrid test plan: a runnable shell script (curl commands, REPL snippets) plus a manual checklist for items requiring human judgment. When the app is reachable at `qa.base_url`, it also **runs the generated script and fixes failing scripted tests in place** — correcting test defects (wrong path, bad expected status, malformed request) while leaving genuine code-bug failures intact and surfacing them as findings (it never rewrites an expectation just to go green). If the app is unreachable, it keeps the generated script and reports that tests weren't executed. Approve via `/engineer-agent review-queue qa`. On completion, if `qa.document_to: slite` is configured, the full plan — manual checklist, the inlined `qa-test.sh` script, and the execution results — is published to Slite as a single note (under `qa.document_parent`, or your private personal channel when unset). Leave `document_to` empty to disable.
+Cross-references ticket acceptance criteria, PR testing notes, and branch code changes to produce a hybrid test plan: a curl script for API changes, unit tests in the project's framework (run with `qa.test_command`, e.g. `uv run pytest -q`) for service/model/library changes, REPL scripts (piped to `qa.repl_command`) for behavior that needs the app's runtime, plus a manual checklist for items requiring human judgment. Unit and REPL tests run in a worktree of the branch; curl checks run when the app is reachable at `qa.base_url`. It **runs the generated tests and fixes failing ones in place** — correcting test defects (wrong path, bad expected status, malformed request) while leaving genuine code-bug failures intact and surfacing them as findings (it never rewrites an expectation just to go green). If the app is unreachable, it keeps the generated script and reports that tests weren't executed. Approve via `/engineer-agent review-queue qa`. On completion, if `qa.document_to: slite` is configured, the full plan — manual checklist, the inlined `qa-test.sh` script, and the execution results — is published to Slite as a single note (under `qa.document_parent`, or your private personal channel when unset). Leave `document_to` empty to disable.
 
 ### `/engineer-agent uat-plan <ticket-or-issue> [more refs...] [--project <slug>]`
 
@@ -590,7 +592,7 @@ Skills are auto-invoked during polling and processing:
 | `create-design-doc` | `/engineer-agent create-design-doc` | Generates engineering design doc from spec |
 | `create-tickets` | `/engineer-agent create-tickets` | Breaks design doc into phased tickets |
 | `audit-gaps` | `/engineer-agent audit-gaps` | Compares pipeline artifacts across boundaries, produces gap checklist |
-| `generate-qa` | `/engineer-agent qa` | Generates hybrid QA test plan (script + manual checklist) from ticket AC and code changes, then runs and self-fixes the scripted tests when the app is reachable |
+| `generate-qa` | `/engineer-agent qa` | Generates hybrid QA test plan (curl, unit and REPL tests + manual checklist) from ticket AC and code changes, then runs and self-fixes the scripted tests |
 | `audit-code` | `/engineer-agent audit-code` | Scans a project for bugs and security issues; Sonnet finds, Opus verifies, verified findings become queue items |
 | `codify-learnings` | `/engineer-agent codify` | Scans recent completed/rejected work for recurring learnings, drafts memory-file / skill-note / CLAUDE.md candidates |
 | `execute-item` | Approve/reject from `review-queue` or `execute` | Performs the external action for one item; the single source of truth shared by terminal and remote approval |
@@ -994,7 +996,11 @@ or via Approve), `scripts/pr-pipeline.sh` runs detached:
    implement-next recorded after its trust check (falling back to the queue item; the ticket is never re-fetched) and the diff. It can read only its
    worktree, that item and the diff bash wrote, and write only the plan. Its scripted tests are a JSON list of HTTP checks
    that bash runs with curl against `qa.server` (else the `browser` server; never model-written
-   shell); without a server they are "not executed". `qa.server` takes the same `setup`, `serve`,
+   shell); without a server they are "not executed", and a plan with none says so. `qa.unit.command`
+   adds unit tests: the run may also write test files under `ea_qa/` in its worktree, and bash runs
+   `<command> ea_qa` there (timeout `qa.unit.timeout`, default 10m) with an env holding only `PATH`,
+   `HOME`, `USER`, `LANG` and `TMPDIR`. This executes model-written code, so it is opt-in; a failure
+   stops like a failed check. `qa.server` takes the same `setup`, `serve`,
    `url`, `ready_timeout` keys plus `setup_timeout` and `insecure`; its `url` host is pinned to
    127.0.0.1. `qa.auth.<name>: <adapter>` lets a check carry `"auth": "<name>"`: bash runs
    `<adapter> <base-url>`, which prints `Name: value` header lines, and sends them from a private

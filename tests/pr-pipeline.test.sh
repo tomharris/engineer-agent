@@ -169,6 +169,16 @@ $v" '{type: "result", result: $r}' ;;
       md)   summary='Click [here](javascript:alert) or www.evil.com or <a href=x>y</a> or `code` or [x|ftp://h/p] or HTTPS://Y.example' ;;
     esac
     checks='{"name":"links render","method":"GET","path":"/nav","expect_status":200}'
+    [ "${QA:-}" = nochecks ] && checks=''
+    udir="$(printf '%s' "$*" | sed -nE 's/.*files under ([^ ]+\/ea_qa)\/ .*/\1/p')"
+    if [ -n "$udir" ]; then
+      mkdir -p "$udir"
+      case "${QA_UNIT:-none}" in
+        pass) echo ok > "$udir/test_nav.py" ;;
+        fail) echo FAIL > "$udir/test_nav.py" ;;
+        link) ln -s /etc/hosts "$udir/test_nav.py" ;;
+      esac
+    fi
     [ -n "${QA_FAIL:-}" ] && checks="${checks}"',{"name":"footer link","method":"GET","path":"/missing","expect_status":200}'
     [ "${QA:-}" = extra ] && checks="${checks}"',{"name":"see https://evil.example/n [x](y)","method":"GET","path":"/nav","expect_contains":"www.evil.example","https://evil.example/k":1}'
     [ "${QA:-}" = auth ] && checks="${checks}"',{"name":"signed in","method":"GET","path":"/me","auth":"session","expect_status":200}'\
@@ -605,6 +615,63 @@ eq "invalid checks fail by name" "FAIL: offsite (invalid check)
 FAIL: flag (invalid check)
 FAIL: traverse (invalid check)" "$(grep 'invalid check' "$PD/qa/tests.out")"
 
+qa_jira "$QA_AFTER"
+QA=nochecks run >/dev/null
+grep -qF 'Automated: not executed — no scripted tests' "$ST/pr-comment.md" \
+  && ok "no checks: says there are none, not that a server is missing" || bad "comment: $(cat "$ST/pr-comment.md")"
+qa_jira '{ mark_ready: true, ci: { fix_attempts: 0 }, qa: { document: true }, browser: { serve: "exec sleep 300", url: "http://localhost:3999" } }'
+QA=nochecks run >/dev/null
+grep -qF 'Automated: not executed — no scripted tests' "$ST/pr-comment.md" \
+  && ok "no checks with a server: still says there are none" || bad "comment: $(cat "$ST/pr-comment.md")"
+
+echo "== QA unit tests"
+# Records its cwd, argv and env; fails when a test file says FAIL. ST is baked in: the env is scrubbed.
+cat > "$TMP/bin/qa-unit" <<'EOF'
+#!/bin/bash
+ST=__ST__
+printf '%s|%s\n' "$PWD" "$*" > "$ST/unit.call"
+env > "$ST/unit.env"
+d="${@: -1}"
+if grep -qx FAIL "$d"/*; then echo "1 failed"; exit 1; fi
+echo "1 passed"
+EOF
+sed -i.bak "s|__ST__|'$ST'|" "$TMP/bin/qa-unit" && rm -f "$TMP/bin/qa-unit.bak"
+chmod +x "$TMP/bin/qa-unit"
+QA_UNIT_AFTER="{ mark_ready: true, ci: { fix_attempts: 0 }, qa: { document: true, unit: { command: \"$TMP/bin/qa-unit -q\" } } }"
+
+qa_jira "$QA_UNIT_AFTER"
+eq "passing unit tests: exits 0, PR ready" "0|1" "$(QA_UNIT=pass run)|$(readied)"
+case "$(cat "$ST/unit.call" 2>/dev/null)" in
+  "$(cd "$EA_AGENT_DIR" && pwd -P)"/worktrees/*-pr-*"|-q ea_qa") ok "the command runs in the branch worktree on ea_qa" ;;
+  *) bad "unit call: $(cat "$ST/unit.call" 2>/dev/null)" ;;
+esac
+grep -qF 'Unit tests: passed' "$ST/pr-comment.md" && ok "comment reports the unit tests" || bad "comment: $(cat "$ST/pr-comment.md")"
+jq -r .markdown "$ST/slite-note.json" | grep -qx '1 passed' && ok "Slite note holds the unit test output" || bad "note: $(jq -r .markdown "$ST/slite-note.json")"
+{ [ ! -s "$ST/unit.env" ] || grep -qE "^(T_JIRA|T_SLITE)=" "$ST/unit.env"; } && bad "a credential env var reached the unit tests" || ok "unit tests get no credential env"
+qa_args="$(grep 'Write a QA plan' "$CLAUDE_ARGS")"
+printf '%s' "$qa_args" | grep -qE "Edit\(/$EA_AGENT_DIR/worktrees/[^ ]+/ea_qa/\*\*\)" && ok "QA run may write test files in ea_qa" || bad "no ea_qa Edit rule"
+
+qa_jira "$QA_UNIT_AFTER"
+eq "failing unit tests stop" 1 "$(QA_UNIT=fail run)"
+eq "failed-unit reason" "stopped	QA: unit tests failed — plan: https://example.slite.com/app/docs/n1" "$(cat "$PD/result")"
+grep -qF 'Unit tests: failed (exit 1)' "$ST/pr-comment.md" && ok "comment reports the unit failure" || bad "comment: $(cat "$ST/pr-comment.md")"
+eq "failed unit tests: still documented, PR draft" "1|0" "$(commented)|$(readied)"
+
+qa_jira "$QA_UNIT_AFTER"
+eq "no unit test files: not gated" "0|1" "$(QA_UNIT=none run)|$(readied)"
+grep -qF 'Unit tests: not executed — the plan wrote none' "$ST/pr-comment.md" && ok "comment says no unit tests were written" || bad "comment: $(cat "$ST/pr-comment.md")"
+[ -e "$ST/unit.call" ] && bad "the command ran with no tests" || ok "the command does not run without tests"
+
+qa_jira "$QA_UNIT_AFTER"
+eq "a link in ea_qa stops" 1 "$(QA_UNIT=link run)"
+eq "refused-unit reason" "stopped	QA: unit tests refused — plan: https://example.slite.com/app/docs/n1" "$(cat "$PD/result")"
+[ -e "$ST/unit.call" ] && bad "unit tests ran through a link" || ok "a link in ea_qa is never run"
+grep -qF 'Unit tests: not executed — ea_qa holds a link or special file' "$ST/pr-comment.md" && ok "comment names the refused link" || bad "comment: $(cat "$ST/pr-comment.md")"
+
+qa_jira "$QA_AFTER"; run >/dev/null
+grep 'Write a QA plan' "$CLAUDE_ARGS" | grep -q 'ea_qa' && bad "QA run without qa.unit may write tests" || ok "without qa.unit, the QA run may write only its plan"
+grep -qF 'Unit tests:' "$ST/pr-comment.md" && bad "unit line without qa.unit" || ok "no unit line without qa.unit"
+
 echo "== QA server and auth"
 # Auth adapters: session prints a header and logs its argument; api_key fails.
 printf '#!/bin/bash\nprintf "%%s\\n" "$1" > "$ST/session.arg"\nprintf "Cookie: SID=s3cret\\nX-CSRF-TOKEN: tok\\n"\n' > "$TMP/bin/qa-session"
@@ -1018,6 +1085,14 @@ write_config '[]' '{ qa: { auth: { session: "/x" } } }'
 eq "auth without a server is refused" "after_pr.qa.auth needs a server (after_pr.qa.server or after_pr.browser)" "$(valid)"
 write_config '[]' '{ qa: { server: { serve: "x", url: "https://unittest.bamboolocal.com:18443", insecure: true, setup_timeout: 30m }, auth: { session: "~/a", api_key: "/b" } } }'
 eq "a full qa.server block is valid" "" "$(valid)"
+write_config '[]' '{ qa: { unit: { timeout: 5m } } }'
+eq "qa.unit without a command is refused" "after_pr.qa.unit.command is required" "$(valid)"
+write_config '[]' '{ qa: { unit: { command: "make test", timeout: soon } } }'
+eq "a bad qa.unit.timeout is refused" "after_pr.qa.unit.timeout 'soon' must look like 30m or 2h" "$(valid)"
+write_config '[]' '{ qa: { unit: { command: "make test", dir: x } } }'
+eq "an unknown qa.unit key is refused" "after_pr.qa.unit: unknown key 'dir' (allowed: command timeout)" "$(valid)"
+write_config '[]' '{ qa: { unit: { command: "uv run pytest -q", timeout: 10m } } }'
+eq "a full qa.unit block is valid" "" "$(valid)"
 PROJ_EXTRA='    qa: { document_to: slite, document_parent: "P1" }' JOB_INTEG=jira write_config '[]' \
   '{ security: { command: "~/bin/review", fix_attempts: 1, timeout: 30m }, qa: { document: true }, transition: "Code Review", announce: { channel: C1 } }'
 eq "the full handoff block is valid on a jira job" "" "$(valid)"

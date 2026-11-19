@@ -390,9 +390,11 @@ qa_auth_headers() {
 # qa_stage — one confined run writes the plan from the trust-checked queue item and the diff (it
 # never re-fetches the ticket and gets no tracker, gh or network verb). Success = the plan has its
 # three sections and ends with this run's nonce. With a server (qa_server_prefix), bash serves the
-# branch and runs the scripted block against it. Sets QA_PASS, QA_FAIL, QA_AUTO, QA_MANUAL.
+# branch and runs the scripted block against it; with qa.unit, bash runs the test files the run
+# wrote under $QA_UNIT_DIR. Sets QA_PASS, QA_FAIL, QA_AUTO, QA_MANUAL, QA_UNIT, QA_UNIT_STOP.
+QA_UNIT_DIR=ea_qa
 qa_stage() {
-  local plan="$D/qa/plan.md" nonce url last srv auth_names auth_rule=""
+  local plan="$D/qa/plan.md" nonce url last srv n auth_names auth_rule="" unit_cmd unit_rule=""
   rm -rf "$D/qa"; mkdir -p "$D/qa"
   branch_worktree || stop "QA: could not create a worktree on ${BRANCH}"
   nonce="$(od -An -tx1 -N8 /dev/urandom | tr -d ' \n')"
@@ -404,12 +406,18 @@ qa_stage() {
   srv="$(qa_server_prefix)"
   auth_names="$(_ar_children "$P.qa.auth" | paste -sd, - | sed 's/,/, /g')"
   [ -z "$auth_names" ] || auth_rule=" A check that needs a signed-in caller adds \"auth\" set to one of: ${auth_names}; omit it for an anonymous request."
+  unit_cmd="$(_arc "$P.qa.unit.command")"
+  if [ -n "$unit_cmd" ]; then
+    mkdir -p "$WT/$QA_UNIT_DIR"
+    tools+=( "Edit(/${WT}/${QA_UNIT_DIR}/**)" )
+    unit_rule="Behavior no HTTP check reaches (library, model, service or CLI code) gets unit tests, never a manual item: write them as test files under ${WT}/${QA_UNIT_DIR}/ (the only other place you may write) in the project's test framework, covering each such acceptance criterion with success and failure cases and exact expected values; bash runs \`${unit_cmd} ${QA_UNIT_DIR}\` from the branch root. "
+  fi
   local prompt="Write a QA plan for the change on this branch. The ticket, with its acceptance criteria, is $(ticket_source); the change is the diff in ${D}/qa/change.diff, and the current directory is the branch. \
 Write the plan to ${plan} (a new file; it is the only file you may write) with exactly these sections: \
 '## Summary' — 2 to 5 sentences: what changed and how each acceptance criterion is covered, no links; \
-'## Scripted Tests' — one \`\`\`json block: an array of at most 50 HTTP checks against the running app, each {\"name\", \"method\" (GET, POST, PUT, PATCH, DELETE or HEAD), \"path\" (starting with /), optional \"body\" (JSON), \"expect_status\", optional \"expect_contains\"}.${auth_rule} Cover every endpoint the diff adds or changes, success and failure paths; \
+'## Scripted Tests' — one \`\`\`json block: an array of at most 50 HTTP checks against the running app, each {\"name\", \"method\" (GET, POST, PUT, PATCH, DELETE or HEAD), \"path\" (starting with /), optional \"body\" (JSON), \"expect_status\", optional \"expect_contains\"}.${auth_rule} Cover every endpoint the diff adds or changes, success and failure paths; an empty array when the diff changes no endpoint; \
 '## Manual Checklist' — '- [ ] ' items only a person can judge. \
-End the file with the line 'QA-NONCE: ${nonce}'. ${NO_MEMORY_RULE} Be concise."
+${unit_rule}End the file with the line 'QA-NONCE: ${nonce}'. ${NO_MEMORY_RULE} Be concise."
   log "QA run on ${sha:0:7} (budget ${QA_BUDGET_USD})"
   ( cd "$WT" && "$CLAUDE_BIN" -p --plugin-dir "$PLUGIN_ROOT" --model sonnet --permission-mode default \
       --allowedTools "${tools[@]}" --max-budget-usd "$QA_BUDGET_USD" "$prompt" </dev/null ) >> "$LOG_FILE" 2>&1
@@ -419,23 +427,48 @@ End the file with the line 'QA-NONCE: ${nonce}'. ${NO_MEMORY_RULE} Be concise."
     cleanup; stop "QA run produced no plan"
   fi
   QA_MANUAL="$(_section "$plan" "Manual Checklist" | grep -c '^- \[ \]')"
-  QA_PASS=0 QA_FAIL=0 QA_AUTO="Automated: not executed — no local server (set after_pr.qa.server)"
+  QA_PASS=0 QA_FAIL=0 QA_UNIT="" QA_UNIT_STOP=""
   _section "$plan" "Scripted Tests" | awk '/^```/ { if (f) exit; f = 1; next } f' > "$D/qa/checks.json"
   jq -e 'type == "array"' "$D/qa/checks.json" >/dev/null 2>&1 || : > "$D/qa/checks.json"
-  if [ -n "$srv" ]; then
-    if [ ! -s "$D/qa/checks.json" ]; then
-      QA_AUTO="Automated: not executed — the plan's checks are not a JSON list"
-    elif serve_branch "$srv"; then
-      url="$(_arc "$srv.url")"; url="${url%/}"
-      qa_auth_headers "$url"
-      qa_checks "$D/qa/checks.json" "$url" > "$D/qa/tests.out"
-      QA_PASS="$(grep -c '^PASS: ' "$D/qa/tests.out")"; QA_FAIL="$(grep -c '^FAIL: ' "$D/qa/tests.out")"
-      QA_AUTO="Automated: ${QA_PASS} passed, ${QA_FAIL} failed"
-    else
-      QA_AUTO="Automated: not executed — ${SERVE_ERR}"
-    fi
+  n="$(jq length "$D/qa/checks.json" 2>/dev/null)"
+  if [ ! -s "$D/qa/checks.json" ]; then
+    QA_AUTO="Automated: not executed — the plan's checks are not a JSON list"
+  elif [ "$n" = 0 ]; then
+    QA_AUTO="Automated: not executed — no scripted tests"
+  elif [ -z "$srv" ]; then
+    QA_AUTO="Automated: not executed — no local server (set after_pr.qa.server)"
+  elif serve_branch "$srv"; then
+    url="$(_arc "$srv.url")"; url="${url%/}"
+    qa_auth_headers "$url"
+    qa_checks "$D/qa/checks.json" "$url" > "$D/qa/tests.out"
+    QA_PASS="$(grep -c '^PASS: ' "$D/qa/tests.out")"; QA_FAIL="$(grep -c '^FAIL: ' "$D/qa/tests.out")"
+    QA_AUTO="Automated: ${QA_PASS} passed, ${QA_FAIL} failed"
+  else
+    QA_AUTO="Automated: not executed — ${SERVE_ERR}"
   fi
+  [ -z "$unit_cmd" ] || qa_unit "$unit_cmd"
   cleanup
+}
+
+# qa_unit <command> — bash runs `<command> $QA_UNIT_DIR` in the worktree on the files the QA run
+# wrote there, with an env holding no credentials. Model-written code: this is the one QA step
+# that executes it (see scheduled-jobs.md). A link or special file there refuses the run.
+qa_unit() {
+  local dir="$WT/$QA_UNIT_DIR" secs rc=0
+  if [ -n "$(find "$dir" ! -type f ! -type d -print -quit 2>/dev/null)" ]; then
+    QA_UNIT="Unit tests: not executed — ${QA_UNIT_DIR} holds a link or special file"; QA_UNIT_STOP=refused; return
+  fi
+  if [ -z "$(find "$dir" -type f -print -quit 2>/dev/null)" ]; then
+    QA_UNIT="Unit tests: not executed — the plan wrote none"; return
+  fi
+  secs="$(jobs_duration_seconds "$(_arc "$P.qa.unit.timeout")")"; secs="${secs:-600}"
+  ( cd "$WT" && with_timeout "$secs" env -i PATH="$PATH" HOME="$HOME" USER="$USER" LANG="${LANG:-C.UTF-8}" \
+      TMPDIR="${TMPDIR:-/tmp}" bash -c "$1 $QA_UNIT_DIR" ) </dev/null > "$D/qa/unit.out" 2>&1 || rc=$?
+  case "$rc" in
+    0)   QA_UNIT="Unit tests: passed" ;;
+    124) QA_UNIT="Unit tests: failed (timed out after ${secs}s)"; QA_UNIT_STOP=failed ;;
+    *)   QA_UNIT="Unit tests: failed (exit ${rc})"; QA_UNIT_STOP=failed ;;
+  esac
 }
 
 # qa_checks <checks.json> <base-url> — the plan's checks are data, never shell: each is one curl
@@ -500,6 +533,10 @@ qa_note_md() {
     printf '```\n'
   fi
   [ -s "$D/qa/tests.out" ] && { printf '\n```\n'; _neutral < "$D/qa/tests.out"; printf '```\n'; }
+  if [ -n "$QA_UNIT" ]; then
+    printf '\n%s\n' "$QA_UNIT"
+    [ -s "$D/qa/unit.out" ] && { printf '\n```\n'; tail -n 60 "$D/qa/unit.out" | _neutral | head -c 6000; printf '\n```\n'; }
+  fi
   printf '\n## Manual Checklist (skipped, unattended)\n\n'
   _section "$plan" "Manual Checklist" | sed -n 's/^- \[ \] //p' | _neutral | head -n 50 | sed 's/^/- [ ] /'
 }
@@ -522,7 +559,9 @@ qa_publish() {
   {
     printf 'QA summary for %s\n\n' "$KEY"
     _section "$plan" "Summary" | _neutral | head -c 2000
-    printf '\n\n%s\nManual checks: %s skipped (unattended)\n' "$QA_AUTO" "$QA_MANUAL"
+    printf '\n\n%s\n' "$QA_AUTO"
+    [ -z "$QA_UNIT" ] || printf '%s\n' "$QA_UNIT"
+    printf 'Manual checks: %s skipped (unattended)\n' "$QA_MANUAL"
     skipped="$(jq length "$D/security/skipped.json" 2>/dev/null)"
     [ -z "$skipped" ] || [ "$skipped" = 0 ] || printf 'Security: %s pre-existing finding(s) skipped\n' "$skipped"
     skipped="$(jq length "$D/security/ac-skipped.json" 2>/dev/null)"
@@ -541,6 +580,7 @@ qa_publish() {
   fi
   log "QA published${NOTE_URL:+ (${NOTE_URL})}"
   [ "$QA_FAIL" = 0 ] || stop "QA: ${QA_FAIL} scripted test(s) failed — plan: ${NOTE_URL:-$plan}"
+  [ -z "$QA_UNIT_STOP" ] || stop "QA: unit tests ${QA_UNIT_STOP} — plan: ${NOTE_URL:-$plan}"
 }
 
 # --- security (security.command adapter) -----------------------------------------------------------

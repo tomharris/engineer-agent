@@ -142,27 +142,26 @@ already exist and `execute-item` will take its finisher path against a half-done
 refuses it). Run its three-phase flow here:
 
   **Phase 1 — Run automated tests:**
-  1. Extract the test script (the bash code block under `### Test Script`) from the `## Draft Response`
-  2. Create a temporary directory and save the script as `qa-test.sh`
-  3. Run the script via Bash: `bash qa-test.sh`
-  4. Display the output to the user (pass/fail for each test, final summary)
+  1. Extract from the `## Draft Response`: the test script (the bash code block under `### Test Script`), each file under `### Unit Tests`, and each script under `### REPL Tests`
+  2. Create a temporary directory and save the script as `qa-test.sh`. For unit and REPL tests, run against the branch the way `generate-qa` step 3.1 does (a worktree of `branch` unless the project checkout is already on it), writing the unit test files to `ea_qa/` there
+  3. Run each kind via Bash, as `generate-qa` step 3.3 does: `bash qa-test.sh`, then `{test_command} ea_qa`, then each REPL script on stdin to `{repl_command}` (commands from the plan header)
+  4. Display the output to the user (pass/fail for each test, per-kind summary); remove any worktree you created
   5. If any tests fail, use AskUserQuestion: "Some automated tests failed. What would you like to do?" Options: "Continue to manual checklist", "Re-run tests", "Reject this QA plan"
   6. If the user chooses to re-run, repeat from step 3
   7. If the user chooses to reject, follow the **Reject** flow below
 
   **Phase 2 — Manual checklist:**
   1. Display the `### Manual Checklist` section from the draft
-  2. Display the `### REPL/Console Tests` section if present, and ask the user to run those manually
-  3. Use AskUserQuestion: "Have you completed the manual checklist and REPL/console tests?" Options: "Yes, all checks passed", "Yes, but some items failed", "Not yet — I'll come back later"
-  4. If "not yet", leave the queue item in `drafts/` and print: "QA plan remains in queue. Run `/engineer-agent review-queue qa` when ready to complete."
-  5. If "some items failed", ask the user to describe which items failed. Record this in the results.
+  2. Use AskUserQuestion: "Have you completed the manual checklist?" Options: "Yes, all checks passed", "Yes, but some items failed", "Not yet — I'll come back later"
+  3. If "not yet", leave the queue item in `drafts/` and print: "QA plan remains in queue. Run `/engineer-agent review-queue qa` when ready to complete."
+  4. If "some items failed", ask the user to describe which items failed. Record this in the results.
 
   **Phase 3 — Archive:**
   1. Create directory `~/.local/share/engineer-agent/qa-plans/{branch}-{YYYYMMDD-HHmmss}/`
-  2. Save `qa-test.sh` — the test script extracted in Phase 1
+  2. Save `qa-test.sh` — the test script extracted in Phase 1 — and the unit test files under `ea_qa/`
   3. Save `test-plan.md` — the full `## Draft Response` content including manual checklist
   4. Save `results.md` — containing:
-     - Automated test output (stdout from the script run)
+     - Automated test output (stdout from the curl script, unit and REPL runs)
      - Pass/fail counts
      - Manual checklist completion status
      - Any notes about failed manual items
@@ -190,8 +189,8 @@ After the three QA phases complete, update the file's frontmatter `status` to `c
   3. Compose the note content (a complete record), in order:
      - A header: ticket key + `source_url`, PR URL (`pr_url` or "None"), `branch`, `base`,
        base URL, and the completion timestamp.
-     - The full test plan — the `test-plan.md` content saved in Phase 3 (manual checklist,
-       REPL/console tests, coverage summary).
+     - The full test plan — the `test-plan.md` content saved in Phase 3 (unit and REPL tests,
+       manual checklist, coverage summary).
      - The generated `qa-test.sh` script inlined in a fenced ```bash code block.
      - The execution results — the `results.md` content saved in Phase 3 (stdout, pass/fail
        counts, manual checklist status, notes on failed items).
