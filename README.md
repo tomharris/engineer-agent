@@ -901,11 +901,13 @@ message starting with `CR/QA` (configurable) from a `trusted_slack_users` id tha
 project's `github.repos` and one Jira ticket, claims it with 👀, then:
 
 1. reviews the PR (`/code-review high` in a read-only model run with an acceptance-criteria check,
-   plus your `security.command` adapter); any Medium+ finding ⇒ a changes-requested verdict and stop. A finding that
+   plus your `security.command` adapter); any Medium+ finding blocks. A finding that
    contradicts the ticket (see the AC guard under `after_pr`) doesn't block; the comment lists it;
 2. QAs it: follows the ticket's written QA steps and runs the `.py`/`.sh` scripts attached to the
-   ticket by `trusted_authors` (bash runs them, from a run plan the model writes); a failure ⇒ a
-   Jira comment, a QA-failed verdict and stop;
+   ticket by `trusted_authors` (bash runs them, from a run plan the model writes). QA runs even
+   when the review blocked, unless a finding is from the security adapter or `critical` (QA
+   scripts can execute PR code); then the QA result goes on the ticket and into one changes-requested
+   verdict, and the job stops. Otherwise a failure ⇒ a Jira comment, a QA-failed verdict and stop;
 3. on a pass, comments a QA summary on the ticket, reacts `:approve:` and moves the ticket to
    `transition`, then posts the approved verdict.
 

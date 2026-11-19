@@ -381,10 +381,39 @@ eq "review stop: claim only" "eyes" "$(paste -sd, - < "$H/reactions")"
 eq "review stop: thread verdict" "1700000001.000000|CR/QA: changes requested" \
   "$(sed -n 1p "$H/slack-replies" 2>/dev/null | cut -d' ' -f2)|$(sed -n 2p "$H/slack-replies" 2>/dev/null)"
 has "review stop: thread names the finding" "Race in scheduler" "$(cat "$H/slack-replies" 2>/dev/null)"
-has "review stop: QA not run" "QA: not run" "$(cat "$H/pr-comments" 2>/dev/null)"
-grep -q '/verdict.json' "$CLAUDE_CALLS" && bad "QA ran after a review stop" || ok "no QA run after a review stop"
-eq "review stop: no Jira comment" "" "$(cat "$H/jira-comments" 2>/dev/null)"
+has "review stop: PR verdict carries the QA result" "QA passed for https://github.com/acme/web/pull/7" "$(cat "$H/pr-comments" 2>/dev/null)"
+has "review stop: thread carries the QA result" "ENG-7-qa.sh: exit 0" "$(cat "$H/slack-replies" 2>/dev/null)"
+eq "review stop: Jira gets the QA result" "QA passed for https://github.com/acme/web/pull/7" "$(head -1 "$H/jira-comments" 2>/dev/null)"
+eq "review stop: no transition" "" "$(cat "$H/transitions" 2>/dev/null)"
 eq "ledger review-stopped" review-stopped "$(outcome)"
+
+e2e_reset '[{"title":"Race in scheduler","severity":"medium","file":"app/a.py","detail":"lock it"},{"nonce":"NONCE"}]' 1
+run_job; eq "review and QA stop: PR verdict" "CR/QA: changes requested" "$(head -1 "$H/pr-comments" 2>/dev/null)"
+has "review and QA stop: verdict carries the QA failure" "QA failed for https://github.com/acme/web/pull/7" "$(cat "$H/pr-comments" 2>/dev/null)"
+eq "review and QA stop: Jira gets the QA failure" "QA failed for https://github.com/acme/web/pull/7" "$(head -1 "$H/jira-comments" 2>/dev/null)"
+eq "review and QA stop: ledger review-stopped" review-stopped "$(outcome)"
+
+e2e_reset '[{"nonce":"NONCE"}]' 0
+export ADAPTER_FINDINGS='[{"title":"injection","severity":"medium","file":"app/a.py"}]'
+run_job
+grep -q '/verdict.json' "$CLAUDE_CALLS" && bad "QA ran on a security-flagged PR" || ok "no QA run on a security-flagged PR"
+has "security stop: QA not run" "QA: not run" "$(cat "$H/pr-comments" 2>/dev/null)"
+eq "security stop: no Jira comment" "" "$(cat "$H/jira-comments" 2>/dev/null)"
+eq "security stop: ledger review-stopped" review-stopped "$(outcome)"
+
+e2e_reset '[{"nonce":"NONCE"}]' 0
+export ADAPTER_FINDINGS='[{"title":"injection","severity":"medium","file":"app/a.py"}]'
+fx ac-verdict '[{"index":0,"ac":"AC1: schedule is registered.","reason":"r"},{"nonce":"NONCE"}]'
+run_job
+grep -q '/verdict.json' "$CLAUDE_CALLS" && bad "QA ran on a security finding the AC guard skipped" || ok "AC guard cannot unlock QA on a security finding"
+eq "AC-skipped security finding: ledger review-stopped" review-stopped "$(outcome)"
+rm -f "$TMP/fx.ac-verdict"
+export ADAPTER_FINDINGS='[]'
+
+e2e_reset '[{"title":"Runs rm -rf on install","severity":"critical","file":"app/a.py","detail":"d"},{"nonce":"NONCE"}]' 0
+run_job
+grep -q '/verdict.json' "$CLAUDE_CALLS" && bad "QA ran after a critical finding" || ok "no QA run after a critical finding"
+has "critical stop: QA not run" "QA: not run" "$(cat "$H/pr-comments" 2>/dev/null)"
 eq "worktree removed after review stop" "$WT0" "$(wts)"
 
 e2e_reset '[{"title":"Schedule should not be registered","severity":"medium","file":"app/a.py","detail":"drop it"},{"nonce":"NONCE"}]' 0
