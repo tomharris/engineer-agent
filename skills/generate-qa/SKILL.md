@@ -7,13 +7,17 @@ model: sonnet
 
 # Generate QA Test Plan
 
-Generate a hybrid QA test plan (runnable script + manual checklist) from ticket acceptance criteria and branch code changes using a two-pass analysis.
+Generate a hybrid QA test plan from ticket acceptance criteria and branch code changes using a two-pass analysis, then run it. Three kinds of scripted test, plus a manual checklist:
+
+- **curl** — HTTP checks against the running app (`qa-test.sh`)
+- **unit** — test files in the project's own framework (pytest, RSpec, Jest, ...), run by `test_command`
+- **REPL** — short self-checking scripts piped to `repl_command`, for behavior that needs the app's runtime (a Rails console with a database, a configured Django shell)
 
 ## Tools Needed
 
 - `Read`, `Write` — read/write queue items and project files
 - `Grep`, `Glob` — search codebase for route definitions and project structure
-- `Bash` — run `git diff` and other git commands
+- `Bash` — `git diff`, `git worktree`, `curl`, and the project's test and REPL commands
 
 ## Input
 
@@ -41,8 +45,12 @@ Read the queue item file. Extract from `## Context`:
 
 Read `~/.local/share/engineer-agent/engineer.yaml`. Extract for the queue item's `project`:
 - `projects.<project>.qa.base_url` (required — if missing, use `http://localhost:3000` and flag a warning)
-- `projects.<project>.qa.console_command` (optional)
+- `projects.<project>.qa.test_command` (optional) — runs unit test files; the test directory is appended as its last argument, e.g. `uv run pytest -q`, `bundle exec rspec`, `npx jest`
+- `projects.<project>.qa.repl_command` (optional) — runs a REPL script read from stdin, non-interactively, e.g. `uv run python -`, `bin/rails runner -`, `node -`
+- `projects.<project>.qa.console_command` (optional, legacy) — used as `repl_command` when that is absent
 - `projects.<project>.path` (project root path)
+
+If `test_command` or `repl_command` (and `console_command`) is absent, infer it from the project: `uv.lock` → `uv run pytest -q` / `uv run python -`; `poetry.lock` → `poetry run pytest -q` / `poetry run python -`; other Python (`pyproject.toml`, `setup.py`) → `python -m pytest -q` / `python -`; `Gemfile` with `rspec` → `bundle exec rspec` / `bin/rails runner -` (Rails) or `bundle exec ruby -`; `package.json` → its test runner (`npx jest`, `npx vitest run`) / `node -`. Note each inferred command in the plan as "inferred".
 
 #### 1.3. Classify Changed Files
 
@@ -56,7 +64,7 @@ Categories:
 - **config** — files matching `config/**`, `.env*`, `docker-compose*`, `Dockerfile*`, `*.config.*`
 - **test** — files matching `test/**`, `spec/**`, `__tests__/**`, `*_test.*`, `*_spec.*`, `*.test.*`, `*.spec.*`
 
-If a file doesn't match any pattern, classify as `service` (conservative default — it will get a REPL test suggestion rather than being silently ignored).
+If a file doesn't match any pattern, classify as `service` (conservative default — it gets a unit test rather than being silently ignored). Library packages (e.g. `packages/*/src/**`, `src/<pkg>/**`) are `service` or `model`, never left unclassified.
 
 #### 1.4. Extract Routes from API File Diffs
 
@@ -146,17 +154,24 @@ For each acceptance criterion, find the matching items in the Pass 1 inventory:
   - Add `-w "\n%{http_code}"` for status code checking
   - Include `# Expected: {status_code}` comment after each curl
 
-- **AC maps to service method(s) only (no API route):** Generate REPL/console snippet:
-  - Use the project's `console_command` if configured
-  - Show the method call with sample arguments
-  - Include `# Expected: {expected_result}` comment
+- **AC maps to service/model/library code (no API route):** Generate a **unit test** (step 2.6):
+  - Written in the project's test framework, following the style of the project's existing tests (read one nearby test file first)
+  - One **happy path** test and one **edge/failure** test per AC (invalid input, boundary, rejected value), with exact expected values and exact error classes/messages
+  - Call the public API the diff adds or changes; never private helpers
+  - Named after the behavior (`test_rejects_unknown_duration_part`)
+
+- **AC needs the app's runtime (database, configured framework, background services) and no route reaches it:** Generate a **REPL test** (step 2.7) instead of a unit test.
+
+- **The diff changes a public API (exports, models, functions other code imports):** in addition to unit tests, generate a **consumer REPL test** (step 2.7): import only from the public module path, the way a caller would, and exercise a realistic end-to-end input (a full published document, not a minimal fixture). It catches export and packaging gaps the package's own tests miss.
+
+- **AC names behavior in another repo that consumes this change** (a pin bump, a caller that must handle the new shape, replay/contract tests against the new version), and that repo is a configured project (`projects.<slug>.path`, matched by slug or GitHub repo name in the ticket): generate a **cross-repo REPL test** (step 2.7) that runs in that consumer against this branch. Never move such an AC to the manual checklist just because it lives in another repo.
 
 - **AC maps to view/UI changes only:** Add to manual checklist:
   - What page/component to navigate to
   - What to look for or verify
   - Any specific interactions to try
 
-**Principle — never punt scripted tests to manual.** An AC that maps to an API route or service method gets a *scripted* test. If generating or running that scripted test is hard (unvalidated route, a failure on first run, etc.), it is resolved in the Pass 3 run-and-fix loop below — it is **never** relocated into the manual checklist to avoid dealing with it. The manual checklist is only for ACs that are genuinely UI/judgment-only.
+**Principle — never punt scripted tests to manual.** An AC that maps to an API route, service method, model or library function gets a *scripted* test: curl, unit or REPL. If generating or running that scripted test is hard (unvalidated route, a failure on first run, a missing fixture, etc.), it is resolved in the Pass 3 run-and-fix loop below — it is **never** relocated into the manual checklist to avoid dealing with it. "Run the unit tests" or "parse X and check Y" are never manual items. The manual checklist is only for ACs that are genuinely UI/judgment-only, or steps that can only happen after merge (cutting a release tag, pinning the consumer to that tag). A consumer's behavior against the change is scripted as a cross-repo REPL test, even when the consumer's own change has not been written yet: that test is expected to fail and records the gap.
 
 - **AC maps to nothing in inventory:** Flag as:
   - `**AC {N}: {text}** — untested: no matching code change found. This may be out of scope for this branch, or the implementation may be missing.`
@@ -234,7 +249,56 @@ echo "========================================="
 [ "$FAIL" -eq 0 ] && exit 0 || exit 1
 ```
 
-#### 2.6. Compose Manual Checklist
+#### 2.6. Compose Unit Tests
+
+Write one test file per changed module (or per AC group) for the unit-test ACs from step 2.2. Files live in an `ea_qa/` directory at the repo root, named for the framework's discovery (`test_*.py`, `*_spec.rb`, `*.test.ts`). Keep them self-contained: no edits to the project's own tests, fixtures or `conftest.py`; build what each test needs inline. For each test, put the AC it covers in a one-line comment above it (`# AC2`).
+
+```python
+# ea_qa/test_wait_step.py
+import pytest
+from pkg.definition import ResolvedWaitStep, parse_step
+
+
+# AC1
+def test_parses_a_wait_step_as_resolved_wait():
+    step = parse_step({"waitTwoDays": {"wait": {"days": 2}}})
+    assert isinstance(step, ResolvedWaitStep)
+    assert step.call is None
+
+
+# AC1
+def test_rejects_an_unknown_duration_part():
+    with pytest.raises(ValueError, match="weeks"):
+        parse_step({"w": {"wait": {"weeks": 1}}})
+```
+
+#### 2.7. Compose REPL Tests
+
+For each REPL-test AC, write a script for `repl_command` (stdin, non-interactive) that sets up what it needs, exercises the behavior, and checks the result itself: print `PASS: {description}` or `FAIL: {description} (expected X, got Y)` per check, and exit non-zero if any check failed. A REPL test that only prints a value for a person to read is not a test.
+
+```ruby
+# AC3 — run with: bin/rails runner -
+user = UserService.new.create_with_invite("a@example.com", :admin)
+ok = user.persisted? && user.invites.count == 1
+puts ok ? "PASS: creates user and one invite" : "FAIL: creates user and one invite (got #{user.invites.count} invites)"
+exit(ok ? 0 : 1)
+```
+
+**Consumer REPL tests** import only the public path and feed a realistic document:
+
+```python
+# Consumer: run with: uv run python -
+from automation.definition import ResolvedAutomationDefinition, ResolvedWaitStep
+doc = {...}  # a full published definition with a call step, a wait step and companionOf
+d = ResolvedAutomationDefinition.model_validate(doc)
+ok = isinstance(d.do[1].step, ResolvedWaitStep) and d.do[1].step.wait.total_ms == 172_800_000
+print("PASS: consumer parses a published wait step" if ok else f"FAIL: consumer parses a published wait step (got {d.do[1].step!r})")
+raise SystemExit(0 if ok else 1)
+```
+
+**Cross-repo REPL tests** run in the consumer project against this branch. Set up in step 3.1; each script states which consumer it runs in (`# Consumer: {slug} — run with: {consumer repl_command}`). Read the consumer's code first and call its real entry points (its check, its loader, its replay test) rather than re-implementing them. When the consumer's own change is still to do, assert the behavior the AC requires: the test fails now and passes once that change lands, and the plan says so.
+
+#### 2.8. Compose Manual Checklist
 
 Build the manual checklist markdown:
 
@@ -256,37 +320,46 @@ Build the manual checklist markdown:
 
 ### Pass 3 — Execute & Fix Loop
 
-Run the scripted tests and fix failing ones in place. The goal: every scripted (curl) test either passes or is left failing for a deliberate, recorded reason — never abandoned, never demoted to the manual checklist.
+Run every scripted test — curl, unit and REPL — and fix failing ones in place. The goal: every scripted test either passes or is left failing for a deliberate, recorded reason — never abandoned, never demoted to the manual checklist.
 
-**Scope:** this loop runs the bash/curl script from step 2.5 only. The REPL/console snippets (service-only ACs) stay as guidance the reviewer runs by hand — the console is interactive and not reliably scriptable.
+#### 3.1. Materialize the Tests
 
-#### 3.1. Materialize the Script
+Write the composed `qa-test.sh` to a temp file under the session scratchpad directory.
 
-Write the composed `qa-test.sh` to a temp file under the session scratchpad directory so it can be executed. Keep this file in sync with any fixes you make in the loop — the final, corrected version is what goes into the Draft Response (step 4).
+Unit and REPL tests must run against the **branch**, not whatever the project checkout has on disk:
+- If the current directory is already a checkout of `branch` (the headless run's worktree), use it.
+- Otherwise create a worktree: `git -C {project_path} worktree add {scratchpad}/qa-wt {branch}` (fetch `origin {branch}` first if the branch is not local).
 
-#### 3.2. Reachability Precheck
+Cross-repo REPL tests run in a worktree of the consumer's default branch (`git -C {consumer_path} worktree add --detach {scratchpad}/qa-consumer-{slug} origin/{default}`), with the dependency redirected to this branch's worktree **in that worktree only** — e.g. for uv, a `[tool.uv.sources]` path entry (`{pkg} = { path = "{worktree}/{package_dir}", editable = true }`) in each pyproject that pins it, then `uv sync`. That redirect is a test harness and is never committed or pushed; the worktree is removed in step 3.6. Run consumer scripts with the consumer's `repl_command` (or its inferred one) from the consumer worktree.
 
-If the script contains no executable curl tests (everything is UI/manual or REPL-only), skip the rest of Pass 3 and record execution status `not executed — no scripted tests`.
+Write the unit test files into `{worktree}/ea_qa/` and each REPL script to `{scratchpad}/repl-{N}.txt`. Keep these files in sync with any fixes you make in the loop — the final, corrected versions go into the Draft Response (step 4).
 
-Otherwise probe the host once:
+#### 3.2. Preconditions (per kind)
 
-```bash
-curl -s -o /dev/null -w "%{http_code}" --max-time 5 "$BASE_URL"
-```
+Each kind runs or is marked not-executed on its own; one kind being blocked never stops the others.
 
-If the connection is refused or the host is unresolvable (curl exits non-zero / no HTTP code), **abort the loop**: leave the generated script unchanged, record execution status `not executed — app unreachable at {base_url}`, and skip to step 4. Do not attempt to "fix" tests against a dead endpoint, and do not move anything to the manual checklist.
+- **curl:** if there are no curl tests, record `not executed — none generated`. Otherwise probe the host once:
 
-> The loop cannot start the app or obtain credentials itself — there is no config or convention for that. It is strictly best-effort against whatever is already running at `base_url`.
+  ```bash
+  curl -s -o /dev/null -w "%{http_code}" --max-time 5 "$BASE_URL"
+  ```
+
+  If the connection is refused or the host is unresolvable, record `not executed — app unreachable at {base_url}` for the curl tests and skip their loop. Do not "fix" tests against a dead endpoint.
+- **unit / REPL:** if there are none of that kind, record `not executed — none generated` (a change to a public API always has at least a consumer REPL test). If its command cannot run here (the tool call is denied in a confined run, or the command is not installed), record `not executed — {reason}` and leave the tests in the plan.
+
+> The loop cannot start the app or obtain credentials itself. curl tests are best-effort against whatever is already running at `base_url`.
 
 #### 3.3. Run
 
-Execute the script and capture the per-test `PASS`/`FAIL` lines and the summary:
+From the worktree root:
 
 ```bash
-bash {scratchpad}/qa-test.sh
+bash {scratchpad}/qa-test.sh                         # curl
+{test_command} ea_qa                                 # unit
+{repl_command} < {scratchpad}/repl-{N}.txt           # REPL, one script at a time
 ```
 
-The script already exits non-zero on any failure via its `check`/`[ "$FAIL" -eq 0 ]` harness. If every test passes, record `ran — {N} passed / 0 failed` and go to step 4.
+Give each command a timeout (10 minutes for the unit run, 2 minutes per REPL script). Capture each test's pass/fail from the output: the curl `PASS`/`FAIL` lines, the test runner's per-test results, the REPL `PASS:`/`FAIL:` lines plus its exit status. If every test passes, record `ran — {N} passed / 0 failed` per kind and go to step 3.6.
 
 #### 3.4. Diagnose Each Failure
 
@@ -296,34 +369,36 @@ Classify each failing test into **exactly one** of these, and act accordingly:
   - Wrong path (404 because the route path is off) — correct it against the validated route definitions from step 1.5.
   - Placeholder/missing auth producing 401/403 — supply a real token only if one is plainly derivable from the project; otherwise treat as an env limitation (below).
   - Expected status disagrees with the AC — correct the expectation to what the **AC** specifies.
-  - Invalid happy-path sample data triggering an unintended validation error — fix the request body.
+  - Invalid happy-path sample data triggering an unintended validation error — fix the request body or test input.
   - Malformed curl (quoting, headers, Content-Type) — fix the command.
+  - Wrong import, name or call signature in a unit or REPL test — fix it against the code in the diff.
+  - Collection or setup error (missing fixture, wrong file name for discovery) — fix the test file.
 
-- **Real code bug → do NOT touch the test.** The request is correct and the AC says behavior X but the app does Y. Leave the test failing and record a finding: which AC/file, expected vs. actual, and why this is a code issue rather than a test issue.
+- **Real code bug → do NOT touch the test.** The test is correct and the AC says behavior X but the code does Y. Leave the test failing and record a finding: which AC/file, expected vs. actual, and why this is a code issue rather than a test issue.
 
-- **Env limitation → leave the test in place, mark not-executed.** The test can't run meaningfully because auth is required and no token is configured or derivable (or a dependency is missing). Don't demote it to manual, and don't fix it against a dead path. Record it as `not executed — {reason}`.
+- **Env limitation → leave the test in place, mark not-executed.** The test can't run meaningfully because auth is required and no token is configured or derivable, a service (database, queue) it needs is not running, or a dependency is missing. Don't demote it to manual, and don't fix it against a dead path. Record it as `not executed — {reason}`.
 
-**Hard guardrail:** never rewrite an `expected` value to match the observed `actual` just to make a test go green. Expectations come from the acceptance criteria, not from the app's current behavior. "Make it pass" is only valid when the *test* was wrong, never when the *app* is wrong.
+**Hard guardrail:** never rewrite an `expected` value or assertion to match the observed `actual` just to make a test go green. Expectations come from the acceptance criteria, not from the code's current behavior. "Make it pass" is only valid when the *test* was wrong, never when the *code* is wrong.
 
 #### 3.5. Loop
 
-After fixing the test-defect failures, re-run the full script (step 3.3). Repeat until one of:
+After fixing the test-defect failures, re-run the affected kind (step 3.3). Repeat until one of:
 - all tests pass,
 - every remaining failure is classified as a real code bug or an env limitation, or
 - an iteration cap of **5** fix-and-rerun cycles is reached (prevents infinite loops).
 
 On hitting the cap, record the remaining failures with their last diagnosis.
 
-#### 3.6. Result
+#### 3.6. Result and Cleanup
 
-The corrected `qa-test.sh` (with all test-defect fixes applied) is the version that flows into the Draft Response. Record for step 4:
+Remove every worktree you created (`git -C {project_path} worktree remove --force {scratchpad}/qa-wt`, and each `qa-consumer-{slug}` from its consumer repo). Check `git -C {consumer_path} status` shows nothing from the harness. The corrected tests (with all test-defect fixes applied) are the versions that flow into the Draft Response. Record for step 4, **per kind** (curl, unit, REPL):
 - execution status: `ran` | `not executed — {reason}`
 - `{N} passed / {M} failed`
 - for each remaining failure: its classification (`real code bug` | `not executed — {reason}`) and detail.
 
 ### 4. Write Draft Response
 
-Combine the (fixed) test script, execution results, and manual checklist into the `## Draft Response`:
+Combine the (fixed) curl script, unit tests, REPL tests, execution results, and manual checklist into the `## Draft Response`:
 
 ```markdown
 ## Draft Response
@@ -335,20 +410,44 @@ Combine the (fixed) test script, execution results, and manual checklist into th
 **Ticket:** {ticket_url}
 **PR:** {pr_url or "None"}
 **Base URL:** {base_url}
+**Test command:** `{test_command}` {"(inferred)" if inferred}
+**REPL command:** `{repl_command}` {"(inferred)" if inferred}
 
 ### Test Script
 
 {the complete, fixed bash script — the version produced by the Pass 3 loop, not the original from step 2.5}
 
+### Unit Tests
+
+Run from the branch root with `{test_command} ea_qa`.
+
+{for each file, the fixed version:}
+#### ea_qa/{file}
+```{language}
+{file contents}
+```
+
+### REPL Tests
+
+{for each REPL test, the fixed version:}
+#### AC {N}: {text} ({in-repo | consumer | cross-repo: {slug}})
+Run with `{repl_command}` from {the branch root | the {slug} worktree with {pkg} redirected to this branch}, script on stdin. {for a cross-repo test expected to fail until the consumer's change lands, say so}
+```{language}
+{script}
+```
+
 ### Execution Results
 
-**Status:** {ran | not executed — {reason}}
-**Result:** {N} passed / {M} failed
+| Kind | Status | Result |
+|---|---|---|
+| curl | {ran \| not executed — {reason}} | {N} passed / {M} failed |
+| unit | {ran \| not executed — {reason}} | {N} passed / {M} failed |
+| REPL | {ran \| not executed — {reason}} | {N} passed / {M} failed |
 
 {for each remaining failure:}
-- **{test description}** — {real code bug | not executed — {reason}}: {expected vs. actual / detail}
+- **{kind}: {test description}** — {real code bug | not executed — {reason}}: {expected vs. actual / detail}
 
-{if status is "not executed", briefly state what's needed to run it (start app at {base_url}, provide auth, etc.).}
+{for each kind not executed, briefly state what's needed to run it (start app at {base_url}, provide auth, install deps, allow the test command, etc.).}
 
 ### Findings & Disposition
 
@@ -361,28 +460,15 @@ env-limitation → `not-executed`. Include the passing-after-fix tests as `fixed
 |---|---|---|---|
 | qa | {failing AC / test} | fixed / real-bug-filed / not-executed | {expected vs. actual / reason} |
 
-### REPL/Console Tests
-
-{if any service-layer-only ACs exist:}
-
-Run in `{console_command or "your project's REPL/console"}`:
-
-{for each service-only AC:}
-#### AC {N}: {text}
-```
-{ServiceClass}.new.{method}({sample_args})
-# Expected: {expected_result}
-```
-
 ### Manual Checklist
 
-{the complete checklist from step 2.6}
+{the complete checklist from step 2.8}
 
 ### Coverage Summary
-- {N}/{M} acceptance criteria have automated tests
+- {N}/{M} acceptance criteria have automated tests ({C} curl, {U} unit, {R} REPL)
 - {N} automated tests executed and passing
 - {N} potential code bugs surfaced by execution
-- {N} automated tests not executed (env: app unreachable / auth required)
+- {N} automated tests not executed (env: app unreachable / auth required / command unavailable)
 - {N} acceptance criteria need manual verification
 - {N} acceptance criteria have no matching code change (possibly out of scope)
 - {N} code changes not mapped to any acceptance criterion
@@ -396,6 +482,6 @@ Run in `{console_command or "your project's REPL/console"}`:
 
 ### 6. Report
 
-Report: "QA test plan drafted for {ticket-key}: {N} automated tests ({P} passed / {F} failed on run), {B} potential bugs surfaced, {N} manual checks, {N} regression tests. Review with `/engineer-agent review-queue qa`."
+Report: "QA test plan drafted for {ticket-key}: {N} automated tests ({C} curl, {U} unit, {R} REPL; {P} passed / {F} failed on run), {B} potential bugs surfaced, {N} manual checks, {N} regression tests. Review with `/engineer-agent review-queue qa`."
 
-If the loop aborted, report execution status instead, e.g.: "... automated tests not executed: app unreachable at {base_url}. ..."
+For a kind that did not run, report its status instead, e.g.: "... curl tests not executed: app unreachable at {base_url}. ..."

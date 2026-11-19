@@ -9,7 +9,7 @@ allowed-tools: ["Bash", "Read", "Write", "Glob", "Grep", "AskUserQuestion", "Age
 
 # Engineer Agent: QA
 
-Generate a QA test plan for a feature branch by cross-referencing ticket acceptance criteria, PR testing notes, and code changes. Produces a runnable test script (curl commands for API changes, REPL snippets for service changes) and a manual checklist for items requiring human judgment.
+Generate a QA test plan for a feature branch by cross-referencing ticket acceptance criteria, PR testing notes, and code changes. Produces runnable tests — curl checks for API changes, unit tests in the project's framework (pytest, RSpec, Jest) for service/model/library changes, REPL scripts for behavior that needs the app's runtime — and a manual checklist for items requiring human judgment.
 
 ## Arguments
 

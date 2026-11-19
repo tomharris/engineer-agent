@@ -114,7 +114,7 @@ Routing itself lives in `references/routing-ladder.md` — see below.
 
 ### QA Documentation Config
 
-The `qa` subsection drives QA test plans: `base_url` and `console_command` (used during generation), plus optional documentation keys `document_to` (`"slite"` | empty — empty/absent disables) and `document_parent` (Slite channel/note id; empty ⇒ the user's private personal channel). When `document_to: slite`, a completed QA plan (review-queue Phase 3) is published to Slite as one note containing the full plan, the inlined `qa-test.sh` script, and the execution results — best-effort, never blocking completion.
+The `qa` subsection drives QA test plans: `base_url`, `test_command` (runs generated unit tests, test dir appended) and `repl_command` (runs a generated REPL script from stdin), with `console_command` as a legacy `repl_command` fallback (all used during generation; the commands are inferred when absent), plus optional documentation keys `document_to` (`"slite"` | empty — empty/absent disables) and `document_parent` (Slite channel/note id; empty ⇒ the user's private personal channel). When `document_to: slite`, a completed QA plan (review-queue Phase 3) is published to Slite as one note containing the full plan, the inlined `qa-test.sh` script, and the execution results — best-effort, never blocking completion.
 
 
 ### `slack` / `cr-qa` job keys
