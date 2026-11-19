@@ -162,12 +162,16 @@ For each acceptance criterion, find the matching items in the Pass 1 inventory:
 
 - **AC needs the app's runtime (database, configured framework, background services) and no route reaches it:** Generate a **REPL test** (step 2.7) instead of a unit test.
 
+- **The diff changes a public API (exports, models, functions other code imports):** in addition to unit tests, generate a **consumer REPL test** (step 2.7): import only from the public module path, the way a caller would, and exercise a realistic end-to-end input (a full published document, not a minimal fixture). It catches export and packaging gaps the package's own tests miss.
+
+- **AC names behavior in another repo that consumes this change** (a pin bump, a caller that must handle the new shape, replay/contract tests against the new version), and that repo is a configured project (`projects.<slug>.path`, matched by slug or GitHub repo name in the ticket): generate a **cross-repo REPL test** (step 2.7) that runs in that consumer against this branch. Never move such an AC to the manual checklist just because it lives in another repo.
+
 - **AC maps to view/UI changes only:** Add to manual checklist:
   - What page/component to navigate to
   - What to look for or verify
   - Any specific interactions to try
 
-**Principle — never punt scripted tests to manual.** An AC that maps to an API route, service method, model or library function gets a *scripted* test: curl, unit or REPL. If generating or running that scripted test is hard (unvalidated route, a failure on first run, a missing fixture, etc.), it is resolved in the Pass 3 run-and-fix loop below — it is **never** relocated into the manual checklist to avoid dealing with it. "Run the unit tests" or "parse X and check Y" are never manual items. The manual checklist is only for ACs that are genuinely UI/judgment-only, or work in another repo or after merge (release tags, downstream pin bumps).
+**Principle — never punt scripted tests to manual.** An AC that maps to an API route, service method, model or library function gets a *scripted* test: curl, unit or REPL. If generating or running that scripted test is hard (unvalidated route, a failure on first run, a missing fixture, etc.), it is resolved in the Pass 3 run-and-fix loop below — it is **never** relocated into the manual checklist to avoid dealing with it. "Run the unit tests" or "parse X and check Y" are never manual items. The manual checklist is only for ACs that are genuinely UI/judgment-only, or steps that can only happen after merge (cutting a release tag, pinning the consumer to that tag). A consumer's behavior against the change is scripted as a cross-repo REPL test, even when the consumer's own change has not been written yet: that test is expected to fail and records the gap.
 
 - **AC maps to nothing in inventory:** Flag as:
   - `**AC {N}: {text}** — untested: no matching code change found. This may be out of scope for this branch, or the implementation may be missing.`
@@ -280,6 +284,20 @@ puts ok ? "PASS: creates user and one invite" : "FAIL: creates user and one invi
 exit(ok ? 0 : 1)
 ```
 
+**Consumer REPL tests** import only the public path and feed a realistic document:
+
+```python
+# Consumer: run with: uv run python -
+from automation.definition import ResolvedAutomationDefinition, ResolvedWaitStep
+doc = {...}  # a full published definition with a call step, a wait step and companionOf
+d = ResolvedAutomationDefinition.model_validate(doc)
+ok = isinstance(d.do[1].step, ResolvedWaitStep) and d.do[1].step.wait.total_ms == 172_800_000
+print("PASS: consumer parses a published wait step" if ok else f"FAIL: consumer parses a published wait step (got {d.do[1].step!r})")
+raise SystemExit(0 if ok else 1)
+```
+
+**Cross-repo REPL tests** run in the consumer project against this branch. Set up in step 3.1; each script states which consumer it runs in (`# Consumer: {slug} — run with: {consumer repl_command}`). Read the consumer's code first and call its real entry points (its check, its loader, its replay test) rather than re-implementing them. When the consumer's own change is still to do, assert the behavior the AC requires: the test fails now and passes once that change lands, and the plan says so.
+
 #### 2.8. Compose Manual Checklist
 
 Build the manual checklist markdown:
@@ -312,6 +330,8 @@ Unit and REPL tests must run against the **branch**, not whatever the project ch
 - If the current directory is already a checkout of `branch` (the headless run's worktree), use it.
 - Otherwise create a worktree: `git -C {project_path} worktree add {scratchpad}/qa-wt {branch}` (fetch `origin {branch}` first if the branch is not local).
 
+Cross-repo REPL tests run in a worktree of the consumer's default branch (`git -C {consumer_path} worktree add --detach {scratchpad}/qa-consumer-{slug} origin/{default}`), with the dependency redirected to this branch's worktree **in that worktree only** — e.g. for uv, a `[tool.uv.sources]` path entry (`{pkg} = { path = "{worktree}/{package_dir}", editable = true }`) in each pyproject that pins it, then `uv sync`. That redirect is a test harness and is never committed or pushed; the worktree is removed in step 3.6. Run consumer scripts with the consumer's `repl_command` (or its inferred one) from the consumer worktree.
+
 Write the unit test files into `{worktree}/ea_qa/` and each REPL script to `{scratchpad}/repl-{N}.txt`. Keep these files in sync with any fixes you make in the loop — the final, corrected versions go into the Draft Response (step 4).
 
 #### 3.2. Preconditions (per kind)
@@ -325,7 +345,7 @@ Each kind runs or is marked not-executed on its own; one kind being blocked neve
   ```
 
   If the connection is refused or the host is unresolvable, record `not executed — app unreachable at {base_url}` for the curl tests and skip their loop. Do not "fix" tests against a dead endpoint.
-- **unit / REPL:** if there are none of that kind, record `not executed — none generated`. If its command cannot run here (the tool call is denied in a confined run, or the command is not installed), record `not executed — {reason}` and leave the tests in the plan.
+- **unit / REPL:** if there are none of that kind, record `not executed — none generated` (a change to a public API always has at least a consumer REPL test). If its command cannot run here (the tool call is denied in a confined run, or the command is not installed), record `not executed — {reason}` and leave the tests in the plan.
 
 > The loop cannot start the app or obtain credentials itself. curl tests are best-effort against whatever is already running at `base_url`.
 
@@ -371,7 +391,7 @@ On hitting the cap, record the remaining failures with their last diagnosis.
 
 #### 3.6. Result and Cleanup
 
-Remove the worktree if you created one (`git -C {project_path} worktree remove --force {scratchpad}/qa-wt`). The corrected tests (with all test-defect fixes applied) are the versions that flow into the Draft Response. Record for step 4, **per kind** (curl, unit, REPL):
+Remove every worktree you created (`git -C {project_path} worktree remove --force {scratchpad}/qa-wt`, and each `qa-consumer-{slug}` from its consumer repo). Check `git -C {consumer_path} status` shows nothing from the harness. The corrected tests (with all test-defect fixes applied) are the versions that flow into the Draft Response. Record for step 4, **per kind** (curl, unit, REPL):
 - execution status: `ran` | `not executed — {reason}`
 - `{N} passed / {M} failed`
 - for each remaining failure: its classification (`real code bug` | `not executed — {reason}`) and detail.
@@ -410,8 +430,8 @@ Run from the branch root with `{test_command} ea_qa`.
 ### REPL Tests
 
 {for each REPL test, the fixed version:}
-#### AC {N}: {text}
-Run with `{repl_command}` from the branch root, script on stdin:
+#### AC {N}: {text} ({in-repo | consumer | cross-repo: {slug}})
+Run with `{repl_command}` from {the branch root | the {slug} worktree with {pkg} redirected to this branch}, script on stdin. {for a cross-repo test expected to fail until the consumer's change lands, say so}
 ```{language}
 {script}
 ```
