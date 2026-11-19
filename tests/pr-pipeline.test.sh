@@ -631,6 +631,8 @@ cat > "$TMP/bin/qa-unit" <<'EOF'
 ST=__ST__
 printf '%s|%s\n' "$PWD" "$*" > "$ST/unit.call"
 env > "$ST/unit.env"
+h="$(cat "$ST/hdr.path" 2>/dev/null)"; [ -n "$h" ] && [ -e "$h" ] && echo live > "$ST/unit.hdr"
+pgrep -f 'sleep 31[0-9]' >/dev/null && echo up > "$ST/unit.srv"
 d="${@: -1}"
 if grep -qx FAIL "$d"/*; then echo "1 failed"; exit 1; fi
 echo "1 passed"
@@ -646,7 +648,9 @@ case "$(cat "$ST/unit.call" 2>/dev/null)" in
   *) bad "unit call: $(cat "$ST/unit.call" 2>/dev/null)" ;;
 esac
 grep -qF 'Unit tests: passed' "$ST/pr-comment.md" && ok "comment reports the unit tests" || bad "comment: $(cat "$ST/pr-comment.md")"
-jq -r .markdown "$ST/slite-note.json" | grep -qx '1 passed' && ok "Slite note holds the unit test output" || bad "note: $(jq -r .markdown "$ST/slite-note.json")"
+jq -r .markdown "$ST/slite-note.json" | grep -qx 'Unit tests: passed' && ok "Slite note reports the unit tests" || bad "note: $(jq -r .markdown "$ST/slite-note.json")"
+jq -r .markdown "$ST/slite-note.json" | grep -qx '1 passed' && bad "raw unit output was published" || ok "raw unit output stays local"
+eq "raw unit output is kept locally" "1 passed" "$(cat "$PD/qa/unit.out" 2>/dev/null)"
 { [ ! -s "$ST/unit.env" ] || grep -qE "^(T_JIRA|T_SLITE)=" "$ST/unit.env"; } && bad "a credential env var reached the unit tests" || ok "unit tests get no credential env"
 qa_args="$(grep 'Write a QA plan' "$CLAUDE_ARGS")"
 printf '%s' "$qa_args" | grep -qE "Edit\(/$EA_AGENT_DIR/worktrees/[^ ]+/ea_qa/\*\*\)" && ok "QA run may write test files in ea_qa" || bad "no ea_qa Edit rule"
@@ -671,6 +675,7 @@ grep -qF 'Unit tests: not executed — ea_qa holds a link or special file' "$ST/
 qa_jira "$QA_AFTER"; run >/dev/null
 grep 'Write a QA plan' "$CLAUDE_ARGS" | grep -q 'ea_qa' && bad "QA run without qa.unit may write tests" || ok "without qa.unit, the QA run may write only its plan"
 grep -qF 'Unit tests:' "$ST/pr-comment.md" && bad "unit line without qa.unit" || ok "no unit line without qa.unit"
+
 
 echo "== QA server and auth"
 # Auth adapters: session prints a header and logs its argument; api_key fails.
@@ -735,6 +740,16 @@ eq "github job, undocumented QA: exits 0" 0 "$(run)"
 eq "PR comment only" "1|0" "$(commented)|$(grep -c . "$ST/curl.log" 2>/dev/null || echo 0)"
 grep -q 'Full plan' "$C" && bad "undocumented QA links a plan" || ok "no plan link without documentation"
 grep -q '^QA summary for acme/web#7$' "$C" && ok "github comment names the issue" || bad "comment: $(head -1 "$C")"
+
+printf '#!/bin/bash\nprintf "Cookie: SID=u\\n"\n' > "$TMP/bin/qa-unit-login"; chmod +x "$TMP/bin/qa-unit-login"
+QA_UNIT_SRV="qa: { document: true, server: { serve: \"exec sleep 313\", url: \"http://localhost:3999\" }, auth: { session: \"$TMP/bin/qa-unit-login\" }, unit: { command: \"$TMP/bin/qa-unit\" } }"
+qa_jira "{ mark_ready: true, ci: { fix_attempts: 0 }, $QA_UNIT_SRV }"
+QA=auth QA_UNIT=pass run >/dev/null
+[ -s "$ST/unit.call" ] && ok "unit tests ran after the HTTP checks" || bad "unit tests did not run"
+grep -qx "PASS: signed in" "$PD/qa/tests.out" && ok "the signed-in check used the headers" || bad "tests.out: $(cat "$PD/qa/tests.out")"
+[ -e "$ST/unit.hdr" ] && bad "auth headers were live during the unit run" || ok "auth headers are gone before the unit run"
+[ -e "$ST/unit.srv" ] && bad "the server was up during the unit run" || ok "the server is stopped before the unit run"
+grep -q "^TMPDIR=${TMPDIR:-/tmp}/*$" "$ST/unit.env" && bad "unit run shares the pipeline TMPDIR" || ok "unit run gets a private TMPDIR"
 
 echo "== transition + announce"
 JIRA_AGENT="$JIRA_AGENT

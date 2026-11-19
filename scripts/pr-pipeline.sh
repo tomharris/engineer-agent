@@ -446,6 +446,9 @@ ${unit_rule}End the file with the line 'QA-NONCE: ${nonce}'. ${NO_MEMORY_RULE} B
   else
     QA_AUTO="Automated: not executed — ${SERVE_ERR}"
   fi
+  # Model-written tests must not read the auth headers or reach the served app.
+  [ -z "$QA_AUTH_DIR" ] || { rm -rf "$QA_AUTH_DIR"; QA_AUTH_DIR=""; }
+  [ -z "$SRV" ] || { jobs_kill_tree "$SRV"; wait "$SRV" 2>/dev/null; SRV=""; }
   [ -z "$unit_cmd" ] || qa_unit "$unit_cmd"
   cleanup
 }
@@ -454,7 +457,7 @@ ${unit_rule}End the file with the line 'QA-NONCE: ${nonce}'. ${NO_MEMORY_RULE} B
 # wrote there, with an env holding no credentials. Model-written code: this is the one QA step
 # that executes it (see scheduled-jobs.md). A link or special file there refuses the run.
 qa_unit() {
-  local dir="$WT/$QA_UNIT_DIR" secs rc=0
+  local dir="$WT/$QA_UNIT_DIR" secs tmp rc=0
   if [ -n "$(find "$dir" ! -type f ! -type d -print -quit 2>/dev/null)" ]; then
     QA_UNIT="Unit tests: not executed — ${QA_UNIT_DIR} holds a link or special file"; QA_UNIT_STOP=refused; return
   fi
@@ -462,8 +465,10 @@ qa_unit() {
     QA_UNIT="Unit tests: not executed — the plan wrote none"; return
   fi
   secs="$(jobs_duration_seconds "$(_arc "$P.qa.unit.timeout")")"; secs="${secs:-600}"
+  tmp="$(mktemp -d)" || { QA_UNIT="Unit tests: not executed — no temp dir"; QA_UNIT_STOP=refused; return; }
   ( cd "$WT" && with_timeout "$secs" env -i PATH="$PATH" HOME="$HOME" USER="$USER" LANG="${LANG:-C.UTF-8}" \
-      TMPDIR="${TMPDIR:-/tmp}" bash -c "$1 $QA_UNIT_DIR" ) </dev/null > "$D/qa/unit.out" 2>&1 || rc=$?
+      TMPDIR="$tmp" bash -c "$1 $QA_UNIT_DIR" ) </dev/null > "$D/qa/unit.out" 2>&1 || rc=$?
+  rm -rf "$tmp"
   case "$rc" in
     0)   QA_UNIT="Unit tests: passed" ;;
     124) QA_UNIT="Unit tests: failed (timed out after ${secs}s)"; QA_UNIT_STOP=failed ;;
@@ -533,10 +538,8 @@ qa_note_md() {
     printf '```\n'
   fi
   [ -s "$D/qa/tests.out" ] && { printf '\n```\n'; _neutral < "$D/qa/tests.out"; printf '```\n'; }
-  if [ -n "$QA_UNIT" ]; then
-    printf '\n%s\n' "$QA_UNIT"
-    [ -s "$D/qa/unit.out" ] && { printf '\n```\n'; tail -n 60 "$D/qa/unit.out" | _neutral | head -c 6000; printf '\n```\n'; }
-  fi
+  # Only the status: raw output of model-written code stays in $D/qa/unit.out.
+  [ -z "$QA_UNIT" ] || printf '\n%s\n' "$QA_UNIT"
   printf '\n## Manual Checklist (skipped, unattended)\n\n'
   _section "$plan" "Manual Checklist" | sed -n 's/^- \[ \] //p' | _neutral | head -n 50 | sed 's/^/- [ ] /'
 }

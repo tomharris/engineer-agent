@@ -272,12 +272,13 @@ security → CI → browser → QA → ready → transition → announce. Things
   service changes have no endpoint, so without it their checks landed in the manual list. With
   `qa.unit.command` the QA run may also write files under `ea_qa/` in its own worktree (an `Edit`
   rule on that directory only), and bash runs `<command> ea_qa` there under `with_timeout`, with
-  `env -i` keeping only `PATH`, `HOME`, `USER`, `LANG`, `TMPDIR`: no credential env vars reach it.
+  `env -i` keeping only `PATH`, `HOME`, `USER`, `LANG` and a private `TMPDIR`: no credential env
+  vars reach it. The auth headers file is deleted and the server stopped before it starts.
   A link or special file in `ea_qa/` refuses the run and stops the pipeline. Residual, accepted:
   the tests run unconfined as you and can read files under `HOME`. That is the same reach as
   `serve`/`setup`, which already execute the branch's model-written code; the QA run's inputs (its
   worktree, the trust-checked ticket text, the diff) are no wider than the implementation's.
-  Output reaches the Slite note only neutralized and capped (last 60 lines, 6000 bytes).
+  Only its status line is published; the raw output stays in `state/pr-pipeline/<item>/qa/unit.out`.
 - **QA checks have their own server, and auth is a name, not a credential.** `qa.server` serves the
   branch for the checks without turning on the Chrome browser test (it falls back to `browser`).
   Its `url` may name any host, because bash pins that host to 127.0.0.1 with `--resolve`; `insecure`
