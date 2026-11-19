@@ -147,6 +147,10 @@ test it like any other.
 
 ### 4. Compose the `## Findings` Document
 
+Every sentence that will be posted follows `${CLAUDE_PLUGIN_ROOT}/references/writing-style.md`
+(fall back to `{this-skill-dir}/../../references/writing-style.md`): no em dashes, AI vocabulary,
+chatbot phrases or filler. The approval gate runs `scripts/draft-lint.sh` on the postable text.
+
 Write it into the queue item, replacing (or following) the `## Draft Response`:
 
 ```markdown

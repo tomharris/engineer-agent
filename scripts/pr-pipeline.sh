@@ -23,6 +23,7 @@ PLUGIN_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 . "${PLUGIN_ROOT}/scripts/lib-jira-api.sh"
 . "${PLUGIN_ROOT}/scripts/lib-slite-api.sh"
 . "${PLUGIN_ROOT}/scripts/lib-review.sh"
+. "${PLUGIN_ROOT}/scripts/lib-decision-log.sh"
 
 ITEM="" EXPECT_HEAD=""
 while [ $# -gt 0 ]; do
@@ -49,7 +50,15 @@ mkdir -p "$D" "$(dirname "$LOG_FILE")"
 
 log() { printf '%s pr-pipeline %s: %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${ITEM%.md}" "$*" >> "$LOG_FILE"; }
 push_ack() { "$NOTIFY" --fyi --title "engineer-agent" --priority "$1" --message "$2" </dev/null >>"$LOG_FILE" 2>&1 || true; }
-result() { printf '%s\t%s\n' "$1" "$2" > "$D/result"; log "result: $1 — $2"; }
+pushed_desc() { if [ -n "$NEW_SHA" ]; then printf 'pushed %s' "${NEW_SHA:0:7}"; else printf 'pushed nothing'; fi; }
+# decide <phase> <decision> <why> <evidence> <result> — one row in the item's decision log.
+decide() { dlog_row "$D/decisions.tsv" "$1" "$2" "$(printf '%s' "$3" | _neutral | cut -c1-200)" "$4" "$5"; }
+# result also closes the decision log and copies it into the completed item for the reviewer.
+result() {
+  printf '%s\t%s\n' "$1" "$2" > "$D/result"; log "result: $1 — $2"
+  decide result "$1" "$2" "${sha:+head ${sha:0:7}}" "$1"
+  dlog_attach "$D/decisions.tsv" "${AGENT_DIR}/queue/completed/${ITEM}"
+}
 # stop <message> — the one failure exit: record, push once, leave the PR in draft. For
 # pr_pipeline_resume_stopped: stopped_head is the branch tip now (resume once it moves) and
 # trusted_from the head this run started from, so every later push, the run's own fixes included,
@@ -98,6 +107,7 @@ IFS="	" read -r PR PR_URL PR_DRAFT BASE <<< "$pr"
 [[ "$BASE" =~ ^[A-Za-z0-9._][A-Za-z0-9._/-]*$ ]] || stop "unreadable PR base '${BASE}'"
 case "$PR_URL" in "https://github.com/${REPO}/pull/${PR}") ;; *) PR_URL="https://github.com/${REPO}/pull/${PR}" ;; esac
 log "PR #${PR} (${BRANCH}) in ${REPO}"
+decide start "pipeline on PR #${PR}" "draft PR opened by an autopilot run" "${REPO}#${PR} ${BRANCH}" "base ${BASE}"
 # The ticket comes from the bash-written ledger; its URL is built here, never read from a model.
 case "$TRACKER" in
   jira)
@@ -660,6 +670,8 @@ security_stage() {
       '[.[] | select([.title, (.file // "")] as $k | $d[0] | map([.title, .file]) | index([$k]) | not)]')"
     count="$(printf '%s' "$intro" | jq length)"
     log "security review ${round}: ${count} introduced, $(jq length "$D/security/skipped.json") skipped"
+    decide security "review ${round}" "security review of the head" "${sha:0:7} ${out}/report.md" \
+      "${count} to fix, $(jq length "$D/security/skipped.json") outside the diff, $(jq length "$D/security/ac-skipped.json" 2>/dev/null || echo 0) contradict the ticket, $(jq length "$D/security/declined.json") declined so far"
     [ "$count" -gt 0 ] || { REVIEWED_SHA="$sha"; return 0; }
     [ "$fixes" -lt "$tries" ] \
       || stop "security review: ${count} introduced finding(s) remain after ${fixes} fix attempt(s): $(printf '%s' "$intro" | jq -r '[.[].title] | join("; ")') — report: ${out}/report.md"
@@ -674,6 +686,8 @@ security_stage() {
         && mv "$D/security/declined.tmp" "$D/security/declined.json"
       log "security fix ${fixes}: $(printf '%s' "$dec" | jq length) finding(s) declined: $(printf '%s' "$dec" | jq -r '[.[] | "\(.title): \(.reason)"] | join("; ")' | _neutral | cut -c1-300)"
     fi
+    decide security "fix ${fixes}" "${count} introduced finding(s)" "${sha:0:7}" \
+      "$(pushed_desc), $(printf '%s' "$dec" | jq length) declined"
     if [ -z "$NEW_SHA" ]; then
       [ "$(printf '%s' "$dec" | jq length)" = "$count" ] || stop "security fix attempt ${fixes} pushed nothing"
       REVIEWED_SHA="$sha"; return 0
@@ -711,14 +725,18 @@ while :; do
   while :; do
     ci="$(ci_wait "$sha")"
     log "CI on ${sha:0:7}: ${ci}"
+    decide ci "CI ${ci}" "checks on the PR head" "${sha:0:7}" \
+      "$([ "$ci" = fail ] && cut -f2 "$D/ci.fail" 2>/dev/null | paste -sd, - | _neutral | cut -c1-200)"
     [ "$ci" = fail ] && [ "$n" -lt "$attempts" ] || break
     n=$((n+1))
     ci_logs
     MERGE_BASE=0
     if base_conflicts "$sha"; then
       MERGE_BASE=1; log "CI failed and ${sha:0:7} conflicts with origin/${BASE}: the fix run merges it first"
+      decide ci "merge origin/${BASE} in the fix run" "the head conflicts with its base" "${sha:0:7}" "merge started"
     fi
     fix_run "CI failed on pull request #${PR} for branch ${BRANCH}. The failing checks and the tail of their logs are in ${D}/ci-failure.log — read it first."
+    decide ci "fix ${n} of ${attempts}" "CI failed" "${sha:0:7} ${D}/ci-failure.log" "$(pushed_desc)"
     MERGE_BASE=0
     [ -n "$NEW_SHA" ] || stop "CI failed and fix attempt ${n} pushed nothing"
     sha="$NEW_SHA"
@@ -737,7 +755,7 @@ done
 if [ -n "$(_arc "$P.browser.serve")" ]; then
   browser_test
   case "$BT" in
-    pass) log "browser test passed" ;;
+    pass) log "browser test passed"; decide browser "browser test" "after_pr.browser.serve set" "${sha:0:7} ${D}/browser-report.md" pass ;;
     fail) stop "browser test failed — report: ${D}/browser-report.md" ;;
     *)    stop "browser test could not run: ${BT}" ;;
   esac
@@ -784,7 +802,7 @@ if [ -n "$tr_name" ] && [ "$TRACKER" = jira ]; then
   else
     TMPD="$D"; jira_transition_by_name "$KEY" "$tr_name"; rc=$?
     case "$rc" in
-      0) log "moved ${KEY} to ${tr_name}" ;;
+      0) log "moved ${KEY} to ${tr_name}"; decide after-ready "moved ${KEY} to ${tr_name}" "after_pr.transition" "${KEY}" done ;;
       4) push_ack normal "⚠️ ${KEY}: no \"${tr_name}\" transition from its current status; move it yourself: ${TICKET_URL}" ;;
       *) push_ack urgent "⚠️ ${KEY}: moving to \"${tr_name}\" failed (HTTP ${JIRA_HTTP}): ${TICKET_URL}" ;;
     esac
@@ -823,10 +841,11 @@ if [ -n "$channel" ]; then
     w="$(_arc "projects.${SLUG}.slack.workspace")"; [ -n "$w" ] || w="$(_arc agent.slack.workspace)"
     ea_slack_bin "$(_arc agent.slack.method)" "$(_arc agent.slack.bin)" "$w"
     if with_timeout "$GH_TIMEOUT" "$SLACK_BIN" send "$channel" "$text" --json ${SLACK_WS[@]+"${SLACK_WS[@]}"} >>"$LOG_FILE" 2>&1; then
-      log "announced in ${channel}: ${text}"
+      log "announced in ${channel}: ${text}"; decide after-ready "announced in ${channel}" "after_pr.announce" "PR #${PR}" done
     else
       push_ack urgent "⚠️ ${KEY}: Slack announce failed — post it yourself: ${text}"
     fi
   fi
 fi
+dlog_attach "$D/decisions.tsv" "${AGENT_DIR}/queue/completed/${ITEM}"   # the after-ready rows
 exit 0

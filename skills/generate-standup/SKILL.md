@@ -61,6 +61,10 @@ Check for:
 
 ### 5. Write the Draft
 
+Every sentence that will be posted follows `${CLAUDE_PLUGIN_ROOT}/references/writing-style.md`
+(fall back to `{this-skill-dir}/../../references/writing-style.md`): no em dashes, AI vocabulary,
+chatbot phrases or filler. The approval gate runs `scripts/draft-lint.sh` on the postable text.
+
 Create a queue item in `~/.local/share/engineer-agent/queue/drafts/`:
 
 **Filename:** `{YYYYMMDD-HHmmss}-standup.md`

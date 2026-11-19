@@ -205,6 +205,14 @@ reader will otherwise "fix" back:
   `--ignore-scripts`: it breaks packages that need postinstall. An OS sandbox would be the real fix.
 - **`pr-ready` is its own tier**, since ready-for-review notifies reviewers. Without it the pipeline
   pushes that the PR passed and leaves it draft. It never moves the board status.
+- **Decision log (`lib-decision-log.sh`).** The implementation run and the pipeline append rows
+  (ts, phase, decision, why, evidence, result) to `state/pr-pipeline/<item>/decisions.tsv`: the base
+  and validate command, each CI result, base merge, fix run and the sha it pushed, each security
+  round's counts, the browser verdict, the outcome and the after-ready steps. Every `result` (and the
+  end of the run) rewrites a trailing `## Decision Log` table into `completed/<item>`, so whoever
+  reviews the PR can see why the run did what it did without reading `jobs.log`. Rows are bash
+  facts, never the model's account; text from outside bash (check names, stop reasons) goes through
+  `_neutral`, because `codify` runs read completed items. Append-only: a resumed run adds rows.
 - **A stop leaves the claim.** Unlike a failed implementation, the PR exists, so `on_fail` does not
   apply.
 - **A stop resumes on new commits.** A stop after the run has started writes two files under

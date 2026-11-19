@@ -68,6 +68,7 @@ and re-asking Phase B would pay twice to re-litigate it.
 | `lib-typesafe.sh` | a minimal System One client: fixed yes/no questions in, floats out. NOT a general LLM client |
 | `lib-secret.sh` / `setup-credentials.sh` | resolve (read-only) and store the Jira / Slite / TypeSafe API credentials |
 | `queue-status.sh` / `queue-list.sh` | the data behind `status` / `review-queue` |
+| `draft-lint.sh` | writing-style flags on a draft's postable text, shown by `review-queue` |
 
 > **`ea-config.sh dump` emits a CURATED view and deliberately omits `agent.notify.ntfy.*`.** On
 > public ntfy.sh the `command_topic` is effectively a password for remote approval, and a poller

@@ -230,6 +230,11 @@ eq "the trusted ticket text is kept for the review guard" "$(printf '# Fix BILL-
   "$(cat "$EA_AGENT_DIR/state/pr-pipeline/${ITEM%.md}/ticket.md" 2>/dev/null)"
 eq "in-flight marker present during the run" "${ITEM} markers=bill" "$(cat "$CLAUDE_LOG")"
 eq "in-flight marker removed after" "" "$(ls "$EA_AGENT_DIR/state/implement-inflight" 2>/dev/null)"
+DLT="$EA_AGENT_DIR/state/pr-pipeline/${ITEM%.md}/decisions.tsv"
+eq "decision log: start and outcome rows" "implement|start unattended run|implement|run completed" \
+  "$(awk -F'\t' 'NR > 1 { printf "%s|%s|", $2, $3 }' "$DLT" 2>/dev/null | sed 's/|$//')"
+eq "decision log: the unattended row names its gate" "implement-next, trusted author" "$(awk -F'\t' 'NR == 2 { print $4 }' "$DLT" 2>/dev/null)"
+eq "decision log attached to the completed item" "## Decision Log" "$(grep '^## ' "$Q/completed/$ITEM" | tail -1)"
 grep -q "Autopilot implemented BILL-1" "$NOTIFY_LOG" && ok "success push" || bad "success push"
 for r in "Bash(gh issue view" "Bash(gh pr view" "Bash(gh pr list" "mcp__atlassian" "Bash(curl"; do
   grep -qF -- "$r" "$CLAUDE_ARGS" && bad "unattended run grants $r" || ok "unattended run omits $r"
@@ -242,6 +247,10 @@ eq "claim rolled back" "|To Do" "$(state BILL-1)"
 case "$(drafts)" in *-ticket-BILL-1.md) ok "item left in drafts/" ;; *) bad "drafts/ holds [$(drafts)]" ;; esac
 grep -q "urgent.*Autopilot failed on BILL-1\|Autopilot failed on BILL-1.*urgent" "$NOTIFY_LOG" && ok "urgent failure push" || bad "urgent failure push"
 grep -q "did not complete; claim rolled back" "$TMP/errors" && ok "error recorded for the receipt" || bad "error recorded"
+F="$(drafts)"
+eq "decision log: a run with no completed/ record is logged as failed" "failed" \
+  "$(awk -F'\t' 'END { print $6 }' "$EA_AGENT_DIR/state/pr-pipeline/${F%.md}/decisions.tsv" 2>/dev/null)"
+eq "decision log: nothing attached to the draft" 0 "$(grep -c '^## Decision Log$' "$Q/drafts/$F")"
 
 reset; write_config "[implement, jira-claim]"; touch "$ST/race_on_put"
 run_job; eq "lost race exits ok" "0" "$?"

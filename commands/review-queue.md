@@ -115,6 +115,11 @@ Read the selected file completely and display:
 - The `## Context` section with source details
 - The `## Draft Response` section with the full proposed content
 - The source URL for reference
+- **Writing-style flags.** Run `${CLAUDE_PLUGIN_ROOT}/scripts/draft-lint.sh <file>`. It lints only
+  the text that will be posted. Exit 1 prints `rule<TAB>line<TAB>match` rows: show them under a
+  "Style flags" heading and offer to fix them as part of an Edit (see
+  `${CLAUDE_PLUGIN_ROOT}/references/writing-style.md`). They are advisory: never block approval on
+  them. Exit 0 shows nothing.
 
 ### 6. User Chooses Action
 

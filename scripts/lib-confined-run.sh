@@ -8,6 +8,8 @@
 
 # shellcheck source=lib-queue.sh
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-queue.sh"
+# shellcheck source=lib-decision-log.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-decision-log.sh"
 
 # NO_MEMORY_RULE — appended to every headless prompt below. A queue item is a fact about ONE
 # item; a memory is a belief applied to ALL future runs, so an unattended run must not write
@@ -266,6 +268,10 @@ run_ticket_implementation() {
   prepare_run_worktree "$project" "$wt"
   project_validate_command "$project"
   log "implementing ticket ${item} in isolated worktree ${wt} (project ${project}, base $(wt_base_desc)); build tools: ${build_rules[*]}; validate: ${VALIDATE_CMD:-none}"
+  local dlog="${PR_PIPELINE_DIR}/${item%.md}/decisions.tsv"
+  dlog_row "$dlog" implement "start $([ "$unattended" = 1 ] && echo unattended || echo approved) run" \
+    "$([ "$unattended" = 1 ] && echo "implement-next, trusted author" || echo "Approve")" \
+    "base $(wt_base_desc)" "budget ${budget}, validate: ${VALIDATE_CMD:-none}"
   inflight_begin "$item" "$project"
 
   # Confined tool set: file edits + git + the narrow build rules + gh (draft PR) + mv
@@ -346,6 +352,14 @@ ${HANDOFF_PROMPT:-} ${NO_MEMORY_RULE} Be concise."
 
   # The ticket branch, read by bash rather than reported by the model, for pr-pipeline.sh.
   [ -e "${AGENT_DIR}/queue/completed/${item}" ] && record_ticket_branch "$item" "$wt"
+  local head_now; head_now="$(git -C "$wt" rev-parse --short HEAD 2>/dev/null)"
+  if [ -e "${AGENT_DIR}/queue/completed/${item}" ]; then
+    dlog_row "$dlog" implement "run completed" "completed/ record written" \
+      "$(head -1 "${PR_PIPELINE_DIR}/${item%.md}/branch" 2>/dev/null || echo "no branch recorded") @ ${head_now:-?}" completed
+    dlog_attach "$dlog" "${AGENT_DIR}/queue/completed/${item}"
+  else
+    dlog_row "$dlog" implement "run ended without a completed/ record" "no completed/ record" "HEAD ${head_now:-?}" failed
+  fi
 
   # Tear down the worktree regardless of outcome. The branch and any pushed commits / draft
   # PR persist in the repo; only the working copy is disposable.

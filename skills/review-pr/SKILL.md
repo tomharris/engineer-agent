@@ -117,6 +117,10 @@ For each finding, include:
 
 ### 6. Write the Draft
 
+Every sentence that will be posted follows `${CLAUDE_PLUGIN_ROOT}/references/writing-style.md`
+(fall back to `{this-skill-dir}/../../references/writing-style.md`): no em dashes, AI vocabulary,
+chatbot phrases or filler. The approval gate runs `scripts/draft-lint.sh` on the postable text.
+
 If working from a queue item, update the file:
 
 1. Add the `## Draft Response` section with the structured review
