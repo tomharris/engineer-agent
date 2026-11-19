@@ -84,6 +84,8 @@ read `projects.<project>.tracker`, or infer from `source` frontmatter (`github` 
   ```bash
   gh pr review {pr_number} --repo {repo} --{approve|comment|request-changes} --body "{review_body}"
   ```
+  `{review_body}` is the `## Draft Response` content up to, not including, `### Dismissed`
+  (approver-only notes; never post them).
 
 - **slack-question** — post the reply in the original thread via the effective Slack CLI.
   Resolve the binary (if `agent.slack.method` is `mcp-proxy` →
@@ -94,6 +96,8 @@ read `projects.<project>.tracker`, or infer from `source` frontmatter (`github` 
   ```bash
   <slack> send {channel_id} "{reply_text}" --thread {thread_ts or message_ts} -w {workspace} --json
   ```
+  `{reply_text}` is only the `### Proposed Slack Message` content; `### Confidence`,
+  `### Claims` and `### Unknowns` are approver-only.
   After the send succeeds, run `${CLAUDE_PLUGIN_ROOT}/scripts/slack-event.sh posted {filename}`.
   It swaps the status reaction and registers the thread for the `my-threads` watch; it always
   exits 0, so ignore its output. Pass only the queue filename: it reads the target from the
@@ -285,7 +289,8 @@ read `projects.<project>.tracker`, or infer from `source` frontmatter (`github` 
     pointer to the sibling `MEMORY.md` (create it if absent). If a memory file with the same
     `name` already exists, update it in place rather than duplicating.
   - `skill-note`: `Edit` the target `SKILL.md` at `codify_path` to append the proposed text to
-    the indicated section.
+    the indicated section, or, when the proposal is a `description:` line, replace the
+    frontmatter `description:` line with it.
   - `claude-md`: `Edit` the target `CLAUDE.md` at `codify_path` to add the proposed content.
   Confirm `codify_path` is within an expected location (a project `path`, a `skills/` dir, or a
   Claude Code `memory/` dir) before writing; if it looks wrong, leave the item in `drafts/`,

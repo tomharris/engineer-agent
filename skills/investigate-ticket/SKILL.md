@@ -139,6 +139,12 @@ Non-code sources are in scope when the ticket depends on them: the ticket's own 
 `gh issue view` for cross-referenced issues, and the repo's `CLAUDE.md` / ADRs / docs. Cite them the
 same way.
 
+Grade every claim per `${CLAUDE_PLUGIN_ROOT}/references/epistemics.md` (fall back to
+`{this-skill-dir}/../../references/epistemics.md`). A citation to code proves *what* it does; it is
+Direct evidence of *why* only when an author wrote the reason down (comment, commit, PR, ticket,
+doc). If the ticket proposes an answer ("we think it's the cache"), treat it as one hypothesis and
+test it like any other.
+
 ### 4. Compose the `## Findings` Document
 
 Write it into the queue item, replacing (or following) the `## Draft Response`:
@@ -159,12 +165,14 @@ Write it into the queue item, replacing (or following) the `## Draft Response`:
 the fact. Never open with "It depends"; if it depends, say what it depends on.}
 
 ### Evidence
-{Numbered claims, each with a file:line citation. This is the section that makes the document
-trustworthy — everything in Answer/Options/Recommendation must trace back to a line here.}
+{Numbered claims, each with a citation and its tier (Direct / Supported / Inferred /
+Speculative). This is the section that makes the document trustworthy — everything in
+Answer/Options/Recommendation must trace back to a line here, worded no more confidently than that
+line's tier.}
 
-1. {claim} — `path/to/file.rb:120-148`
-2. {claim} — `path/to/other.ts:31`
-3. {claim about history} — commit `a1b2c3d` ("{subject}")
+1. {claim} — `path/to/file.rb:120-148` (Direct)
+2. {claim} — `path/to/other.ts:31`, `path/to/caller.ts:88` (Supported)
+3. {claim about history} — commit `a1b2c3d` ("{subject}") (Inferred: {the chain})
 
 ### Options
 {REQUIRED for a decision-shaped ticket. Two or more real options; "do nothing" counts and is
@@ -180,8 +188,10 @@ what would change your mind. A recommendation that hedges across two options is 
 recommendation.}
 
 ### Open Questions
-{What you could not determine, and precisely why — the file you would need access to, the load
-test you would need to run, the person who knows. "Nothing" is a valid entry; vagueness is not.}
+{What you could not determine, and precisely why — what you searched (paths, `git log -S` terms,
+issues), the file you would need access to, the load test you would need to run, the person who
+knows. "Nothing" is a valid entry only if every Evidence line is Direct/Supported; vagueness is
+not.}
 
 ### Suggested Next Steps
 {Concrete follow-ups, each small enough to be a ticket. If the answer implies code work, say so

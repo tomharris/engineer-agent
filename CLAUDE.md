@@ -14,7 +14,7 @@ This repo IS the plugin. Dev: `claude --plugin-dir /path/to/engineer-agent`.
 commands/                   slash commands
 skills/                     skills by task type
 references/                 shared specs skills Read at runtime (routing-ladder.md, ticket-kind.md,
-                            queue-reconciliation.md); scripts/lib-routing.sh and
+                            queue-reconciliation.md, epistemics.md); scripts/lib-routing.sh and
                             lib-ticket-kind.sh implement their deterministic tiers
 hooks/hooks.json            turn-completion push hooks
 scripts/                    cron poll, ntfy notify/listener, collectors, jobs, setup, credentials

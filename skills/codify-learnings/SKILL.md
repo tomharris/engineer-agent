@@ -53,7 +53,24 @@ that cost real time, not one-offs:
 
 Discard anything already captured (check the target project's `CLAUDE.md`, its `memory/`
 index, and existing skill notes before proposing a duplicate — update-in-place beats a new
-duplicate).
+duplicate). If the existing guidance is there but was ignored because it is buried or weak, the
+candidate is a rewording/move of that text, not an addition.
+
+Then test each survivor; reject it, with one of these reason codes, if it fails:
+
+- `durability` — won't hold in 6 months (names a SHA, a line number, a tool version, a one-week
+  incident). Keep the pattern, drop the instance: "Slack shim exits 75 on expired Keychain
+  token" stays; "spy 0.4.2 crashed on Tuesday" goes.
+- `specificity` — a platitude ("test more carefully") or a fact too narrow to recognize again.
+- `decision-changing` — a future run would read it and do nothing differently.
+- `convergence` — seen in one item only, and it didn't cost real time. Signals across 2+ items
+  clear a lower bar on the other tests.
+- `already-covered` — duplicates clear, well-placed guidance; the failure was execution.
+- `structural` — a test, lint, script check or config validation could enforce it. Prose is
+  for what needs judgment. Don't draft it; list it under "Mechanisms" in the report with the
+  suggested check (e.g. "add a `tests/` case asserting X", "make `lib-foo.sh` reject Y").
+- `skill-not-used` — the friction was in a skill that never ran. If it *should* have run, don't
+  reject: propose a `skill-note` that rewrites that skill's `description:` so it triggers.
 
 ### 4. Classify Each Candidate
 
@@ -67,7 +84,8 @@ For each surviving learning, choose exactly one target:
   `MEMORY.md`.
 - **skill-note** — a reusable procedure or gotcha that belongs in an existing skill. Target
   the specific `skills/<name>/SKILL.md` and propose the exact text to append (e.g. a new
-  edge-case bullet).
+  edge-case bullet), or, for a skill that didn't trigger, the full replacement `description:`
+  line.
 - **claude-md** — a team convention or architecture decision. Target the project's
   `CLAUDE.md` (`projects.<slug>.path`/CLAUDE.md) and propose the exact addition.
 
@@ -117,3 +135,8 @@ perform the local file write on approval.
 Report: "Drafted {N} codify candidates ({X} memory-file, {Y} skill-note, {Z} claude-md).
 Review with `/engineer-agent review-queue` before anything is written." If no recurring
 signals were found, report that and write no drafts.
+
+Then, one line each:
+
+- **Mechanisms:** `{pattern}` → `{suggested test/lint/check}` (the `structural` rejects).
+- **Rejected:** `{pattern}` — `{reason code}`.

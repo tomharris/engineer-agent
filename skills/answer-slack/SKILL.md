@@ -58,18 +58,28 @@ Based on the question type:
 
 ### 3. Draft the Answer
 
+Read `${CLAUDE_PLUGIN_ROOT}/references/epistemics.md` (fall back to
+`{this-skill-dir}/../../references/epistemics.md`; never a bare relative path) and assign each
+substantive claim a tier before writing.
+
 Write a concise Slack-appropriate response:
 
 - **Be direct** — answer the question first, then provide context
 - **Keep it short** — 1-3 paragraphs for most answers
 - **Include code references** — link to specific files/lines when relevant
 - **Use Slack formatting** — `code blocks`, *bold* for emphasis, bullet lists
-- **Acknowledge uncertainty** — if you're not sure about something, say so
+- **Word each claim to its tier** — "because" only with a source; hedge Inferred claims; say
+  plainly what you couldn't determine. No tier labels in the message itself.
+- **Check, don't echo** — if the asker suggests an answer ("I assume it's for perf?"), verify it
+  independently and say if the evidence points elsewhere.
 
 If the question cannot be answered confidently:
 - Draft a response that says what you do know
 - Flag what's uncertain
 - Set priority to `urgent` so the human reviews it quickly
+
+Overall confidence is the tier of the claim the answer rests on: `high` = Direct/Supported,
+`medium` = Inferred, `low` = Speculative/Unknown.
 
 ### 4. Write the Draft
 
@@ -88,11 +98,20 @@ Update the queue item file:
 
 {high | medium | low} — {brief explanation of confidence level}
 
-### Sources
+### Claims
 
-- {file or link referenced}
-- {another source}
+| Claim | Tier | Source |
+|---|---|---|
+| {claim the message makes} | Direct / Supported / Inferred / Speculative | {file:line, commit, PR, ticket, or "—"} |
+
+### Unknowns
+
+{What couldn't be determined: sources searched and search terms. "None" only if every claim is
+Direct/Supported.}
 ```
+
+The `### Claims` table is for the approver, not Slack: it lets them spot an under-sourced claim
+before posting.
 
 2. Update frontmatter `status` to `drafted`
 3. If confidence is low, update `priority` to `urgent`
