@@ -1177,6 +1177,7 @@ scripts/
   poll-github-prs.sh           Deterministic GitHub PR collector
   queue-status.sh              Queue counts / poll times / receipt health
   queue-list.sh                Sorted review-queue table
+  draft-lint.sh                Flags AI-writing tells in a draft's postable text (review-queue)
   queue-dedup-check.sh         Asserts (and with --heal, resolves) the one-item-per-(type, source_id) invariant
   queue-heal-stranded.sh       Moves finished drafts out of incoming/, where no approval path can see them
   lib-*.sh                     Shared libraries (yaml, time, queue, routing, ticket-kind, state)
@@ -1207,6 +1208,7 @@ references/
   ticket-kind.md               Shared code-work vs investigation logic (same callers + review-queue)
   queue-reconciliation.md      Shared skip/update/create rule every poller follows
   epistemics.md                Confidence tiers for evidence-based answers (answer-slack, investigate-ticket)
+  writing-style.md             Style rules for posted text (drafting skills, draft-lint.sh)
 hooks/
   hooks.json                   Claude Code hook registrations (turn-completion pushes)
 scripts/
@@ -1220,6 +1222,7 @@ scripts/
   job-slack-cr-qa.sh           slack/cr-qa job: review + QA a requested PR
   lib-cr-qa.sh                 cr-qa request parsing, review, QA and comment helpers
   lib-review.sh                Review helpers shared by pr-pipeline.sh, implement-next and cr-qa
+  lib-decision-log.sh          Append-only decisions.tsv for autopilot runs, copied into the completed item
   slack-event.sh               Slack status reactions + watched-thread registry for a queue item
   lib-jobs.sh                  Job config validation, due/window checks, per-job state
   lib-assign-rules.sh          Jira implement-next rules: validation, predicates, first-match selection

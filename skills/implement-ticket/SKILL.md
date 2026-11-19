@@ -121,7 +121,8 @@ git checkout -b {branch_name}
 
 Implement the ticket **yourself, iteratively, in this session** — plan → edit → run the tests
 → read failures → fix → repeat. Treat "up to ~10 passes" and "done when all acceptance criteria
-are met and the tests pass" as your own stopping condition; there is no external loop driving you.
+are met and the tests pass" as your own stopping condition (made precise in **Exit condition**
+below); there is no external loop driving you.
 
 > **Do NOT invoke `/ralph-loop` here.** Ralph Loop is an *interactive, human-typed* convenience: the
 > command is hidden from the SlashCommand tool (a model literally cannot call it), its setup writes
@@ -171,9 +172,22 @@ not a pass: say which ones and why, and set the result to `partial`. Never claim
 without its output (a `php -l` "pass" reported without running `php` shipped a parse error that
 failed every CI job).
 
-Stop when the acceptance criteria are met and tests pass, or when you have made your best iterations
-and something genuinely blocks completion (record that as partial in the next step — do not loop
-forever or fabricate completion).
+**Exit condition — write it down before the first edit.** From the Definition of done and the
+acceptance criteria, state a checkable predicate: the exact command(s) that must pass (the run's
+validate command when it names one) plus each criterion you can check. Every pass then:
+
+1. Makes the smallest change the last failure justifies.
+2. Re-checks the predicate. A pass that moved it (a criterion met, fewer failing tests, a new error
+   *past* the old one) is progress: commit it.
+3. A pass that didn't move it is reverted with `git restore <files>` (the only revert verb a
+   confined run has; `git checkout --` is denied). Don't leave speculative "might help" edits in
+   the tree.
+
+Stop when the predicate holds, or after **two consecutive passes with no progress** — you are
+stuck, so stop and record it as `partial` with the failing check and what you tried. Never relax
+the predicate to finish: no skipping, deleting or loosening a test, lint rule or type check, and no
+narrowing an acceptance criterion. The ~10-pass ceiling still applies; two stuck passes end the run
+sooner.
 
 ### 4. Self-Review the Diff
 

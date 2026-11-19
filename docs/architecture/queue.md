@@ -122,5 +122,9 @@ Body sections:
   posted: a `pr-review`'s trailing `### Dismissed` (findings filtered out, with the rule that
   dropped each) and a `slack-question`'s `### Confidence` / `### Claims` / `### Unknowns`
   (per-claim confidence tiers from `references/epistemics.md`); only `### Proposed Slack Message`
-  is sent.
+  is sent. `review-queue` runs `scripts/draft-lint.sh` over that postable text and shows its
+  writing-style flags (advisory, per `references/writing-style.md`).
+- `## Decision Log` — autopilot items only, always last, written by bash into `completed/<item>`
+  from `state/pr-pipeline/<item>/decisions.tsv` (see `scheduled-jobs.md` → `after_pr`). Rewritten
+  in place on each update, never stacked.
 

@@ -58,6 +58,10 @@ Based on the question type:
 
 ### 3. Draft the Answer
 
+Every sentence that will be posted follows `${CLAUDE_PLUGIN_ROOT}/references/writing-style.md`
+(fall back to `{this-skill-dir}/../../references/writing-style.md`): no em dashes, AI vocabulary,
+chatbot phrases or filler. The approval gate runs `scripts/draft-lint.sh` on the postable text.
+
 Read `${CLAUDE_PLUGIN_ROOT}/references/epistemics.md` (fall back to
 `{this-skill-dir}/../../references/epistemics.md`; never a bare relative path) and assign each
 substantive claim a tier before writing.

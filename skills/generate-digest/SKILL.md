@@ -51,6 +51,10 @@ Scan all queue directories for items from the current day (or since the last dig
 
 ### 4. Write the Draft
 
+Every sentence that will be posted follows `${CLAUDE_PLUGIN_ROOT}/references/writing-style.md`
+(fall back to `{this-skill-dir}/../../references/writing-style.md`): no em dashes, AI vocabulary,
+chatbot phrases or filler. The approval gate runs `scripts/draft-lint.sh` on the postable text.
+
 Create a queue item in `~/.local/share/engineer-agent/queue/drafts/`:
 
 **Filename:** `{YYYYMMDD-HHmmss}-digest.md`

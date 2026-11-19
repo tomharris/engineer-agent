@@ -422,6 +422,9 @@ reset; write_config '["pr-ready", "security-review"]' "$SEC"
 echo '[{"title":"x","severity":"low","file":"a.txt"}]' > "$ST/secrev.1.json"
 eq "a security fix that pushes nothing stops" 1 "$(FIX=none run)"
 eq "reason recorded" "stopped	security fix attempt 1 pushed nothing" "$(cat "$PD/result")"
+eq "decision log: the review, the empty fix and the stop" "security|review 1|1 to fix|security|fix 1|pushed nothing, 0 declined|result|stopped|security fix attempt 1 pushed nothing" \
+  "$(awk -F'\t' 'NR > 2 { printf "%s|%s|%s|", $2, $3, ($2 == "result" ? $4 : $6) }' "$PD/decisions.tsv" | sed 's/|$//; s/|1 to fix, [^|]*|/|1 to fix|/')"
+grep -c '^## Decision Log$' "$Q/completed/$ITEM" | grep -qx 1 && ok "decision log attached on a stop" || bad "no decision log on stop"
 reset; write_config '["pr-ready", "security-review"]' "$SEC"
 echo '[{"title":"x","severity":"low","file":"a.txt"},{"title":"y","severity":"low","file":"a.txt"}]' > "$ST/secrev.1.json"
 eq "a security fix that declines every finding and pushes nothing goes ready" "0|ready|1" \
@@ -805,6 +808,14 @@ eq "one fix run" 1 "$(fix_runs)"
 grep -q 'log of run 77: expected 1 got 2' "$PD/ci-failure.log" && ok "failed run log handed to the fix run" || bad "log: $(cat "$PD/ci-failure.log")"
 grep -q 'FAILED CHECK: test' "$PD/ci-failure.log" && ok "failing check named" || bad "check name missing"
 grep -q 'merge of origin/main' "$CLAUDE_ARGS" && bad "a branch that merges cleanly got a base merge" || ok "no base merge without conflicts"
+DL="$(awk '$0 == "## Decision Log" {f=1} f' "$Q/completed/$ITEM")"
+printf '%s\n' "$DL" | grep -q '^| [0-9TZ:-]* | ci | CI fail | checks on the PR head | [0-9a-f]\{7\} | test |$' \
+  && ok "decision log: the failing check" || bad "decision log: $DL"
+printf '%s\n' "$DL" | grep -q '| ci | fix 1 of 1 | CI failed | [0-9a-f]\{7\} .*ci-failure.log | pushed [0-9a-f]\{7\} |$' \
+  && ok "decision log: the fix run and the commit it pushed" || { bad "decision log fix row"; printf "%s\n" "$DL" | grep fix; }
+printf '%s\n' "$DL" | grep -q '| result | ready | PR #42 marked ready for review | head [0-9a-f]\{7\} | ready |$' \
+  && ok "decision log: the outcome" || bad "decision log: $DL"
+grep -q 'merge origin/main' "$PD/decisions.tsv" && bad "decision log: base merge without conflicts" || ok "decision log: no base merge row"
 
 reset; write_config '["pr-ready"]'
 main0="$(git --git-dir="$ORIGIN" rev-parse refs/heads/main)"
@@ -818,6 +829,8 @@ eq "the fix run starts inside the base merge, with the conflict unresolved" a.tx
 grep -q 'A merge of origin/main into this branch is in progress' "$CLAUDE_ARGS" && grep -q "$PD/merge-conflicts.txt" "$CLAUDE_ARGS" \
   && ok "the fix run is told to finish the merge" || bad "merge not in the fix prompt"
 eq "conflicting files listed" a.txt "$(cat "$PD/merge-conflicts.txt" 2>/dev/null)"
+cut -f2- "$PD/decisions.tsv" | tr '\t' '|' | grep -qx 'ci|merge origin/main in the fix run|the head conflicts with its base|[0-9a-f]\{7\}|merge started' \
+  && ok "decision log: the base merge" || { bad "decision log base merge"; cat "$PD/decisions.tsv"; }
 git --git-dir="$ORIGIN" merge-base --is-ancestor "$main1" "refs/heads/$BR" && ok "the pushed head contains the base" || bad "base not merged into the pushed head"
 git --git-dir="$ORIGIN" update-ref refs/heads/main "$main0"
 
