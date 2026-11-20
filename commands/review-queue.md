@@ -199,11 +199,24 @@ After the three QA phases complete, update the file's frontmatter `status` to `c
      - The generated `qa-test.sh` script inlined in a fenced ```bash code block.
      - The execution results — the `results.md` content saved in Phase 3 (stdout, pass/fail
        counts, manual checklist status, notes on failed items).
+
+     Readers of the note cannot see this machine, so every script and test file appears in
+     full in its own fenced code block: `qa-test.sh`, each `ea_qa/` file and each REPL script.
+     Never replace one with a summary, an excerpt, or a pointer to a local path (the archive
+     directory, `{scratchpad}/repl-{N}.txt`, a worktree). Do not shorten the record to fit;
+     use step 4's append path instead.
   4. Call `mcp__slite__create-note` with:
      - title: `QA Plan: {ticket-key} — {title} ({branch})`
      - parent: the resolved parent id from step 2
      - content: the composed record from step 3
-  5. On success, print: `QA plan documented to Slite: {note_url}`.
+
+     For a long record, create the note with the header and test plan prose, then add each
+     code block with `mcp__slite__append-blocks` (one call per script or test file) under its
+     heading.
+  5. Read the note back with `mcp__slite__get-note` (format `md`). If it contains
+     `~/.local/share/engineer-agent`, `/Users/`, `{scratchpad}` or `repl-` file names, or is
+     missing any script or test file from step 3, fix it in place before reporting.
+  6. On success, print: `QA plan documented to Slite: {note_url}`.
      On any failure (channel resolution or note creation), print a warning with the error
      and continue — the plan remains completed and locally archived.
 
