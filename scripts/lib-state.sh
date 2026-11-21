@@ -48,7 +48,7 @@ state_list() {
 # state_set <a|b|c> <value> — set or replace a scalar, creating parents implicitly.
 state_set() {
   local path="$1" val="$2"
-  EA_STATE="$(printf '%s\n' "$EA_STATE" | grep -v -x -F "${path}={{X}}" | awk -v p="${path}=" 'index($0,p)!=1')"
+  EA_STATE="$(grep -v -x -F "${path}={{X}}" <<< "$EA_STATE" | awk -v p="${path}=" 'index($0,p)!=1')"
   EA_STATE="${EA_STATE}
 ${path}=${val}"
 }
@@ -61,7 +61,7 @@ ${path}=${val}"
 # filesystem lookup in lib-queue.sh is what actually enforces one-item-per-source_id.
 state_list_add() {
   local path="$1" item="$2"
-  printf '%s\n' "$EA_STATE" | grep -q -x -F "${path}[]=${item}" && return 0
+  grep -q -x -F "${path}[]=${item}" <<< "$EA_STATE" && return 0
   EA_STATE="${EA_STATE}
 ${path}[]=${item}"
 }

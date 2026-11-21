@@ -81,8 +81,8 @@ _tracker() {
   local slug="$1" t
   t="$(_get "projects.${slug}.tracker")"
   if [ -n "$t" ]; then printf '%s' "$t"; return 0; fi
-  if printf '%s\n' "$YAML_DUMP_CACHE" | grep -q "^projects\.${slug}\.jira{}$"; then printf 'jira'; return 0; fi
-  if printf '%s\n' "$YAML_DUMP_CACHE" | grep -q "^projects\.${slug}\.github\.issues{}$"; then printf 'github-issues'; return 0; fi
+  if grep -q "^projects\.${slug}\.jira{}$" <<< "$YAML_DUMP_CACHE"; then printf 'jira'; return 0; fi
+  if grep -q "^projects\.${slug}\.github\.issues{}$" <<< "$YAML_DUMP_CACHE"; then printf 'github-issues'; return 0; fi
   printf 'none'
 }
 
@@ -116,7 +116,7 @@ _source_state() {
       [ "$tracker" = "jira" ] || { printf 'skipped:tracker is %s, no jira section' "$tracker"; return 0; }
       printf 'configured' ;;
     slite)
-      printf '%s\n' "$YAML_DUMP_CACHE" | grep -q "^projects\.${slug}\.slite{}$" || { printf 'skipped:no slite section configured'; return 0; }
+      grep -q "^projects\.${slug}\.slite{}$" <<< "$YAML_DUMP_CACHE" || { printf 'skipped:no slite section configured'; return 0; }
       [ -n "$(_list "projects.${slug}.slite.doc_labels")" ] || { printf 'skipped:slite.doc_labels is empty'; return 0; }
       printf 'configured' ;;
     *) printf 'skipped:unknown source' ;;

@@ -44,14 +44,14 @@ jobs_duration_seconds() {
 # jobs_autonomy_allows <tier> — rc 0 if the tier is in agent.autonomy.auto_execute (deny-by-default).
 jobs_autonomy_allows() {
   jobs_cfg_load
-  printf '%s\n' "$EA_JOBS_CFG" | grep -qxF "agent.autonomy.auto_execute[]=$1"
+  grep -qxF "agent.autonomy.auto_execute[]=$1" <<< "$EA_JOBS_CFG"
 }
 
 jobs_cfg_load() {
   [ -n "${EA_JOBS_CFG:-}" ] && return 0
   EA_JOBS_CFG="$("${_jobs_script_dir}/ea-config.sh" dump 2>/dev/null)"
 }
-_jcfg()  { printf '%s\n' "$EA_JOBS_CFG" | awk -F= -v k="$1" '$1==k {sub(/^[^=]*=/,""); gsub(/\|/,"?"); print; exit}'; }
+_jcfg()  { awk -F= -v k="$1" '$1==k {sub(/^[^=]*=/,""); gsub(/\|/,"?"); print; exit}' <<< "$EA_JOBS_CFG"; }
 _jcfgl() { printf '%s\n' "$EA_JOBS_CFG" | awk -v p="$1[]=" 'index($0,p)==1 {print substr($0,length(p)+1)}' | tr '|' '?' | paste -sd, -; }
 
 # jobs_enumerate — one '|'-separated row per configured job (not tab: `read` collapses empty

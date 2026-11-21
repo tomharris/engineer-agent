@@ -58,7 +58,7 @@ if [ "$EVENT" = posted ] && [[ "$PROJECT" =~ ^[a-z0-9_-]+$ ]]; then
 fi
 
 # --- reaction --------------------------------------------------------------------------------------
-printf '%s\n' "$CFG" | grep -qxF 'agent.autonomy.auto_execute[]=slack-react' || exit 0
+grep -qxF 'agent.autonomy.auto_execute[]=slack-react' <<< "$CFG" || exit 0
 EMOJI_RE='^[a-z0-9_+-]+$'
 emoji="$(cfg "agent.slack.reactions.${EVENT}")"
 [ -n "$emoji" ] || exit 0
