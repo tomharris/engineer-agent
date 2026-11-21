@@ -324,14 +324,15 @@ shared.
 
 - **Eligibility**: every rule must set `require.reopened_with_feedback: true` (and may not set
   `no_linked_pr`, which the merged PR always fails). It passes when the latest `ReopenedEvent` has no
-  `ClosedEvent` after it and at least one comment was posted after it. It is re-checked on the
-  handler's own fetch.
+  `ClosedEvent` after it and at least one comment was posted after the close it undid (not after the
+  reopen: "Reopen with comment" stamps the comment at, or a second before, the reopen). It is
+  re-checked on the handler's own fetch.
 - **Identity**: `source_id` is `<owner/repo#N>@reopen-<epoch of the reopen>`, so the absorbing
   terminal rule (`references/queue-reconciliation.md`) still holds per reopen cycle: the same reopen
   is never picked twice, a later reopen is a new item. The ledger keeps the plain key, so
   `gh-claim.sh` (which accepts the `@reopen-<digits>` form) and `pr-pipeline.sh` need nothing new.
 - **Text and trust**: one fetch (`gr_issue_feedback_fetch`) supplies the item's `## Feedback` section
-  (comments after the reopen), `ticket.md` for the review guard, and both trust checks. Unattended
+  (comments since that close), `ticket.md` for the review guard, and both trust checks. Unattended
   needs the usual issue checks plus `gr_feedback_untrusted_reason`: the reopener and every author and
   editor of a feedback comment trusted. A comment list truncated past the reopen, or a truncated
   comment edit history, fails closed.

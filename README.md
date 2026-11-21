@@ -958,11 +958,11 @@ GitHub `implement-next` (`integration: github-issues`) does the same for GitHub 
 GitHub `address-feedback` (`integration: github-issues`, `action: address-feedback`) runs the same
 way for an issue that was implemented, closed, then **reopened with feedback comments**. Every rule
 needs `require.reopened_with_feedback: true` (the latest reopen has no close after it and at least
-one comment after it); the other predicates except `no_linked_pr` still apply. Differences:
+one comment was posted since the close it undid, which includes "Reopen with comment"); the other predicates except `no_linked_pr` still apply. Differences:
 
 - Each reopen is picked once (the item's `source_id` is `owner/repo#N@reopen-<epoch>`).
-- The comments since the reopen go into the item's `## Feedback` section, and for an unattended run
-  the reopener and every comment author and editor since the reopen must be in `trusted_authors`.
+- The comments since that close go into the item's `## Feedback` section, and for an unattended run
+  the reopener and every author and editor of those comments must be in `trusted_authors`.
 - If the original PR is still open (same repo, not a fork, branch under `agent.branch_prefix`, and
   every push to that branch was yours per the repository activity API) the fix is pushed to its
   branch; otherwise a new `<prefix>/issue-N-<slug>-feedback-<epoch>` branch

@@ -203,9 +203,10 @@ _gr_facts() {
         elif (.xrefs.totalCount // 0) > (.xrefs.nodes | length) then "unknown"
         else "\(.closedByPullRequestsReferences.totalCount) \(.linkedBranches.totalCount // 0) \([.xrefs.nodes[]? | select(.source.state? == "OPEN")] | length)" end),
     (([.reopens.nodes[]? | select(.__typename == "ReopenedEvent") | .createdAt] | max // "") as $r
+     | ([.reopens.nodes[]? | select(.__typename == "ClosedEvent" and .createdAt <= $r) | .createdAt] | max // $r) as $w
      | l("reopened_at"; $r),
        l("closed_after_reopen"; $r != "" and ([.reopens.nodes[]? | select(.__typename == "ClosedEvent" and .createdAt > $r)] | length) > 0),
-       l("feedback_count"; if $r == "" then 0 else [.comments.nodes[]? | select(.createdAt > $r)] | length end))
+       l("feedback_count"; if $r == "" then 0 else [.comments.nodes[]? | select(.createdAt > $w)] | length end))
   ' "$1"
 }
 
@@ -289,7 +290,7 @@ gr_eval() {
   if [ "$(_arc "$p.require.reopened_with_feedback")" = true ]; then
     [ -n "$(_ar_fact "$facts" reopened_at)" ] || { echo "reopened_with_feedback: never reopened"; return 1; }
     [ "$(_ar_fact "$facts" closed_after_reopen)" = false ] || { echo "reopened_with_feedback: closed again since the last reopen"; return 1; }
-    [ "$(_ar_fact "$facts" feedback_count)" -gt 0 ] 2>/dev/null || { echo "reopened_with_feedback: no comment since the last reopen"; return 1; }
+    [ "$(_ar_fact "$facts" feedback_count)" -gt 0 ] 2>/dev/null || { echo "reopened_with_feedback: no comment since it was closed"; return 1; }
   fi
   return 0
 }
@@ -472,11 +473,14 @@ gr_issue_feedback_fetch() {
     } } }" -f "o=${repo%%/*}" -f "r=${repo#*/}" -F "n=$num"
 }
 
-# _GR_FEEDBACK_JQ — defines $r (latest reopen) and $fb (comments after it) on the fetched issue.
+# _GR_FEEDBACK_JQ — defines $r (latest reopen), $w (the close it undid; $r if none is known) and $fb
+# (comments after $w) on the fetched issue. The window starts at the close, not the reopen: GitHub's
+# "Reopen with comment" stamps the comment at, or a second before, the reopen.
 _GR_FEEDBACK_JQ='.data.repository.issue as $i
   | ([$i.reopens.nodes[]? | select(.__typename == "ReopenedEvent")] | max_by(.createdAt)) as $ev
   | ($ev.createdAt // "") as $r
-  | [$i.comments.nodes[]? | select($r != "" and .createdAt > $r)] as $fb'
+  | ([$i.reopens.nodes[]? | select(.__typename == "ClosedEvent" and .createdAt <= $r) | .createdAt] | max // $r) as $w
+  | [$i.comments.nodes[]? | select($r != "" and .createdAt > $w)] as $fb'
 
 # gr_feedback_state <fetch-json> — "ok", or why the issue is no longer eligible (re-checked on the
 # fetch: the issue may have changed since selection).
@@ -485,12 +489,12 @@ gr_feedback_state() {
     | if $r == "" then "never reopened"
       elif ($i.state // "") != "OPEN" then "not open"
       elif ([$i.reopens.nodes[]? | select(.__typename == "ClosedEvent" and .createdAt > $r)] | length) > 0 then "closed again since the last reopen"
-      elif ($fb | length) == 0 then "no comment since the last reopen"
+      elif ($fb | length) == 0 then "no comment since it was closed"
       else "ok" end' "$1" 2>/dev/null || echo "unreadable issue JSON"
 }
 
 # gr_feedback_untrusted_reason <fetch-json> <trusted-logins newline list> — empty when the reopener
-# and every author and editor of a comment since the reopen is trusted. A truncated comment list
+# and every author and editor of a comment since the close the reopen undid is trusted. A truncated comment list
 # that may hide part of the feedback fails closed.
 gr_feedback_untrusted_reason() {
   [ -n "$2" ] || { echo "no trusted_authors configured"; return 0; }
@@ -499,7 +503,7 @@ gr_feedback_untrusted_reason() {
     | def trusted(l): (l // "" | ascii_downcase) as $l | $l != "" and ($ok | index($l)) != null;
       if (trusted($ev.actor.login) | not) then "reopened by \($ev.actor.login // "(deleted user)"), not a trusted author"
       elif ($i.comments.totalCount // 0) > ($i.comments.nodes | length)
-           and (($i.comments.nodes[0].createdAt // "") > $r) then "comment history truncated; cannot verify feedback"
+           and (($i.comments.nodes[0].createdAt // "") > $w) then "comment history truncated; cannot verify feedback"
       elif ([$fb[] | select((.userContentEdits.totalCount // 0) > (.userContentEdits.nodes | length))] | length) > 0
         then "comment edit history truncated; cannot verify edits"
       else [($fb[] | .author.login, (.userContentEdits.nodes[]? | .editor.login)) | select(trusted(.) | not)] as $bad
@@ -511,7 +515,7 @@ gr_feedback_untrusted_reason() {
 # gr_feedback_md <fetch-json> — the feedback comments as markdown, oldest first.
 gr_feedback_md() {
   jq -r "$_GR_FEEDBACK_JQ"'
-    | "Reopened \($r) by @\($ev.actor.login // "unknown"). Comments since:\n",
+    | "Reopened \($r) by @\($ev.actor.login // "unknown"). Comments since it was closed (\($w)):\n",
       ($fb | sort_by(.createdAt)[] | "### @\(.author.login // "unknown") — \(.createdAt)\n\n\(.body // "")\n")' "$1"
 }
 
