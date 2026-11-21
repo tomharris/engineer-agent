@@ -69,7 +69,7 @@ job_body() {
         --errors "$w/errors" --items "$w/items" ${budget:+--budget "$budget"} >> "$LOG_FILE" 2>&1
       rc=$?
       [ "$rc" = 0 ] && items="$(cat "$w/items" 2>/dev/null || echo 0)" ;;
-    github-issues:implement-next)
+    github-issues:implement-next|github-issues:address-feedback)
       bash "${EA_JOB_HANDLER_GITHUB_IMPLEMENT_NEXT:-${PLUGIN_ROOT}/scripts/job-github-implement-next.sh}" --job "$key" \
         --errors "$w/errors" --items "$w/items" ${budget:+--budget "$budget"} >> "$LOG_FILE" 2>&1
       rc=$?

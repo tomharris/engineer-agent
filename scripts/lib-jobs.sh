@@ -89,7 +89,7 @@ jobs_validate() {
     jira:implement-next)
       ar_validate "$slug" "$idx" || return 1
       jobs_validate_implement "$slug" "$idx" jira || return 1 ;;
-    github-issues:implement-next)
+    github-issues:implement-next|github-issues:address-feedback)
       gr_validate "$slug" "$idx" || return 1
       jobs_validate_implement "$slug" "$idx" github-issues || return 1 ;;
     slack:cr-qa)

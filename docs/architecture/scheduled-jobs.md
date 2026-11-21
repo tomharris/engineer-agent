@@ -4,7 +4,8 @@
 `projects.<slug>.jobs` gives one project's integration its own interval, **alongside** the global
 poll. Spec: `docs/superpowers/specs/2026-11-09-scheduled-jobs-design.md` (phased; phases 1–5 are built —
 dispatcher, `slack`/`watch` with `channels`/`mentions`/`my-threads`, status reactions,
-`jira`/`implement-next`, and `github-issues`/`implement-next` as phase 6a, plus `after_pr` below).
+`jira`/`implement-next`, and `github-issues`/`implement-next` as phase 6a, plus `after_pr` and
+`github-issues`/`address-feedback` below).
 
 ```
 jobs-tick.sh (every 60s; install-jobs.sh)
@@ -15,6 +16,8 @@ jobs-tick.sh (every 60s; install-jobs.sh)
                            → push for Approve, or (implement + jira-claim) claim → confined run
       github-issues:implement-next  job-github-implement-next.sh: same shape, gr_select,
                            gh-claim.sh, tier github-claim
+      github-issues:address-feedback  same handler: a reopened issue, keyed per reopen,
+                           feedback comments in the item and the gate, branch decided by bash
       slack:cr-qa          job-slack-cr-qa.sh: tiers → Slack read → crqa_pick → ticket trust
                            → ledger + claim reaction → review → QA → comment / approve
 ```
@@ -311,6 +314,38 @@ security → CI → browser → QA → ready → transition → announce. Things
   excluded; teammates' PRs for the ticket included, as the user asked), the ticket
   URL from `agent.jira.site` and the ledger key, never model text. The channel must be one of the
   project's `slack.channels`.
+
+## `github-issues` / `address-feedback`
+
+Implements feedback on an issue that was implemented, closed, then reopened with comments. It is
+`implement-next` with four differences, all in `job-github-implement-next.sh` (gated on the job's
+`action`) and `lib-gh-assign-rules.sh`; guards, claim/release, the confined run and `after_pr` are
+shared.
+
+- **Eligibility**: every rule must set `require.reopened_with_feedback: true` (and may not set
+  `no_linked_pr`, which the merged PR always fails). It passes when the latest `ReopenedEvent` has no
+  `ClosedEvent` after it and at least one comment was posted after it. It is re-checked on the
+  handler's own fetch.
+- **Identity**: `source_id` is `<owner/repo#N>@reopen-<epoch of the reopen>`, so the absorbing
+  terminal rule (`references/queue-reconciliation.md`) still holds per reopen cycle: the same reopen
+  is never picked twice, a later reopen is a new item. The ledger keeps the plain key, so
+  `gh-claim.sh` (which accepts the `@reopen-<digits>` form) and `pr-pipeline.sh` need nothing new.
+- **Text and trust**: one fetch (`gr_issue_feedback_fetch`) supplies the item's `## Feedback` section
+  (comments after the reopen), `ticket.md` for the review guard, and both trust checks. Unattended
+  needs the usual issue checks plus `gr_feedback_untrusted_reason`: the reopener and every author and
+  editor of a feedback comment trusted. A comment list truncated past the reopen, or a truncated
+  comment edit history, fails closed.
+- **Branch**: bash writes `state/pr-pipeline/<item>/feedback_branch` (`reuse|new`, branch, original
+  PR) from GitHub's PR fields, never issue text. `reuse` takes the newest open, non-fork PR in the
+  project's repos whose head is under `agent.branch_prefix` (the only branches `confined-push.sh`
+  pushes); `run_ticket_implementation` checks it out with `checkout -B` before claude starts,
+  because the run itself may only create branches, and the prompt forbids a new PR. Otherwise `new`:
+  `<prefix>/issue-N-<slug>-feedback-<epoch>`, created by the run, with a draft PR referencing the
+  original. A failed checkout refuses the run (claim released per `on_fail`). Feedback runs are never
+  handed off to another project.
+
+Use `assignee: any` (or `me`) and `on_fail.unassign: false`: the issue is usually still assigned to
+you from its first implementation.
 
 ## `slack` / `cr-qa` (`job-slack-cr-qa.sh`, `lib-cr-qa.sh`)
 

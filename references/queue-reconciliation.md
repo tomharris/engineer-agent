@@ -100,6 +100,13 @@ really does need new work after completion, the override is **explicit and human
 /engineer-agent add-ticket {TICKET-KEY}
 ```
 
+### Reopened with feedback (`address-feedback` jobs)
+
+The `github-issues` / `address-feedback` scheduled job picks reopened issues on purpose. It does not
+break the rule above: its items carry their own `source_id`, `<owner/repo#N>@reopen-<epoch>`, one
+per reopen cycle. A terminal item for that id is still absorbing, so the same reopen is never
+re-queued; only a new reopen mints a new item. See `docs/architecture/scheduled-jobs.md`.
+
 ### Manual add
 
 `commands/add-ticket.md` is the one caller permitted to write an item whose `source_id` already

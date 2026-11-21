@@ -59,6 +59,9 @@ Read the queue item to extract:
 - Target repo from the implementation plan
 - Acceptance criteria from the context section
 - Implementation plan from the draft response
+- `## Feedback`, when present: the ticket was reopened and these comments are the work to do. Scope
+  the Intent block, the implementation and the PR to the feedback; the original description and
+  acceptance criteria are context, already implemented once.
 
 Then synthesize the **Intent block** — a compact, self-contained framing of the work, so the
 session and the eventual PR are reusable intent artifacts even if the ticket itself is thin.
@@ -111,6 +114,10 @@ Create the branch based on tracker type. The `{branch_prefix}` placeholder below
 
 **If tracker is `jira`:**
 - Branch name: `{branch_prefix}/{ticket_key}`
+
+**Feedback run** (the run prompt starts a sentence with `FEEDBACK RUN`): the prompt's branch
+replaces the rules above. If it says the worktree is already on the branch, do not create one:
+commit there. Otherwise create exactly the branch it names.
 
 ```bash
 cd {projects.<project>.path}   # skip this line if already inside the repo worktree (see above)
@@ -320,6 +327,11 @@ source ticket** — this is required, never optional, on every PR this skill cre
 - tracker `jira`: `**Ticket:** [{ticket_key}]({source_url})`, using `source_url` from the queue
   item's frontmatter (the Jira browse URL). If `source_url` is somehow absent, fall back to the
   bare `{ticket_key}` — the body attribution line still ships.
+
+**Feedback run:** when the prompt says the worktree is on an open PR's branch, push and stop
+here: do **not** run `gh pr create` (that PR picks up the push). Report its PR number as the
+result. Otherwise use the prompt's branch as `--head` and add a line referencing the earlier PR
+it names after the attribution line.
 
 Then the **Intent block** from Step 1, then the changes summary and test results, then the
 **Findings & Disposition** ledger from the Implementation Result (when non-empty). This makes

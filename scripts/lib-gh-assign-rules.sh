@@ -13,13 +13,16 @@
 
 GR_RULE_KEYS="name query require ready_check claim on_fail"
 GR_REQ_LISTS="labels_any labels_none milestones issue_types project_statuses title_prefixes"
-GR_REQ_SCALARS="assignee min_age min_quiet no_open_blockers no_linked_pr has_acceptance_criteria min_body_chars"
+GR_REQ_SCALARS="assignee min_age min_quiet no_open_blockers no_linked_pr has_acceptance_criteria min_body_chars reopened_with_feedback"
 GR_CLAIM_KEYS="assign project_status"
 GR_ONFAIL_KEYS="unassign project_status"
 GR_MAX_RESULTS="${GR_MAX_RESULTS:-30}"
 GR_GH_TIMEOUT="${EA_POLL_CMD_TIMEOUT:-120}"
 
 _gr_lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
+
+# gr_job_action <slug> <idx> — implement-next | address-feedback.
+gr_job_action() { _arc "projects.$1.job.$2.action"; }
 
 # gr_board <slug> <idx> — prints "<owner>\t<number>\t<status field>" for the job's board, or nothing.
 gr_board() {
@@ -86,12 +89,21 @@ gr_validate() {
       v="$(_arc "$p.require.$k")"
       [ -z "$v" ] || [ -n "$(jobs_duration_seconds "$v")" ] || { echo "rule ${name}: require.${k} '${v}' must look like 30m, 2h or 1d"; return 1; }
     done
-    for k in no_open_blockers no_linked_pr has_acceptance_criteria; do
+    for k in no_open_blockers no_linked_pr has_acceptance_criteria reopened_with_feedback; do
       v="$(_arc "$p.require.$k")"
       _ar_bool "$v" || { echo "rule ${name}: require.${k} '${v}' must be true or false"; return 1; }
     done
     v="$(_arc "$p.require.min_body_chars")"
     [ -z "$v" ] || [[ "$v" =~ ^[0-9]+$ ]] || { echo "rule ${name}: require.min_body_chars '${v}' must be an integer"; return 1; }
+    # address-feedback picks issues it (or implement-next) already handled, keyed per reopen cycle,
+    # so the predicate is mandatory there and meaningless elsewhere. no_linked_pr would reject
+    # every candidate: the merged PR still counts.
+    if [ "$(gr_job_action "$slug" "$idx")" = address-feedback ]; then
+      [ "$(_arc "$p.require.reopened_with_feedback")" = true ] || { echo "rule ${name}: address-feedback rules need require.reopened_with_feedback: true"; return 1; }
+      [ "$(_arc "$p.require.no_linked_pr")" != true ] || { echo "rule ${name}: require.no_linked_pr cannot be used with address-feedback"; return 1; }
+    else
+      [ -z "$(_arc "$p.require.reopened_with_feedback")" ] || { echo "rule ${name}: require.reopened_with_feedback is only for address-feedback jobs"; return 1; }
+    fi
     if [ -z "$board" ]; then
       [ -z "$(_arcl "$p.require.project_statuses")" ] || { echo "rule ${name}: require.project_statuses needs the job's board (owner, number)"; return 1; }
       for k in claim on_fail; do
@@ -125,13 +137,14 @@ gr_graphql_error() { jq -r '[.errors[]?.message] | join("; ")' "$1" 2>/dev/null 
 # _gr_fields <slug> <idx> — the Issue selection set this job's rules need. Optional parts are
 # included only when a rule uses them, so a GHES without (say) issue types still serves the rest.
 _gr_fields() {
-  local slug="$1" idx="$2" n j p types=0 linked=0 blockers=0 board
+  local slug="$1" idx="$2" n j p types=0 linked=0 blockers=0 reopen=0 board
   n="$(_arc "projects.${slug}.job.${idx}.rule_count")"; j=0
   while [ "$j" -lt "${n:-0}" ]; do
     p="$(ar_prefix "$slug" "$idx" "$j")"
     [ -n "$(_arcl "$p.require.issue_types")" ] && types=1
     [ "$(_arc "$p.require.no_linked_pr")" = true ] && linked=1
     [ "$(_arc "$p.require.no_open_blockers")" = true ] && blockers=1
+    [ "$(_arc "$p.require.reopened_with_feedback")" = true ] && reopen=1
     j=$((j+1))
   done
   board="$(gr_board "$slug" "$idx")"
@@ -145,8 +158,12 @@ _gr_fields() {
   [ -n "$board" ] && printf '%s' ' projectItems(first: 20) { nodes { project { number owner { ... on Organization { login } ... on User { login } } } status: fieldValueByName(name: $field) { ... on ProjectV2ItemFieldSingleSelectValue { name } } } }'
   [ "$linked" = 1 ] && printf '%s' ' closedByPullRequestsReferences(first: 1, includeClosedPrs: false) { totalCount } linkedBranches(first: 1) { totalCount } xrefs: timelineItems(itemTypes: [CROSS_REFERENCED_EVENT], last: 100) { totalCount nodes { ... on CrossReferencedEvent { source { ... on PullRequest { state } } } } }'
   [ "$blockers" = 1 ] && printf '%s' ' blockedBy(first: 50) { totalCount nodes { state } }'
+  [ "$reopen" = 1 ] && printf '%s' " $GR_REOPEN_FIELDS comments(last: 100) { totalCount nodes { createdAt } }"
   return 0
 }
+
+# Close/reopen history, shared by selection and the feedback fetch.
+GR_REOPEN_FIELDS='reopens: timelineItems(itemTypes: [CLOSED_EVENT, REOPENED_EVENT], last: 50) { nodes { __typename ... on ClosedEvent { createdAt } ... on ReopenedEvent { createdAt actor { login } } } }'
 
 # gr_search_query <slug> <rule-prefix> — the rule's query, restricted to open issues and, when it
 # names no repo/org/user, to the project's repos (multiple repo: qualifiers are OR in search).
@@ -184,7 +201,11 @@ _gr_facts() {
         else [.blockedBy.nodes[] | select(.state == "OPEN")] | length end),
     l("linked"; if .closedByPullRequestsReferences == null or .xrefs == null then "unknown"
         elif (.xrefs.totalCount // 0) > (.xrefs.nodes | length) then "unknown"
-        else "\(.closedByPullRequestsReferences.totalCount) \(.linkedBranches.totalCount // 0) \([.xrefs.nodes[]? | select(.source.state? == "OPEN")] | length)" end)
+        else "\(.closedByPullRequestsReferences.totalCount) \(.linkedBranches.totalCount // 0) \([.xrefs.nodes[]? | select(.source.state? == "OPEN")] | length)" end),
+    (([.reopens.nodes[]? | select(.__typename == "ReopenedEvent") | .createdAt] | max // "") as $r
+     | l("reopened_at"; $r),
+       l("closed_after_reopen"; $r != "" and ([.reopens.nodes[]? | select(.__typename == "ClosedEvent" and .createdAt > $r)] | length) > 0),
+       l("feedback_count"; if $r == "" then 0 else [.comments.nodes[]? | select(.createdAt > $r)] | length end))
   ' "$1"
 }
 
@@ -265,7 +286,30 @@ gr_eval() {
     read -r a b c <<< "$x"
     [ "$x" = "0 0 0" ] || { echo "no_linked_pr: ${a} closing PR(s), ${b} branch(es), ${c} open referencing PR(s)"; return 1; }
   fi
+  if [ "$(_arc "$p.require.reopened_with_feedback")" = true ]; then
+    [ -n "$(_ar_fact "$facts" reopened_at)" ] || { echo "reopened_with_feedback: never reopened"; return 1; }
+    [ "$(_ar_fact "$facts" closed_after_reopen)" = false ] || { echo "reopened_with_feedback: closed again since the last reopen"; return 1; }
+    [ "$(_ar_fact "$facts" feedback_count)" -gt 0 ] 2>/dev/null || { echo "reopened_with_feedback: no comment since the last reopen"; return 1; }
+  fi
   return 0
+}
+
+# gr_reopen_epoch <issue-json> — epoch of the latest ReopenedEvent (search node or the
+# .data.repository.issue of a fetch); empty when never reopened.
+gr_reopen_epoch() {
+  local r
+  r="$(jq -r '(.data.repository.issue // .) | [.reopens.nodes[]? | select(.__typename == "ReopenedEvent") | .createdAt] | max // ""' "$1" 2>/dev/null)"
+  [ -n "$r" ] && epoch_of_iso "$r"
+}
+
+# gr_queue_sid <issue-json> <owner/repo#N> <action> — the queue identity. address-feedback keys
+# each reopen cycle separately (<sid>@reopen-<epoch>) so a handled issue can be picked again
+# after it is reopened, but never twice for the same reopen. Empty: no reopen to key on.
+gr_queue_sid() {
+  local e
+  [ "$3" = address-feedback ] || { printf '%s' "$2"; return 0; }
+  e="$(gr_reopen_epoch "$1")"
+  [[ "$e" =~ ^[0-9]+$ ]] && printf '%s@reopen-%s' "$2" "$e"
 }
 
 # gr_init — rc 1 with GR_ERR set when gh/jq are missing. Call directly, not in $(...).
@@ -307,7 +351,7 @@ _gr_kind_skip() {
 # eligible, or a reason (rc 2) on error. A failed search aborts rather than falling through.
 # AR_TRACE=1 logs every verdict to stderr; AR_EVAL_ALL=1 keeps evaluating after the pick.
 gr_select() {
-  local slug="$1" idx="$2" n j p name q count k sid pick="" reason need_me=0 hit fields board bo bn bf
+  local slug="$1" idx="$2" n j p name q count k sid qsid action pick="" reason need_me=0 hit fields board bo bn bf
   local -a vars
   jobs_cfg_load
   n="$(_arc "projects.${slug}.job.${idx}.rule_count")"
@@ -321,6 +365,7 @@ gr_select() {
   fi
   fields="$(_gr_fields "$slug" "$idx")"
   board="$(gr_board "$slug" "$idx")"
+  action="$(gr_job_action "$slug" "$idx")"
   IFS="	" read -r bo bn bf <<< "$board"
 
   j=0
@@ -346,7 +391,9 @@ gr_select() {
       k=$((k+1))
       sid="$(jq -r '"\(.repository.nameWithOwner // "")#\(.number // "")"' "$TMPD/issue.json")"
       [[ "$sid" =~ ^[A-Za-z0-9-]+/[A-Za-z0-9._-]+#[0-9]+$ ]] || { _ar_trace "  ?  skip  not an issue"; continue; }
-      hit="$(queue_lookup ticket "$sid")"
+      qsid="$(gr_queue_sid "$TMPD/issue.json" "$sid" "$action")"
+      [ -n "$qsid" ] || { _ar_trace "  ${sid}  skip  reopened_with_feedback: never reopened"; continue; }
+      hit="$(queue_lookup ticket "$qsid")"
       if [ -n "$hit" ]; then
         _ar_trace "  ${sid}  skip  already queued (${hit%%	*})"
         continue
@@ -400,4 +447,97 @@ gr_untrusted_reason() {
            | if ($bad | length) == 0 then empty
              else "edited by \($bad[0] // "(deleted user)"), not a trusted author" end
       end' "$1"
+}
+
+# --- address-feedback -----------------------------------------------------------------------------
+# One fetch feeds the queue item, both trust checks and the branch decision, so the model reads
+# exactly the text that was checked and the branch comes from GitHub's PR fields, never issue text.
+
+# gr_issue_feedback_fetch <out> <owner/repo> <number> — gr_issue_fetch's fields plus the close/reopen
+# history, the comments (with edit history) and the PRs that reference the issue as closing.
+gr_issue_feedback_fetch() {
+  local out="$1" repo="$2" num="$3"
+  gr_graphql "$out" "query(\$o: String!, \$r: String!, \$n: Int!) { repository(owner: \$o, name: \$r) { issue(number: \$n) {
+      id number title body url state repository { nameWithOwner } author { login }
+      labels(first: 50) { nodes { name } }
+      userContentEdits(first: 100) { totalCount nodes { editor { login } } }
+      edits: timelineItems(itemTypes: [RENAMED_TITLE_EVENT, LABELED_EVENT, UNLABELED_EVENT], first: 100) {
+        totalCount nodes { __typename ... on RenamedTitleEvent { actor { login } } ... on LabeledEvent { actor { login } } ... on UnlabeledEvent { actor { login } } } }
+      ${GR_REOPEN_FIELDS}
+      comments(last: 100) { totalCount nodes { createdAt body author { login }
+        userContentEdits(first: 20) { totalCount nodes { editor { login } } } } }
+      feedbackPrs: closedByPullRequestsReferences(first: 10, includeClosedPrs: true) { nodes {
+        number state merged isCrossRepository headRefName createdAt
+        repository { nameWithOwner } headRepository { nameWithOwner } } }
+    } } }" -f "o=${repo%%/*}" -f "r=${repo#*/}" -F "n=$num"
+}
+
+# _GR_FEEDBACK_JQ — defines $r (latest reopen) and $fb (comments after it) on the fetched issue.
+_GR_FEEDBACK_JQ='.data.repository.issue as $i
+  | ([$i.reopens.nodes[]? | select(.__typename == "ReopenedEvent")] | max_by(.createdAt)) as $ev
+  | ($ev.createdAt // "") as $r
+  | [$i.comments.nodes[]? | select($r != "" and .createdAt > $r)] as $fb'
+
+# gr_feedback_state <fetch-json> — "ok", or why the issue is no longer eligible (re-checked on the
+# fetch: the issue may have changed since selection).
+gr_feedback_state() {
+  jq -r "$_GR_FEEDBACK_JQ"'
+    | if $r == "" then "never reopened"
+      elif ($i.state // "") != "OPEN" then "not open"
+      elif ([$i.reopens.nodes[]? | select(.__typename == "ClosedEvent" and .createdAt > $r)] | length) > 0 then "closed again since the last reopen"
+      elif ($fb | length) == 0 then "no comment since the last reopen"
+      else "ok" end' "$1" 2>/dev/null || echo "unreadable issue JSON"
+}
+
+# gr_feedback_untrusted_reason <fetch-json> <trusted-logins newline list> — empty when the reopener
+# and every author and editor of a comment since the reopen is trusted. A truncated comment list
+# that may hide part of the feedback fails closed.
+gr_feedback_untrusted_reason() {
+  [ -n "$2" ] || { echo "no trusted_authors configured"; return 0; }
+  jq -r --arg t "$2" "$_GR_FEEDBACK_JQ"'
+    | ($t | ascii_downcase | split("\n") | map(select(. != ""))) as $ok
+    | def trusted(l): (l // "" | ascii_downcase) as $l | $l != "" and ($ok | index($l)) != null;
+      if (trusted($ev.actor.login) | not) then "reopened by \($ev.actor.login // "(deleted user)"), not a trusted author"
+      elif ($i.comments.totalCount // 0) > ($i.comments.nodes | length)
+           and (($i.comments.nodes[0].createdAt // "") > $r) then "comment history truncated; cannot verify feedback"
+      elif ([$fb[] | select((.userContentEdits.totalCount // 0) > (.userContentEdits.nodes | length))] | length) > 0
+        then "comment edit history truncated; cannot verify edits"
+      else [($fb[] | .author.login, (.userContentEdits.nodes[]? | .editor.login)) | select(trusted(.) | not)] as $bad
+           | if ($bad | length) == 0 then empty
+             else "feedback comment by \($bad[0] // "(deleted user)"), not a trusted author" end
+      end' "$1"
+}
+
+# gr_feedback_md <fetch-json> — the feedback comments as markdown, oldest first.
+gr_feedback_md() {
+  jq -r "$_GR_FEEDBACK_JQ"'
+    | "Reopened \($r) by @\($ev.actor.login // "unknown"). Comments since:\n",
+      ($fb | sort_by(.createdAt)[] | "### @\(.author.login // "unknown") — \(.createdAt)\n\n\(.body // "")\n")' "$1"
+}
+
+# gr_feedback_branch <fetch-json> <slug> <branch-prefix> — "<mode>|<branch>|<original PR>" (not tab:
+# `read` collapses the empty branch field), where
+# mode is "reuse" for the newest still-open, same-repo, non-fork PR on a branch under the prefix
+# (confined-push.sh can push nothing else), else "new" with an empty branch. The PR number is the
+# newest referencing PR in the project's repos, or empty.
+gr_feedback_branch() {
+  local repos row mode br pr
+  repos="$(gr_project_repos "$2")"
+  row="$(jq -r --arg repos "$repos" --arg pre "$3/" '
+    ($repos | split("\n") | map(select(. != ""))) as $ok
+    | [.data.repository.issue.feedbackPrs.nodes[]?
+       | select(((.repository.nameWithOwner // "") | ascii_downcase) as $n | $ok | index($n) != null)]
+    | sort_by(.createdAt) | reverse as $prs
+    | ([$prs[] | select(.state == "OPEN" and (.merged | not) and (.isCrossRepository | not)
+         and ((.headRepository.nameWithOwner // "") | ascii_downcase) == ((.repository.nameWithOwner // "") | ascii_downcase)
+         and ((.headRefName // "") | startswith($pre)))] | first) as $open
+    | if $open then "reuse|\($open.headRefName)|\($open.number)"
+      else "new||\($prs[0].number // "")" end' "$1" 2>/dev/null)" || return 1
+  IFS="|" read -r mode br pr <<< "$row"
+  [[ "$pr" =~ ^[0-9]*$ ]] || pr=""
+  if [ "$mode" = reuse ] && ! { [[ "$br" =~ ^[A-Za-z0-9._/-]+$ ]] && [[ "$br" != *..* ]]; }; then
+    mode=new br=""
+  fi
+  [ "$mode" = reuse ] || { mode=new br=""; }
+  printf '%s|%s|%s\n' "$mode" "$br" "$pr"
 }

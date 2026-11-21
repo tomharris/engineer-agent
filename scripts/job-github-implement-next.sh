@@ -1,6 +1,9 @@
 #!/bin/bash
 # job-github-implement-next.sh — the github-issues / implement-next scheduled job: pick the next
 # issue by the job's rules, queue it, and (only with both autonomy tiers) claim and implement it.
+# Also serves github-issues / address-feedback: the same sequence for an issue reopened with
+# feedback comments, keyed per reopen cycle, with the comments since the reopen in the item, their
+# authors under the trust gate, and the fix pushed to the original PR's branch while that PR is open.
 #
 # Usage: job-github-implement-next.sh --job <project>.<id> --errors <file> --items <file> [--budget <usd>]
 # Exit: 0 ok (including "guard skipped" and "nothing eligible"), 1 failed, 3 GitHub unavailable.
@@ -47,6 +50,7 @@ jobs_cfg_load
 IFS='|' read -r SLUG IDX _ <<< "$(jobs_enumerate | awk -F'|' -v k="$JOB" '($1 "." $3) == k { print; exit }')"
 [ -n "${SLUG:-}" ] || { echo "no such job: $JOB" >&2; exit 2; }
 P="projects.${SLUG}.job.${IDX}"
+ACTION="$(_jcfg "${P}.action")"
 
 # A stopped PR pipeline resumes once its branch has new commits; before the guards, which only
 # limit new picks.
@@ -75,25 +79,58 @@ IFS="	" read -r RULE KEY _ <<< "$pick"
 REPO="${KEY%#*}"; NUM="${KEY##*#}"
 
 # --- 3. queue item --------------------------------------------------------------------------------
-gr_issue_fetch "$TMPD/issue.json" "$REPO" "$NUM" || { err "could not read ${KEY}: $(gr_graphql_error "$TMPD/issue.json")"; exit 1; }
+if [ "$ACTION" = address-feedback ]; then
+  gr_issue_feedback_fetch "$TMPD/issue.json" "$REPO" "$NUM" || { err "could not read ${KEY}: $(gr_graphql_error "$TMPD/issue.json")"; exit 1; }
+else
+  gr_issue_fetch "$TMPD/issue.json" "$REPO" "$NUM" || { err "could not read ${KEY}: $(gr_graphql_error "$TMPD/issue.json")"; exit 1; }
+fi
 I='.data.repository.issue'
 # The key written to the queue is the API's, never one parsed from issue text.
 [ "$(jq -r "\"\(${I}.repository.nameWithOwner // \"\")#\(${I}.number // \"\")\"" "$TMPD/issue.json")" = "$KEY" ] \
   || { err "issue response key mismatch for ${KEY}"; exit 1; }
 jq -r "${I}.body // \"\""                 "$TMPD/issue.json" > "$TMPD/body"
+SID="$KEY" SHORT="gh-${NUM}"
+if [ "$ACTION" = address-feedback ]; then
+  # Re-checked on this fetch, which is what the item and the trust gate are built from.
+  st="$(gr_feedback_state "$TMPD/issue.json")"
+  [ "$st" = ok ] || { log "${KEY} no longer eligible: ${st}"; exit 0; }
+  SID="$(gr_queue_sid "$TMPD/issue.json" "$KEY" "$ACTION")"
+  [ -n "$SID" ] || { log "${KEY}: no reopen to key on"; exit 0; }
+  hit="$(queue_lookup ticket "$SID")"
+  [ -z "$hit" ] || { log "${SID} already queued (${hit%%	*})"; exit 0; }
+  REOPEN_EPOCH="${SID##*@reopen-}"
+  SHORT="gh-${NUM}-feedback"
+  gr_feedback_md "$TMPD/issue.json" > "$TMPD/feedback"
+  prefix="$("${PLUGIN_ROOT}/scripts/ea-config.sh" dump 2>/dev/null | awk -F= '$1=="agent.branch_prefix" {print $2; exit}')"
+  prefix="${prefix:-engineer-agent}"
+  IFS='|' read -r FB_MODE FB_BRANCH FB_PR <<< "$(gr_feedback_branch "$TMPD/issue.json" "$SLUG" "$prefix")"
+  if [ "${FB_MODE:-}" != reuse ]; then
+    FB_MODE=new
+    FB_BRANCH="${prefix}/issue-${NUM}-$(branch_slug "$(jq -r "${I}.title // \"\"" "$TMPD/issue.json")")-feedback-${REOPEN_EPOCH}"
+  fi
+  [[ "$FB_BRANCH" =~ ^[A-Za-z0-9._/-]+$ ]] || { err "${KEY}: unusable feedback branch name"; exit 1; }
+fi
 jq -r "${I}.labels.nodes[]?.name // empty" "$TMPD/issue.json" > "$TMPD/labels"
 prio=normal
 grep -qiE '^(priority:[[:space:]]*high|urgent)$' "$TMPD/labels" && prio=urgent
 grep -qiE '^priority:[[:space:]]*low$' "$TMPD/labels" && prio=low
 URL="$(jq -r "${I}.url // \"\"" "$TMPD/issue.json")"
 case "$URL" in https://*) ;; *) URL="https://github.com/${REPO}/issues/${NUM}" ;; esac
-ITEM="$(queue_filename ticket "gh-${NUM}" "$(queue_ts)")"
+ITEM="$(queue_filename ticket "$SHORT" "$(queue_ts)")"
 DRAFT="${AGENT_DIR}/queue/drafts/${ITEM}"
 mkdir -p "$(dirname "$DRAFT")"
-write_ticket_item --path "$DRAFT" --type ticket --source github --source-url "$URL" --source-id "$KEY" \
+write_ticket_item --path "$DRAFT" --type ticket --source github --source-url "$URL" --source-id "$SID" \
   --title "$(jq -r "${I}.title // \"\"" "$TMPD/issue.json")" --priority "$prio" \
   --created-at "$(iso_now)" --project "$SLUG" --ticket-key "#${NUM}" --state Open \
   --labels-file "$TMPD/labels" --kind-method default --body-file "$TMPD/body"
+if [ "$ACTION" = address-feedback ]; then
+  { printf '\n## Feedback\n\n'; cat "$TMPD/feedback"; } >> "$DRAFT"
+  fm_set "$DRAFT" feedback_reopen "$REOPEN_EPOCH"
+  # The branch the confined run lands on, decided here from GitHub's PR fields. Read by
+  # run_ticket_implementation from state, never from the item, which a model may have written.
+  mkdir -p "${PR_PIPELINE_DIR}/${ITEM%.md}"
+  printf '%s|%s|%s\n' "$FB_MODE" "$FB_BRANCH" "$FB_PR" > "${PR_PIPELINE_DIR}/${ITEM%.md}/feedback_branch"
+fi
 fm_set "$DRAFT" status drafted
 fm_set "$DRAFT" autopilot true
 fm_set "$DRAFT" autopilot_job "$JOB"
@@ -106,6 +143,13 @@ Autopilot pick: job \`${JOB}\`, rule \`${RULE}\`. Approving claims ${KEY} on Git
 \`claim\`), implements it in a confined worktree, and opens a draft PR. On failure the claim is
 rolled back per the rule's \`on_fail\`.
 EOF
+if [ "$ACTION" = address-feedback ]; then
+  if [ "$FB_MODE" = reuse ]; then
+    printf '\nFeedback run: pushes to %s (open PR #%s); no new PR.\n' "$FB_BRANCH" "$FB_PR" >> "$DRAFT"
+  else
+    printf '\nFeedback run: new branch %s and draft PR%s.\n' "$FB_BRANCH" "${FB_PR:+ referencing #${FB_PR}}" >> "$DRAFT"
+  fi
+fi
 autopilot_record "$ITEM" "$JOB" "$RULE" "$KEY" github
 job_record_pick "$JOB" "$ITEM"
 echo 1 > "$ITEMS"
@@ -117,6 +161,9 @@ if ! jobs_autonomy_allows implement || ! jobs_autonomy_allows github-claim; then
   gate="autonomy tiers implement and github-claim not both set"
 else
   gate="$(gr_untrusted_reason "$TMPD/issue.json" "$(_arcl "${P}.trusted_authors")")"
+  if [ -z "$gate" ] && [ "$ACTION" = address-feedback ]; then
+    gate="$(gr_feedback_untrusted_reason "$TMPD/issue.json" "$(_arcl "${P}.trusted_authors")")"
+  fi
 fi
 if [ -n "$gate" ]; then
   printf '\nUnattended run not allowed: %s.\n' "$gate" >> "$DRAFT"
@@ -126,6 +173,7 @@ if [ -n "$gate" ]; then
   log "awaiting Approve for ${ITEM}: ${gate}"
   exit 0
 fi
+[ "$ACTION" = address-feedback ] && { printf '\n\n## Feedback\n\n'; cat "$TMPD/feedback"; } >> "$TMPD/body"
 record_ticket_text "$ITEM" "$(jq -r "${I}.title // \"\"" "$TMPD/issue.json")" "$TMPD/body"
 
 # --- 5. claim + implement -------------------------------------------------------------------------
@@ -134,7 +182,12 @@ trap 'log "interrupted; releasing ${KEY}"; autopilot_release "$ITEM"; rm -rf "$T
 autopilot_implement "$ITEM" "$BUDGET"; rc=$?
 trap 'rm -rf "$TMPD"' EXIT; trap - TERM INT
 case "$rc" in
-  0) push_ack normal "✅ Autopilot implemented ${KEY} (rule ${RULE}) — draft PR opened"; exit 0 ;;
+  0) if [ "$ACTION" = address-feedback ]; then
+       push_ack normal "✅ Autopilot addressed feedback on ${KEY} (rule ${RULE}) — $([ "$FB_MODE" = reuse ] && echo "pushed to PR #${FB_PR}" || echo "draft PR opened")"
+     else
+       push_ack normal "✅ Autopilot implemented ${KEY} (rule ${RULE}) — draft PR opened"
+     fi
+     exit 0 ;;
   3) exit 0 ;;
   *) err "implementation of ${KEY} did not complete; claim rolled back, item left in drafts/"
      push_ack urgent "⚠️ Autopilot failed on ${KEY} — claim rolled back; item left in drafts/ for review"
