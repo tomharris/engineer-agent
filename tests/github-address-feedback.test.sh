@@ -122,6 +122,7 @@ reset() {
   rm -rf "$Q"/*/* "$EA_AGENT_DIR/state" "$ST"/*; mkdir -p "$EA_AGENT_DIR/state" "$TMP/repo"
   : > "$REQ_LOG"; : > "$NOTIFY_LOG"; : > "$CLAUDE_LOG"; : > "$CLAUDE_ARGS"; : > "$GIT_LOG"
   fb_issue 1; echo "1" > "$ST/search"
+  echo '[{"actor": {"login": "Tom"}}, {"actor": {"login": "tom"}}]' > "$ST/activity"
 }
 run_job() { bash "$HANDLER" --job web.fb --errors "$TMP/errors" --items "$TMP/items" 2>/dev/null; }
 drafts()  { ls "$Q/drafts" | tr '\n' ' ' | sed 's/ $//'; }
@@ -200,6 +201,21 @@ grep -qF -- "checkout --quiet -B tom/issue-1-fix-thing-1 origin/tom/issue-1-fix-
   && ok "worktree checked out on the PR branch before the run" || bad "git: $(cat "$GIT_LOG")"
 grep -qF "already checked out on 'tom/issue-1-fix-thing-1'" "$CLAUDE_ARGS" && grep -qF "do NOT open a new pull request" "$CLAUDE_ARGS" \
   && ok "prompt says commit there, no new PR" || bad "prompt: $(cat "$CLAUDE_ARGS")"
+grep -qF "repos/acme/web/activity?ref=refs/heads/tom/issue-1-fix-thing-1&per_page=100" "$ST/activity_reqs" \
+  && ok "pushers checked on the PR's branch" || bad "activity requests: $(cat "$ST/activity_reqs" 2>/dev/null)"
+
+pusher_case() {  # pusher_case <name> <activity JSON, or "" for an API error>
+  reset; fb_issue 1 "$OPEN_PR"; write_config "[implement, github-claim]"
+  if [ -n "$2" ]; then printf '%s\n' "$2" > "$ST/activity"; else rm -f "$ST/activity"; fi
+  run_job
+  eq "$1: falls back to a new branch" "new|tom/issue-1-fix-thing-1-feedback-${R1}|9" "$(branch_row "$(done_item)")"
+  grep -q -- "checkout --quiet -B" "$GIT_LOG" && bad "$1: the untrusted branch was checked out" || ok "$1: the branch is never checked out"
+}
+pusher_case "pushed by someone else" '[{"actor": {"login": "tom"}}, {"actor": {"login": "stranger"}}]'
+pusher_case "pusher unknown" '[{"actor": null}]'
+pusher_case "activity unavailable" ""
+pusher_case "no activity recorded" '[]'
+pusher_case "activity truncated" "$(jq -nc '[range(100) | {actor: {login: "tom"}}]')"
 
 reset; fb_issue 1 "$OPEN_PR | .feedbackPrs.nodes[1].isCrossRepository = true"; write_config "[implement, github-claim]"
 run_job; eq "a fork PR is never reused" "new|tom/issue-1-fix-thing-1-feedback-${R1}|9" "$(branch_row "$(done_item)")"

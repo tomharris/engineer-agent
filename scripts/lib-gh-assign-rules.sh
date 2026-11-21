@@ -515,13 +515,13 @@ gr_feedback_md() {
       ($fb | sort_by(.createdAt)[] | "### @\(.author.login // "unknown") — \(.createdAt)\n\n\(.body // "")\n")' "$1"
 }
 
-# gr_feedback_branch <fetch-json> <slug> <branch-prefix> — "<mode>|<branch>|<original PR>" (not tab:
-# `read` collapses the empty branch field), where
-# mode is "reuse" for the newest still-open, same-repo, non-fork PR on a branch under the prefix
-# (confined-push.sh can push nothing else), else "new" with an empty branch. The PR number is the
-# newest referencing PR in the project's repos, or empty.
+# gr_feedback_branch <fetch-json> <slug> <branch-prefix> — "<mode>|<branch>|<original PR>|<PR repo>"
+# (not tab: `read` collapses the empty branch field), where mode is "reuse" for the newest
+# still-open, same-repo, non-fork PR on a branch under the prefix (confined-push.sh can push nothing
+# else), else "new" with an empty branch. The PR number is the newest referencing PR in the
+# project's repos, or empty. A reuse candidate is not yet trusted: see gr_branch_pusher_verdict.
 gr_feedback_branch() {
-  local repos row mode br pr
+  local repos row mode br pr prrepo
   repos="$(gr_project_repos "$2")"
   row="$(jq -r --arg repos "$repos" --arg pre "$3/" '
     ($repos | split("\n") | map(select(. != ""))) as $ok
@@ -531,13 +531,33 @@ gr_feedback_branch() {
     | ([$prs[] | select(.state == "OPEN" and (.merged | not) and (.isCrossRepository | not)
          and ((.headRepository.nameWithOwner // "") | ascii_downcase) == ((.repository.nameWithOwner // "") | ascii_downcase)
          and ((.headRefName // "") | startswith($pre)))] | first) as $open
-    | if $open then "reuse|\($open.headRefName)|\($open.number)"
-      else "new||\($prs[0].number // "")" end' "$1" 2>/dev/null)" || return 1
-  IFS="|" read -r mode br pr <<< "$row"
+    | if $open then "reuse|\($open.headRefName)|\($open.number)|\($open.repository.nameWithOwner | ascii_downcase)"
+      else "new||\($prs[0].number // "")|" end' "$1" 2>/dev/null)" || return 1
+  IFS="|" read -r mode br pr prrepo <<< "$row"
   [[ "$pr" =~ ^[0-9]*$ ]] || pr=""
   if [ "$mode" = reuse ] && ! { [[ "$br" =~ ^[A-Za-z0-9._/-]+$ ]] && [[ "$br" != *..* ]]; }; then
     mode=new br=""
   fi
-  [ "$mode" = reuse ] || { mode=new br=""; }
-  printf '%s|%s|%s\n' "$mode" "$br" "$pr"
+  [[ "$prrepo" =~ ^[a-z0-9._-]+/[a-z0-9._-]+$ ]] || prrepo=""
+  [ "$mode" = reuse ] && [ -n "$prrepo" ] || { mode=new br=""; }
+  printf '%s|%s|%s|%s\n' "$mode" "$br" "$pr" "$prrepo"
+}
+
+# gr_branch_pusher_verdict <owner/repo> <branch> — "ok" when the repository activity API names the
+# gh user as the actor of every push, creation and force push on the branch; otherwise why not.
+# A reused branch is checked out and built in an unattended run, and the prefix only constrains
+# what confined-push.sh pushes, not what others can push, so its code is trusted only when every
+# write to it was ours. Commit author fields can be forged; the pusher cannot. Unknown fails closed.
+gr_branch_pusher_verdict() {
+  local me acts
+  me="$(gr_my_login)" || { echo "own GitHub login unknown"; return 0; }
+  acts="$(with_timeout "$GR_GH_TIMEOUT" gh api "repos/$1/activity?ref=refs/heads/$2&per_page=100" 2>/dev/null)" \
+    || { echo "branch activity unavailable"; return 0; }
+  printf '%s' "$acts" | jq -r --arg me "$(_gr_lower "$me")" '
+    if type != "array" then "branch activity unreadable"
+    elif length == 0 then "no branch activity recorded"
+    elif length >= 100 then "branch activity truncated"
+    else ([.[] | (.actor.login // "") | ascii_downcase | select(. != $me)] | first) as $o
+      | if $o == null then "ok" elif $o == "" then "pushed by an unknown user" else "pushed by \($o)" end
+    end' 2>/dev/null || echo "branch activity unreadable"
 }
