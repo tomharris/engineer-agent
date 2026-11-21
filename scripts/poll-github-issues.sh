@@ -48,6 +48,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "${SCRIPT_DIR}/lib-routing-judge.sh"
 
 TAB="$(printf '\t')"
+# Field separator for reading gh TSV rows: tab is IFS whitespace, so `read` would collapse an empty
+# field (e.g. no labels) and shift every column after it.
+US="$(printf '\037')"
 
 ONLY_PROJECT=""; RUN_TS=""; DRY_RUN=0; MANIFEST=""
 while [ $# -gt 0 ]; do
@@ -159,7 +162,7 @@ EOF
   # Merge by issue number across assignees (dedup is PER REPO).
   sort -u -t"$TAB" -k1,1n "$ISSUES" -o "$ISSUES"
 
-  while IFS="$TAB" read -r num updated title_b64 body_b64 labels_raw url; do
+  while IFS="$US" read -r num updated title_b64 body_b64 labels_raw url; do
     [ -n "$num" ] || continue
     FOUND=$((FOUND+1))
     title="$(printf '%s' "$title_b64" | b64d)"
@@ -329,7 +332,7 @@ EOF
     fi
     emit "$(printf 'draft\t%s\t%s\t%s\t%s\t%s\t%s\t%s' \
       "$target" "$typ" "$slug" "$sid" "$needs_route" "$needs_kind" "$title")"
-  done < "$ISSUES"
+  done < <(tr "$TAB" "$US" < "$ISSUES")
 
   # Advance the per-repo cutoff even when the repo produced zero items: a source that found
   # nothing was still polled successfully. (Slack's message-timestamp cutoff is the documented

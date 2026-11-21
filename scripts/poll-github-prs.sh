@@ -36,6 +36,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "${SCRIPT_DIR}/lib-routing-judge.sh"
 
 TAB="$(printf '\t')"
+# Field separator for reading gh TSV rows: tab is IFS whitespace, so `read` would collapse an empty
+# field (e.g. no labels) and shift every column after it.
+US="$(printf '\037')"
 
 ONLY_PROJECT=""; RUN_TS=""; DRY_RUN=0; MANIFEST=""
 while [ $# -gt 0 ]; do
@@ -116,7 +119,7 @@ while IFS= read -r full; do
     continue
   fi
 
-  while IFS="$TAB" read -r num title_b64 author url labels_raw head base changed reviewers_raw body_b64; do
+  while IFS="$US" read -r num title_b64 author url labels_raw head base changed reviewers_raw body_b64; do
     [ -n "$num" ] || continue
     title="$(printf '%s' "$title_b64" | b64d)"
     printf '%s\n' "$body_b64" | b64d > "$TMPD/body"
@@ -236,7 +239,7 @@ while IFS= read -r full; do
     fi
     emit "$(printf 'draft\t%s\tpr-review\t%s\t%s\t%s\t0\t%s' \
       "$target" "$slug" "$sid" "$needs_route" "$title")"
-  done < "$PRS"
+  done < <(tr "$TAB" "$US" < "$PRS")
 done < <(cut -f1 "$REPOS" | sort -u)
 
 # Resume sweep — see lib-queue.sh poll_resume_candidates(). Only pr-review items are re-emitted

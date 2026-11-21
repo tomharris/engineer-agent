@@ -143,6 +143,9 @@ eq "source_id"   "acme/shared#101"       "$(fmv "$F" source_id)"
 eq "ticket_key"  "#101"                  "$(fmv "$F" ticket_key)"
 eq "status"      "incoming"              "$(awk 'NR==1&&/^---/{i=1;next} i&&/^---/{exit} /^status:/{print $2;exit}' "$F")"
 eq "labels"      '["backend"]'           "$(fmv "$F" github_labels)"
+# An empty field must not shift the columns after it (IFS=tab collapses consecutive tabs).
+eq "unlabelled issue keeps its url"   "https://gh/103" "$(fmv "$(item gh-103)" source_url)"
+eq "unlabelled issue has no labels"   '[]'             "$(fmv "$(item gh-103)" github_labels)"
 if grep -q '^## Context' "$F"; then ok "has Context section"; else bad "missing Context"; fi
 if grep -q '^### Acceptance Criteria' "$F"; then ok "has AC section"; else bad "missing AC"; fi
 # Undrafted by construction — the model adds this, and its absence is what the resume sweep keys on.
