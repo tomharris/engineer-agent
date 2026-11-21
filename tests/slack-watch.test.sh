@@ -1,5 +1,5 @@
 #!/bin/bash
-# Tests for the slack/watch job's `mentions` and `my-threads` sources (scripts/job-slack-watch.sh →
+# Tests for the slack/watch job's `mentions` and `my-threads` sources (scripts/job-watch.sh →
 # scripts/poll-slack.sh), plus the `detected` reaction a collector fires on create.
 #
 # `spy` (search/thread/react) and `curl` (the TypeSafe judgment) are PATH stubs.
@@ -9,7 +9,7 @@ set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-JOB="${REPO_ROOT}/scripts/job-slack-watch.sh"
+JOB="${REPO_ROOT}/scripts/job-watch.sh"
 POLL="${REPO_ROOT}/scripts/poll-slack.sh"
 
 PASS=0; FAIL=0
@@ -109,7 +109,7 @@ reset() {
   echo '{"query":"","total":0,"hits":[]}' > "$SEARCH_JSON"
   answers 0.95 0.92 0.02 0.90; unset SPY_SEARCH_RC
 }
-run_job() { EA_TEST_TS_KEY="tskey" bash "$JOB" --project alpha --job alpha.sw --manifest "$TMP/manifest" --errors "$TMP/errors" >/dev/null 2>"$TMP/err"; }
+run_job() { EA_TEST_TS_KEY="tskey" bash "$JOB" --integration slack --project alpha --job alpha.sw --manifest "$TMP/manifest" --errors "$TMP/errors" >/dev/null 2>"$TMP/err"; }
 items() { ls "$EA_AGENT_DIR/queue/incoming/"*slack-question* 2>/dev/null; }
 nitems() { items | grep -c .; }
 fmv() { sed -n "s/^$2: //p" "$1" | head -1 | tr -d '"'; }

@@ -54,10 +54,11 @@ push() { "$NOTIFY" --title "$1" --message "$2" --priority "$3" --tags warning --
 job_body() {
   local slug="$1" key="$2" kind="$3" w="$4" run_ts="$5" budget="$6" rc status=ok items=0 drafting=none
   case "$kind" in
-    slack:watch)
-      # EA_JOB_HANDLER_SLACK_WATCH: test seam — the real collector talks to Slack and TypeSafe.
-      bash "${EA_JOB_HANDLER_SLACK_WATCH:-${PLUGIN_ROOT}/scripts/job-slack-watch.sh}" --project "$slug" --job "$key" \
-        --manifest "$w/manifest.tsv" --errors "$w/errors" --run-ts "$run_ts" >> "$LOG_FILE" 2>&1
+    *:watch)
+      # EA_JOB_HANDLER_WATCH: test seam — the real collectors talk to gh, Jira, Slite, Slack, TypeSafe.
+      bash "${EA_JOB_HANDLER_WATCH:-${PLUGIN_ROOT}/scripts/job-watch.sh}" --integration "${kind%%:*}" \
+        --project "$slug" --job "$key" --manifest "$w/manifest.tsv" --errors "$w/errors" --run-ts "$run_ts" \
+        >> "$LOG_FILE" 2>&1
       rc=$? ;;
     jira:implement-next)
       bash "${EA_JOB_HANDLER_JIRA_IMPLEMENT_NEXT:-${PLUGIN_ROOT}/scripts/job-jira-implement-next.sh}" --job "$key" \
@@ -78,8 +79,8 @@ job_body() {
   esac
   case "${kind}:${rc}" in
     *:0) ;;
-    slack:watch:3) status=error; echo "collector unavailable (exit 3): check agent.typesafe credential, curl and jq — see state/jobs.log" >> "$w/errors" ;;
-    slack:watch:*) status=error; echo "collector exited ${rc} — see state/jobs.log" >> "$w/errors" ;;
+    *:watch:3) status=error; [ -s "$w/errors" ] || echo "collector unavailable (exit 3) — see state/jobs.log" >> "$w/errors" ;;
+    *:watch:*) status=error; echo "collector exited ${rc} — see state/jobs.log" >> "$w/errors" ;;
     *:3) status=error; [ -s "$w/errors" ] || echo "${kind} unavailable (exit 3) — see state/jobs.log" >> "$w/errors" ;;
     *) status=error; [ -s "$w/errors" ] || echo "${kind} exited ${rc} — see state/jobs.log" >> "$w/errors" ;;
   esac

@@ -51,7 +51,8 @@
 # (this script has none; `<slack> send` is execute-item's job), and cannot emit a string any later
 # stage executes.
 #
-# Usage: poll-slack.sh [--project <slug>] [--run-ts <iso>] [--dry-run] [--manifest <file>]
+# Usage: poll-slack.sh [--project <slug>] [--run-ts <iso>] [--dry-run] [--manifest <file>] [--check]
+#        --check: exit 0 if the collector could run, else log why and exit 3. No network, no state.
 #                      [--sources channels,mentions,my-threads] [--thread-ttl <seconds>]
 #        --sources defaults to channels (the global poll). mentions and my-threads need --project:
 #        they are slack/watch job sources.
@@ -72,12 +73,13 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "${SCRIPT_DIR}/lib-typesafe.sh"
 . "${SCRIPT_DIR}/lib-routing-judge.sh"
 
-ONLY_PROJECT=""; RUN_TS=""; DRY_RUN=0; MANIFEST=""; SOURCES="channels"; THREAD_TTL=604800
+ONLY_PROJECT=""; RUN_TS=""; DRY_RUN=0; MANIFEST=""; CHECK=0; SOURCES="channels"; THREAD_TTL=604800
 while [ $# -gt 0 ]; do
   case "$1" in
     --project)  ONLY_PROJECT="$2"; shift 2 ;;
     --run-ts)   RUN_TS="$2"; shift 2 ;;
     --dry-run)  DRY_RUN=1; shift ;;
+    --check)    CHECK=1; shift ;;
     --manifest) MANIFEST="$2"; shift 2 ;;
     --sources)  SOURCES="$2"; shift 2 ;;
     --thread-ttl) THREAD_TTL="$2"; shift 2 ;;
@@ -145,6 +147,7 @@ else
 fi
 command -v "$SLACK_BIN" >/dev/null 2>&1 || [ -x "$SLACK_BIN" ] || {
   log "poll-slack: Slack binary '${SLACK_BIN}' not found or not executable; leaving Slack to the model"; exit 3; }
+[ "$CHECK" -eq 1 ] && exit 0   # --check: every precondition above passed; no network, no state
 
 USER_NAME="$(cfg agent.slack.user_name)"
 USER_ID="$(cfg agent.slack.user_id)"

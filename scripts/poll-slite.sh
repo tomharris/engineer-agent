@@ -25,7 +25,8 @@
 # tag comparison. An unrecognisable response shape exits 3 rather than guessing: a collector that
 # silently decides no docs need review is indistinguishable from a quiet week.
 #
-# Usage: poll-slite.sh [--project <slug>] [--run-ts <iso>] [--dry-run] [--manifest <file>]
+# Usage: poll-slite.sh [--project <slug>] [--run-ts <iso>] [--dry-run] [--manifest <file>] [--check]
+#        --check: exit 0 if the collector could run, else log why and exit 3. No network, no state.
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -44,12 +45,13 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "${SCRIPT_DIR}/lib-typesafe.sh"
 . "${SCRIPT_DIR}/lib-routing-judge.sh"
 
-ONLY_PROJECT=""; RUN_TS=""; DRY_RUN=0; MANIFEST=""
+ONLY_PROJECT=""; RUN_TS=""; DRY_RUN=0; MANIFEST=""; CHECK=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --project)  ONLY_PROJECT="$2"; shift 2 ;;
     --run-ts)   RUN_TS="$2"; shift 2 ;;
     --dry-run)  DRY_RUN=1; shift ;;
+    --check)    CHECK=1; shift ;;
     --manifest) MANIFEST="$2"; shift 2 ;;
     -h|--help)  sed -n '2,26p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "poll-slite.sh: unknown argument '$1'" >&2; exit 2 ;;
@@ -85,6 +87,7 @@ if ! slite_init "$(cfg agent.slite.api_base)" "$(cfg agent.slite.api_key_env)" "
   log "poll-slite: ${SLITE_ERR}; leaving Slite to the model"
   exit 3
 fi
+[ "$CHECK" -eq 1 ] && exit 0   # --check: every precondition above passed; no network, no state
 
 # urlenc <s> — percent-encode a query value. jq does this correctly (including UTF-8), and jq is
 # already a hard dependency of this script.

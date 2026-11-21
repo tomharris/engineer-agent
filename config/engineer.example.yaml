@@ -408,6 +408,13 @@ projects:
     #     guards:
     #       pause_after_failures: 3      # consecutive failed runs before the job pauses itself
     #
+    #   # Same shape for the other sources (no watch/thread_ttl): integration github (PR reviews),
+    #   # github-issues, jira, slite. Each runs that source's scripted collector for this project.
+    #   - id: prs
+    #     integration: github
+    #     action: watch
+    #     every: 10m
+    #
     #   # Reviews and QAs PRs requested in a channel ("CR/QA <PR url> <Jira url>"). Needs tiers
     #   # slack-react, slack-post, pr-comment, jira-comment, jira-transition, security-review.
     #   - id: cr-qa

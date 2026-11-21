@@ -17,7 +17,8 @@
 # tracking its work in Jira, so the candidate predicate is the github section alone
 # (route_candidates_github_prs), not the github-issues one.
 #
-# Usage: poll-github-prs.sh [--project <slug>] [--run-ts <iso>] [--dry-run] [--manifest <file>]
+# Usage: poll-github-prs.sh [--project <slug>] [--run-ts <iso>] [--dry-run] [--manifest <file>] [--check]
+#        --check: exit 0 if the collector could run, else log why and exit 3. No network, no state.
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -36,13 +37,17 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "${SCRIPT_DIR}/lib-routing-judge.sh"
 
 TAB="$(printf '\t')"
+# Field separator for reading gh TSV rows: tab is IFS whitespace, so `read` would collapse an empty
+# field (e.g. no labels) and shift every column after it.
+US="$(printf '\037')"
 
-ONLY_PROJECT=""; RUN_TS=""; DRY_RUN=0; MANIFEST=""
+ONLY_PROJECT=""; RUN_TS=""; DRY_RUN=0; MANIFEST=""; CHECK=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --project)  ONLY_PROJECT="$2"; shift 2 ;;
     --run-ts)   RUN_TS="$2"; shift 2 ;;
     --dry-run)  DRY_RUN=1; shift ;;
+    --check)    CHECK=1; shift ;;
     --manifest) MANIFEST="$2"; shift 2 ;;
     -h|--help)  sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "poll-github-prs.sh: unknown argument '$1'" >&2; exit 2 ;;
@@ -58,6 +63,7 @@ emit() { [ -n "$MANIFEST" ] && printf '%s\n' "$*" >> "$MANIFEST"; return 0; }
 b64d() { base64 -d 2>/dev/null || base64 -D 2>/dev/null; }
 
 command -v gh >/dev/null 2>&1 || { log "poll-github-prs: gh not found; skipping"; exit 3; }
+[ "$CHECK" -eq 1 ] && exit 0   # --check: every precondition above passed; no network, no state
 GH_TIMEOUT="${EA_POLL_CMD_TIMEOUT:-120}"
 
 EA_CFG="$("${SCRIPT_DIR}/ea-config.sh" dump)"; export EA_CFG
@@ -116,7 +122,7 @@ while IFS= read -r full; do
     continue
   fi
 
-  while IFS="$TAB" read -r num title_b64 author url labels_raw head base changed reviewers_raw body_b64; do
+  while IFS="$US" read -r num title_b64 author url labels_raw head base changed reviewers_raw body_b64; do
     [ -n "$num" ] || continue
     title="$(printf '%s' "$title_b64" | b64d)"
     printf '%s\n' "$body_b64" | b64d > "$TMPD/body"
@@ -236,7 +242,7 @@ while IFS= read -r full; do
     fi
     emit "$(printf 'draft\t%s\tpr-review\t%s\t%s\t%s\t0\t%s' \
       "$target" "$slug" "$sid" "$needs_route" "$title")"
-  done < "$PRS"
+  done < <(tr "$TAB" "$US" < "$PRS")
 done < <(cut -f1 "$REPOS" | sort -u)
 
 # Resume sweep — see lib-queue.sh poll_resume_candidates(). Only pr-review items are re-emitted

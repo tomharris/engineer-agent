@@ -32,7 +32,8 @@
 # day. The offset is read off a real returned timestamp (already DST-correct, no tz database), never
 # hardcoded.
 #
-# Usage: poll-jira.sh [--project <slug>] [--run-ts <iso>] [--dry-run] [--manifest <file>]
+# Usage: poll-jira.sh [--project <slug>] [--run-ts <iso>] [--dry-run] [--manifest <file>] [--check]
+#        --check: exit 0 if the collector could run, else log why and exit 3. No network, no state.
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -51,12 +52,13 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "${SCRIPT_DIR}/lib-typesafe.sh"
 . "${SCRIPT_DIR}/lib-routing-judge.sh"
 
-ONLY_PROJECT=""; RUN_TS=""; DRY_RUN=0; MANIFEST=""
+ONLY_PROJECT=""; RUN_TS=""; DRY_RUN=0; MANIFEST=""; CHECK=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --project)  ONLY_PROJECT="$2"; shift 2 ;;
     --run-ts)   RUN_TS="$2"; shift 2 ;;
     --dry-run)  DRY_RUN=1; shift ;;
+    --check)    CHECK=1; shift ;;
     --manifest) MANIFEST="$2"; shift 2 ;;
     -h|--help)  sed -n '2,36p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "poll-jira.sh: unknown argument '$1'" >&2; exit 2 ;;
@@ -107,6 +109,7 @@ if [ -z "$JIRA_TOKEN" ]; then
   log "poll-jira: no Jira API token available (checked env/file/keychain); leaving Jira to the model"
   exit 3
 fi
+[ "$CHECK" -eq 1 ] && exit 0   # --check: every precondition above passed; no network, no state
 
 # --- HTTP ------------------------------------------------------------------------------------
 # shellcheck source=lib-jira-api.sh
