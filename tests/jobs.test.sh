@@ -1,9 +1,9 @@
 #!/bin/bash
 # Tests for scheduled jobs: scripts/lib-jobs.sh, jobs-tick.sh, jobs-draft.sh, jobs-ctl.sh,
-# job-slack-watch.sh, and the `exclusive` skip in ea-config.sh.
+# job-watch.sh, and the `exclusive` skip in ea-config.sh.
 #
 # The clock is frozen with EA_NOW and TZ=UTC. The Slack collector is replaced by a stub handler
-# (EA_JOB_HANDLER_SLACK_WATCH) for dispatcher mechanics; section 9 drives the REAL collector
+# (EA_JOB_HANDLER_WATCH) for dispatcher mechanics; section 9 drives the REAL collector
 # against stubbed `spy` and `curl`. `claude` and `notify.sh` are stubbed via CLAUDE_BIN /
 # EA_NOTIFY_BIN.
 #
@@ -71,7 +71,7 @@ fi
 exit "$(cat "$HSTUB/h.$job.rc" 2>/dev/null || echo 0)"
 EOF
 chmod +x "$TMP/handler"
-export EA_JOB_HANDLER_SLACK_WATCH="$TMP/handler"
+export EA_JOB_HANDLER_WATCH="$TMP/handler"
 
 # claude stub: CLAUDE_MODE=move moves every manifest row to drafts/; anything else does nothing.
 cat > "$TMP/claude" <<'EOF'
@@ -399,9 +399,104 @@ eq "paused cr-qa gives the source back" "configured" \
   "$(bash "$REPO_ROOT/scripts/ea-config.sh" sources web | awk -F'\t' '$1=="slack"{print $2}')"
 
 # --------------------------------------------------------------------------------------------
+echo "== 10c. <integration>/watch: validation, dispatch, collector mapping =="
+watch_config() {  # watch_config <integration> [extra project lines] [extra job lines]
+  cat > "$CFG" <<YAML
+projects:
+  alpha:
+    path: "/tmp/alpha"
+    tracker: "github-issues"
+    github:
+      owner: acme
+      repos: [web]
+      review_requested_for: tom
+      issues:
+        assignee: tom
+${2:-}
+    jobs:
+      - id: w
+        integration: $1
+        action: watch
+        every: 5m
+${3:-}
+YAML
+}
+winv() { reset_state; watch_config "$@"; tick; cat "$STATE/alpha.w.invalid" 2>/dev/null; }
+eq "github:watch with review config is valid" "" "$(winv github)"
+eq "github-issues:watch on a github-issues tracker is valid" "" "$(winv github-issues)"
+eq "jira:watch needs the jira source configured" "jira:watch: tracker is github-issues, no jira section" "$(winv jira)"
+eq "slite:watch needs a slite section" "slite:watch: no slite section configured" "$(winv slite)"
+eq "slite:watch with doc_labels is valid" "" "$(winv slite '    slite:
+      doc_labels: [needs-review]')"
+eq "an exclusive watch job is not blocked by owning its own source" "" "$(winv github '' '        exclusive: true')"
+reset_state; watch_config github
+tick
+eq "github:watch dispatches to the watch handler" 1 "$(calls alpha.w)"
+
+# The real handler must reach the right collector. Each collector names itself in its log.
+wrun() { bash "$REPO_ROOT/scripts/job-watch.sh" --integration "$1" --project alpha --job alpha.w \
+           --manifest "$TMP/wm" --errors "$TMP/we" --run-ts 2026-11-09T10:00:00Z 2>&1; echo "rc=$?"; }
+unset EA_JOB_HANDLER_WATCH
+printf '#!/bin/bash\nexit 0\n' > "$TMP/bin/gh"; chmod +x "$TMP/bin/gh"
+reset_state; watch_config jira '    jira:
+      project: ENG
+      assignee: tom'
+out="$(wrun jira)"; has "jira maps to poll-jira.sh" "poll-jira:" "$out"; has "jira unavailable exits 3" "rc=3" "$out"
+reset_state; watch_config slite '    slite:
+      doc_labels: [needs-review]'
+out="$(wrun slite)"; has "slite maps to poll-slite.sh" "poll-slite:" "$out"; has "slite unavailable exits 3" "rc=3" "$out"
+reset_state; watch_config github-issues
+out="$(wrun github-issues)"; has "github-issues maps to poll-github-issues.sh" "Found 0 issue(s)" "$out"; has "rc 0" "rc=0" "$out"
+has "unknown integration is a usage error" "rc=2" "$(wrun gitlab)"
+
+echo "== 10d. the real PR collector: own project only, own state file =="
+reset_state
+export GH_ARGV="$TMP/gh.argv"; : > "$GH_ARGV"
+cat > "$TMP/bin/gh" <<'EOF'
+#!/bin/bash
+printf '%s\n' "$*" >> "$GH_ARGV"
+repo=""; while [ $# -gt 0 ]; do case "$1" in --repo) repo="$2"; shift 2 ;; *) shift ;; esac; done
+[ "$repo" = "acme/web" ] || exit 0
+t="$(printf 'Fix login' | base64)"; b="$(printf 'body' | base64)"
+printf '7\t%s\tdev\thttps://github.com/acme/web/pull/7\t\tfix-login\tmain\t3\ttom\t%s\n' "$t" "$b"
+EOF
+chmod +x "$TMP/bin/gh"
+cat > "$CFG" <<'YAML'
+projects:
+  alpha:
+    path: "/tmp/alpha"
+    tracker: "none"
+    github:
+      owner: acme
+      repos: [web]
+      review_requested_for: tom
+    jobs:
+      - id: prs
+        integration: github
+        action: watch
+        every: 5m
+  beta:
+    path: "/tmp/beta"
+    tracker: "none"
+    github:
+      owner: acme
+      repos: [api]
+      review_requested_for: tom
+YAML
+echo "global" > "$EA_AGENT_DIR/state/last-poll.yaml"
+CLAUDE_MODE=move tick
+has "queried the job's repo" "--repo acme/web" "$(cat "$GH_ARGV")"
+case "$(cat "$GH_ARGV")" in *"acme/api"*) bad "queried another project's repo" ;; *) ok "did not query beta's repo" ;; esac
+eq "one pr-review drafted" "pr-review" "$(awk '/^type:/{print $2; exit}' "$EA_AGENT_DIR"/queue/drafts/*.md 2>/dev/null)"
+has "seen PR recorded in the job's own state file" "acme/web#7" "$(cat "$STATE/alpha.prs.state.yaml" 2>/dev/null)"
+eq "global last-poll.yaml untouched" "global" "$(cat "$EA_AGENT_DIR/state/last-poll.yaml")"
+eq "receipt ok" ok "$(rfield alpha.prs status)"
+rm -f "$TMP/bin/gh"
+
+# --------------------------------------------------------------------------------------------
 echo "== 11. the real Slack collector: own channels only, own cutoff file =="
 if command -v jq >/dev/null 2>&1; then
-  reset_state; unset EA_JOB_HANDLER_SLACK_WATCH
+  reset_state; unset EA_JOB_HANDLER_WATCH
   export SPY_ARGV="$TMP/spy.argv"; : > "$SPY_ARGV"
   cat > "$TMP/bin/spy" <<'EOF'
 #!/bin/bash

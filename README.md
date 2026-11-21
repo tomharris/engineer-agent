@@ -857,6 +857,19 @@ requires an `agent.typesafe` credential (plus `curl` and `jq`). Its `watch` sour
   like any message, except "is it aimed at me?" is not required. Threads drop out after
   `thread_ttl` (default `7d`).
 
+The other sources have a `watch` job too, each running that source's scripted collector for the
+one project with its own state file (`state/jobs/<project>.<id>.state.yaml`):
+
+| `integration` | Finds | Needs |
+|---|---|---|
+| `github` | PRs awaiting your review | `github.owner`, `repos`, `review_requested_for` |
+| `github-issues` | issues assigned to you | `tracker: github-issues`, `github.issues.assignee` |
+| `jira` | tickets assigned to you | `tracker: jira`; `agent.jira.site`/`email`, a Jira token, `curl`, `jq` |
+| `slite` | docs tagged for review | `slite.doc_labels`; a Slite token, `curl`, `jq` |
+
+A job whose source is not configured is invalid (shown by `/engineer-agent jobs list`), not silently
+idle. A collector that cannot run (missing `jq` or credential) fails the job.
+
 When it finds something, a drafting run starts using the poll's read-only allowlist; drafts land in
 `drafts/` and push to ntfy as usual. Reaction triggers are specified in
 `docs/superpowers/specs/2026-11-09-scheduled-jobs-design.md` and not built yet.
@@ -1232,7 +1245,7 @@ scripts/
   install-jobs.sh              Installs the scheduled-jobs dispatcher
   jobs-ctl.sh                  List / run / pause / resume scheduled jobs
   jobs-draft.sh                Drafting run for a job's collected items
-  job-slack-watch.sh           slack/watch job collector
+  job-watch.sh                 <integration>/watch job collector (github, github-issues, jira, slite, slack)
   job-slack-cr-qa.sh           slack/cr-qa job: review + QA a requested PR
   lib-cr-qa.sh                 cr-qa request parsing, review, QA and comment helpers
   lib-review.sh                Review helpers shared by pr-pipeline.sh, implement-next and cr-qa

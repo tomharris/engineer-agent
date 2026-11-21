@@ -77,6 +77,21 @@ jobs_enumerate() {
   done < <(printf '%s\n' "$EA_JOBS_CFG" | awk 'index($0,"project[]=")==1 {print substr($0,11)}')
 }
 
+# jobs_validate_watch_source <slug> <integration> — the collector would skip an unconfigured source
+# and report ok forever, so reject the job with ea-config's skip reason instead. A source "owned"
+# by an exclusive job is configured; ownership only hides it from the global poll.
+jobs_validate_watch_source() {
+  local st src
+  jobs_cfg_load
+  case "$2" in github-issues) src=github_issues ;; *) src="$2" ;; esac
+  st="$(_jcfg "projects.$1.source.${src}")"
+  case "$st" in
+    configured|"skipped:owned by scheduled job "*) return 0 ;;
+    skipped:*) echo "$2:watch: ${st#skipped:}"; return 1 ;;
+    *) echo "$2:watch: source state unknown"; return 1 ;;
+  esac
+}
+
 # jobs_validate <row> — prints a reason and returns 1 if the job must not run; silent 0 if valid.
 # Needs the full enumeration to detect duplicate ids, so pass it as $2.
 jobs_validate() {
@@ -94,6 +109,8 @@ jobs_validate() {
       jobs_validate_implement "$slug" "$idx" github-issues || return 1 ;;
     slack:cr-qa)
       jobs_validate_cr_qa "$slug" "$idx" || return 1 ;;
+    github:watch|github-issues:watch|jira:watch|slite:watch)
+      jobs_validate_watch_source "$slug" "$integ" || return 1 ;;
   esac
   [ "$sup" = "1" ] || { echo "unsupported integration/action '${integ}:${action}'"; return 1; }
   secs="$(jobs_duration_seconds "$every")"

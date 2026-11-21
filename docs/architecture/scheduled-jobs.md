@@ -3,7 +3,7 @@
 
 `projects.<slug>.jobs` gives one project's integration its own interval, **alongside** the global
 poll. Spec: `docs/superpowers/specs/2026-11-09-scheduled-jobs-design.md` (phased; phases 1–5 are built —
-dispatcher, `slack`/`watch` with `channels`/`mentions`/`my-threads`, status reactions,
+dispatcher, `watch` for every source (`github`, `github-issues`, `jira`, `slite`, `slack`), `slack`/`watch` with `channels`/`mentions`/`my-threads`, status reactions,
 `jira`/`implement-next`, and `github-issues`/`implement-next` as phase 6a, plus `after_pr` and
 `github-issues`/`address-feedback` below).
 
@@ -11,7 +11,8 @@ dispatcher, `slack`/`watch` with `channels`/`mentions`/`my-threads`, status reac
 jobs-tick.sh (every 60s; install-jobs.sh)
   for each valid, unpaused, in-window, due job → detached run_job:
     job lock → handler → receipt → failure streak / pause
-      slack:watch          job-slack-watch.sh → poll-slack.sh --project --sources <watch> → manifest → jobs-draft.sh
+      <integ>:watch        job-watch.sh → poll-<source>.sh --project (own state file) → manifest → jobs-draft.sh
+                           (github → poll-github-prs.sh; slack also gets --sources <watch>)
       jira:implement-next  job-jira-implement-next.sh: guards → ar_select → drafts/ item
                            → push for Approve, or (implement + jira-claim) claim → confined run
       github-issues:implement-next  job-github-implement-next.sh: same shape, gr_select,
@@ -41,6 +42,10 @@ Things a reader will otherwise "fix" back:
   is computed in `ea-config.sh`'s `_source_state`, so the scripted path, the bash receipt and the
   model's `EXCLUSIVE:` prompt line all agree. A paused job claiming a source would make it silently
   unpolled. The job's own collector sets `EA_JOBS_IGNORE_EXCLUSIVE=1`.
+- **A non-Slack `watch` job on an unconfigured source is invalid** (`jobs_validate_watch_source`,
+  reason from `_source_state`). The collector would skip the source and report `ok` forever. Slack
+  is exempt: `mentions` / `my-threads` need no channels. "Owned by scheduled job" counts as
+  configured, since ownership only hides the source from the global poll.
 - **`poll-slack.sh --project` reads only that project's channels.** A channel the project doesn't
   watch has no Tier 0 route to it, so reading it only buys messages the filter discards.
 - **Failure pushes: first failure, then the pause** (`guards.pause_after_failures`, default 3) —
