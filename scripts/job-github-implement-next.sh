@@ -103,7 +103,11 @@ if [ "$ACTION" = address-feedback ]; then
   gr_feedback_md "$TMPD/issue.json" > "$TMPD/feedback"
   prefix="$("${PLUGIN_ROOT}/scripts/ea-config.sh" dump 2>/dev/null | awk -F= '$1=="agent.branch_prefix" {print $2; exit}')"
   prefix="${prefix:-engineer-agent}"
-  IFS='|' read -r FB_MODE FB_BRANCH FB_PR <<< "$(gr_feedback_branch "$TMPD/issue.json" "$SLUG" "$prefix")"
+  IFS='|' read -r FB_MODE FB_BRANCH FB_PR FB_REPO <<< "$(gr_feedback_branch "$TMPD/issue.json" "$SLUG" "$prefix")"
+  if [ "${FB_MODE:-}" = reuse ]; then
+    v="$(gr_branch_pusher_verdict "$FB_REPO" "$FB_BRANCH")"
+    [ "$v" = ok ] || { log "${KEY}: not reusing ${FB_BRANCH} (${v}); opening a new branch"; FB_MODE=new; }
+  fi
   if [ "${FB_MODE:-}" != reuse ]; then
     FB_MODE=new
     FB_BRANCH="${prefix}/issue-${NUM}-$(branch_slug "$(jq -r "${I}.title // \"\"" "$TMPD/issue.json")")-feedback-${REOPEN_EPOCH}"

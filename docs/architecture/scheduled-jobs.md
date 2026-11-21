@@ -338,7 +338,10 @@ shared.
 - **Branch**: bash writes `state/pr-pipeline/<item>/feedback_branch` (`reuse|new`, branch, original
   PR) from GitHub's PR fields, never issue text. `reuse` takes the newest open, non-fork PR in the
   project's repos whose head is under `agent.branch_prefix` (the only branches `confined-push.sh`
-  pushes); `run_ticket_implementation` checks it out with `checkout -B` before claude starts,
+  pushes) and only when the repository activity API names the gh user as the pusher of every write
+  to that branch (`gr_branch_pusher_verdict`; unknown, truncated or anyone else's push falls back to
+  `new`): the run builds the branch's code, and the prefix does not stop others pushing to it.
+  `run_ticket_implementation` checks it out with `checkout -B` before claude starts,
   because the run itself may only create branches, and the prompt forbids a new PR. Otherwise `new`:
   `<prefix>/issue-N-<slug>-feedback-<epoch>`, created by the run, with a draft PR referencing the
   original. A failed checkout refuses the run (claim released per `on_fail`). Feedback runs are never

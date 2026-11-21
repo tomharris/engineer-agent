@@ -963,8 +963,9 @@ one comment after it); the other predicates except `no_linked_pr` still apply. D
 - Each reopen is picked once (the item's `source_id` is `owner/repo#N@reopen-<epoch>`).
 - The comments since the reopen go into the item's `## Feedback` section, and for an unattended run
   the reopener and every comment author and editor since the reopen must be in `trusted_authors`.
-- If the original PR is still open (same repo, not a fork, branch under `agent.branch_prefix`) the
-  fix is pushed to its branch; otherwise a new `<prefix>/issue-N-<slug>-feedback-<epoch>` branch
+- If the original PR is still open (same repo, not a fork, branch under `agent.branch_prefix`, and
+  every push to that branch was yours per the repository activity API) the fix is pushed to its
+  branch; otherwise a new `<prefix>/issue-N-<slug>-feedback-<epoch>` branch
   and draft PR referencing the original. `after_pr` runs either way.
 - Use `assignee: any` and `on_fail.unassign: false`; see the commented `gh-feedback` example.
 

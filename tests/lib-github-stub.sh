@@ -33,6 +33,11 @@ node() {  # node <N> — the fixture with live assignees/board/state
 }
 opt_name() { case "$1" in o1) echo Todo ;; o2) echo "In Progress" ;; o3) echo Ready ;; esac; }
 if [ "$path" = user ]; then echo "$me"; exit 0; fi
+case "$path" in
+  repos/acme/web/activity\?*)   # $ST/activity: the branch's activity JSON; absent = API error
+    printf '%s\n' "$path" >> "$ST/activity_reqs"
+    [ -f "$ST/activity" ] && { cat "$ST/activity"; exit 0; }; exit 1 ;;
+esac
 if [ "$path" = graphql ]; then
   case "$query" in
     *"search(query"*)
