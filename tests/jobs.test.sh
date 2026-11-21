@@ -461,6 +461,13 @@ else
   echo "  SKIP: jq not installed"
 fi
 
+echo "== config lookups under pipefail (a match early in a config larger than a pipe buffer)"
+{ printf 'agent.autonomy.auto_execute[]=implement\nprojects.p.trusted_authors[]=lead\nprojects.p.x=1\n'; seq -f 'filler.%g=x' 20000; } > "$TMP/bigcfg"
+out="$(bash -c 'set -uo pipefail; source "$1/scripts/lib-jobs.sh"; source "$1/scripts/lib-assign-rules.sh"; EA_JOBS_CFG="$(cat "$2")"
+  jobs_autonomy_allows implement && echo tier; _ar_is_list projects.p.trusted_authors && echo list
+  v="$(_jcfg projects.p.x)" && echo "jcfg=$v"; v="$(_arc projects.p.x)" && echo "arc=$v"' _ "$REPO_ROOT" "$TMP/bigcfg" 2>&1 | paste -sd' ' -)"
+eq "early matches succeed, whatever the config's size" "tier list jcfg=1 arc=1" "$out"
+
 echo
 echo "Passed: $PASS  Failed: $FAIL"
 [ "$FAIL" -eq 0 ]

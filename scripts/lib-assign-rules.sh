@@ -19,10 +19,10 @@ AR_ONFAIL_KEYS="unassign transition"
 AR_MAX_RESULTS="${AR_MAX_RESULTS:-50}"
 
 # Raw accessors: unlike _jcfg these keep '|' (valid in JQL).
-_arc()  { printf '%s\n' "$EA_JOBS_CFG" | awk -F= -v k="$1" '$1==k {sub(/^[^=]*=/,""); print; exit}'; }
-_arcl() { printf '%s\n' "$EA_JOBS_CFG" | awk -v p="$1[]=" 'index($0,p)==1 {print substr($0,length(p)+1)}'; }
-_ar_is_list()   { printf '%s\n' "$EA_JOBS_CFG" | grep -qF -e "$1[]=" -e "$1[]#empty"; }
-_ar_is_scalar() { printf '%s\n' "$EA_JOBS_CFG" | awk -v p="$1=" 'index($0,p)==1 {f=1} END {exit !f}'; }
+_arc()  { awk -F= -v k="$1" '$1==k {sub(/^[^=]*=/,""); print; exit}' <<< "$EA_JOBS_CFG"; }
+_arcl() { awk -v p="$1[]=" 'index($0,p)==1 {print substr($0,length(p)+1)}' <<< "$EA_JOBS_CFG"; }
+_ar_is_list()   { grep -qF -e "$1[]=" -e "$1[]#empty" <<< "$EA_JOBS_CFG"; }
+_ar_is_scalar() { awk -v p="$1=" 'index($0,p)==1 {f=1} END {exit !f}' <<< "$EA_JOBS_CFG"; }
 
 # _ar_children <path> — distinct immediate child keys present under <path>.
 _ar_children() {
