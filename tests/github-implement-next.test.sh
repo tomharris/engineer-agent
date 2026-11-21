@@ -122,7 +122,7 @@ write_config "[]" "{ project_statuses: [Ready] }" '["le ad"]'
 eq "a malformed login is refused" "trusted_authors entry 'le ad' is not a GitHub login" "$(valid)"
 write_config "[]" "{ project_status: [Ready] }"
 eq "an unknown require key is refused" \
-  "rule ready require: unknown key 'project_status' (allowed: labels_any labels_none milestones issue_types project_statuses title_prefixes assignee min_age min_quiet no_open_blockers no_linked_pr has_acceptance_criteria min_body_chars)" "$(valid)"
+  "rule ready require: unknown key 'project_status' (allowed: labels_any labels_none milestones issue_types project_statuses title_prefixes assignee min_age min_quiet no_open_blockers no_linked_pr has_acceptance_criteria min_body_chars reopened_with_feedback)" "$(valid)"
 write_config "[]" "{ milestones: v2 }"
 eq "a scalar where a list belongs is refused" "rule ready: require.milestones must be a list" "$(valid)"
 write_config "[]"; sed -i.bak 's/^        board: .*$//' "$EA_CONFIG_FILE"

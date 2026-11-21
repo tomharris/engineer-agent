@@ -7,7 +7,7 @@
 #                                  honors validation, pause and lock)
 #   jobs-ctl.sh pause <key>        stop a job running until resumed
 #   jobs-ctl.sh resume <key>       clear a pause (manual or circuit-breaker) and its failure streak
-#   jobs-ctl.sh preview <key>      implement-next only: fetch each rule's tickets and show which
+#   jobs-ctl.sh preview <key>      implement-next / address-feedback only: fetch each rule's tickets and show which
 #                                  one would be picked and why each other one was skipped (read-only;
 #                                  ignores the job's guards)
 # <key> is <project>.<id>.
@@ -84,11 +84,11 @@ cmd_preview() {
       _arcl "projects.${slug}.investigation.jira_types" > "$TMPD/jira_types"
       export AR_JIRA_TYPES_FILE="$TMPD/jira_types"
       out="$(AR_TRACE=1 AR_EVAL_ALL=1 ar_select "$slug" "$idx" 2>&1 >"$TMPD/pick")"; rc=$? ;;
-    github-issues:implement-next)
+    github-issues:implement-next|github-issues:address-feedback)
       reason="$(gr_validate "$slug" "$idx")" || die "$key rules are invalid: $reason"
       gr_init || die "$GR_ERR"
       out="$(AR_TRACE=1 AR_EVAL_ALL=1 gr_select "$slug" "$idx" 2>&1 >"$TMPD/pick")"; rc=$? ;;
-    *) die "preview applies to implement-next jobs only" ;;
+    *) die "preview applies to implement-next and address-feedback jobs only" ;;
   esac
   printf '%s\n' "$out"
   case "$rc" in

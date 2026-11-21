@@ -17,7 +17,8 @@
 #
 # Not a collector: it writes to GitHub, so it runs only after selection, for one issue, under the
 # `github-claim` tier or after a human Approve. It must never appear in a model run's
-# --allowedTools. The key must equal the item's source_id and name one of the project's repos.
+# --allowedTools. The key must equal the item's source_id (or its
+# <key>@reopen-<epoch> form for address-feedback) and name one of the project's repos.
 set -uo pipefail
 
 PLUGIN_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -48,14 +49,19 @@ case "$MODE" in claim|release) ;; *) die "usage: gh-claim.sh claim|release --job
 [[ "$KEY" =~ ^[A-Za-z0-9-]+/[A-Za-z0-9._-]+#[0-9]+$ ]] || die "invalid issue key '${KEY}'"
 [[ "$RUN_ID" =~ ^[A-Za-z0-9._-]+$ ]] || die "invalid run id"
 [ -f "$ITEM" ] || die "no such queue item: $ITEM"
-[ "$(fm "$ITEM" source_id)" = "$KEY" ] || die "item source_id '$(fm "$ITEM" source_id)' does not match ${KEY}"
+# An address-feedback item is keyed per reopen cycle: <key>@reopen-<epoch>.
+case "$(fm "$ITEM" source_id)" in
+  "$KEY") ;;
+  "$KEY"@reopen-*) [[ "$(fm "$ITEM" source_id)" =~ @reopen-[0-9]+$ ]] || die "item source_id '$(fm "$ITEM" source_id)' does not match ${KEY}" ;;
+  *) die "item source_id '$(fm "$ITEM" source_id)' does not match ${KEY}" ;;
+esac
 REPO="${KEY%#*}"; NUM="${KEY##*#}"
 
 jobs_cfg_load
 ROW="$(jobs_enumerate | awk -F'|' -v k="$JOB" '($1 "." $3) == k { print; exit }')"
 [ -n "$ROW" ] || die "no such job: $JOB"
 IFS='|' read -r SLUG IDX _ INTEG ACTION _ <<< "$ROW"
-[ "${INTEG}:${ACTION}" = "github-issues:implement-next" ] || die "$JOB is not a github-issues:implement-next job"
+case "${INTEG}:${ACTION}" in github-issues:implement-next|github-issues:address-feedback) ;; *) die "$JOB is not a github-issues implement-next or address-feedback job" ;; esac
 reason="$(gr_validate "$SLUG" "$IDX")" || die "$JOB rules are invalid: $reason"
 P="$(ar_rule_prefix_by_name "$SLUG" "$IDX" "$RULE")" || die "$JOB has no rule named '${RULE}'"
 _ar_member "$(_gr_lower "$REPO")" "$(gr_project_repos "$SLUG")" 0 || die "${REPO} is not one of ${SLUG}'s github.repos"

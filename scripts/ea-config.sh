@@ -126,7 +126,7 @@ _source_state() {
 # --- Scheduled jobs (scripts/jobs-tick.sh) -----------------------------------------------------
 # The (integration:action) pairs the dispatcher has a handler for. Single source of truth: jobs
 # naming anything else are reported unsupported and never run, and never claim `exclusive`.
-JOBS_SUPPORTED="slack:watch slack:cr-qa jira:implement-next github-issues:implement-next"
+JOBS_SUPPORTED="slack:watch slack:cr-qa jira:implement-next github-issues:implement-next github-issues:address-feedback"
 
 # Job integration name -> the source name used by _source_state / the receipt.
 _job_source() {

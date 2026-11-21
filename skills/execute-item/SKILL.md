@@ -143,6 +143,11 @@ read `projects.<project>.tracker`, or infer from `source` frontmatter (`github` 
     truncated to 40 chars, trailing hyphens stripped.
   - tracker `jira`: `{branch_prefix}/{ticket_key}`
 
+  **Feedback run exception.** If the run prompt contains `FEEDBACK RUN`, skip the probe below
+  and go straight to case 3 (`implement-ticket`) with the branch and PR instructions the prompt
+  gives: the ticket was reopened, so its original branch existing on the remote does not mean this
+  work is done.
+
   **Then probe for that branch, in this order, and take the first case that matches:**
 
   1. **On the remote** (`git ls-remote --exit-code --heads origin {branch}` succeeds) — the work

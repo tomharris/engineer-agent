@@ -265,6 +265,10 @@ run_ticket_implementation() {
     return 1
   fi
   base="$WT_BASE"; wt="$WT_PATH"
+  if ! feedback_checkout "$item" "$project_path" "$wt"; then
+    git -C "$project_path" worktree remove --force "$wt" >>"$LOG_FILE" 2>&1 || true
+    return 1
+  fi
   prepare_run_worktree "$project" "$wt"
   project_validate_command "$project"
   log "implementing ticket ${item} in isolated worktree ${wt} (project ${project}, base $(wt_base_desc)); build tools: ${build_rules[*]}; validate: ${VALIDATE_CMD:-none}"
@@ -304,7 +308,7 @@ PUSH ONLY with: ${PLUGIN_ROOT}/scripts/confined-push.sh --no-verify (from the ti
 Read config from ${EA_CONFIG_FILE}. \
 To finalize the queue item, WRITE the completed record to ${AGENT_DIR}/queue/completed/${item} (status: completed). You do NOT need to delete the drafts/ original — the listener reconciles that afterward; do not spend effort trying to remove it. \
 Operate ONLY inside this working directory (plus writing that one completed/ queue file). \
-${HANDOFF_PROMPT:-} ${NO_MEMORY_RULE} Be concise."
+${FEEDBACK_PROMPT} ${HANDOFF_PROMPT:-} ${NO_MEMORY_RULE} Be concise."
 
   # Turn-completion push (opt-in: agent.notify.turn_completions). hooks/hooks.json fires
   # scripts/turn-notify-hook.sh at the end of every turn, but ONLY when armed — and this run is
@@ -377,6 +381,47 @@ ${HANDOFF_PROMPT:-} ${NO_MEMORY_RULE} Be concise."
   reconcile_queue_move "$item"
   inflight_end "$item"
   return 0
+}
+
+# --- address-feedback ------------------------------------------------------------------------------
+# state/pr-pipeline/<item>/feedback_branch is "<reuse|new>|<branch>|<original PR>", written by the
+# job from GitHub's PR fields before any model ran. The checkout and the branch named in the prompt
+# come from it alone, so feedback text can steer the code but not where it is pushed.
+
+# feedback_branch_row <item> — "mode|branch|pr" for a valid row; rc 1 when the item is no feedback run.
+feedback_branch_row() {
+  local f="${PR_PIPELINE_DIR}/${1%.md}/feedback_branch" mode br pr prefix
+  [ -s "$f" ] || return 1
+  IFS='|' read -r mode br pr < "$f"
+  prefix="$("${PLUGIN_ROOT}/scripts/ea-config.sh" dump 2>/dev/null | awk -F= '$1=="agent.branch_prefix" {print $2; exit}')"
+  case "$mode" in reuse|new) ;; *) return 1 ;; esac
+  [[ "$br" =~ ^[A-Za-z0-9._/-]+$ ]] && [[ "$br" != *..* ]] || return 1
+  case "$br" in "${prefix:-engineer-agent}/"?*) ;; *) return 1 ;; esac
+  [[ "$pr" =~ ^[0-9]*$ ]] || return 1
+  printf '%s|%s|%s\n' "$mode" "$br" "$pr"
+}
+
+# feedback_checkout <item> <project-path> <worktree> — sets FEEDBACK_PROMPT. For a reuse run, puts
+# the worktree on the PR branch at origin's tip here, on the privileged side: the confined run may
+# only create branches. rc 1 refuses the run (a corrupt row, or a branch that cannot be checked
+# out, e.g. because it is checked out in the user's own checkout).
+feedback_checkout() {
+  local item="$1" project_path="$2" wt="$3" row mode br pr
+  FEEDBACK_PROMPT=""
+  [ -e "${PR_PIPELINE_DIR}/${item%.md}/feedback_branch" ] || return 0
+  row="$(feedback_branch_row "$item")" || { log "WARN: ${item} has an unusable feedback_branch record; refusing"; return 1; }
+  IFS='|' read -r mode br pr <<< "$row"
+  if [ "$mode" = reuse ]; then
+    if ! with_timeout 60 git -C "$project_path" fetch --quiet origin "refs/heads/${br}:refs/remotes/origin/${br}" >>"$LOG_FILE" 2>&1 \
+       || ! git -C "$wt" checkout --quiet -B "$br" "origin/${br}" >>"$LOG_FILE" 2>&1; then
+      log "WARN: could not check out ${br} for feedback run ${item}; refusing"
+      return 1
+    fi
+    FEEDBACK_PROMPT="FEEDBACK RUN: this ticket was reopened with feedback; the item's '## Feedback' section is the work to do, the original description is context. The worktree is already checked out on '${br}', the branch of the still-open PR #${pr}. Commit the fix ON THIS BRANCH (do not create another branch), push it with confined-push.sh, and do NOT open a new pull request: PR #${pr} picks up the push. This overrides the skill's branch probe and branch creation."
+  else
+    FEEDBACK_PROMPT="FEEDBACK RUN: this ticket was reopened with feedback; the item's '## Feedback' section is the work to do, the original description is context${pr:+ (its earlier PR was #${pr})}. Create the branch '${br}' with git checkout -b (not the usual ticket branch name), implement the feedback, push it, and open a DRAFT PR from it whose body starts with 'Closes #<issue number>'${pr:+ and references #${pr} as the PR this follows up}. This overrides the skill's branch probe and branch name."
+  fi
+  log "feedback run ${item}: ${mode} ${br}${pr:+ (PR #${pr})}"
 }
 
 # record_ticket_branch <item> <worktree> — state/pr-pipeline/<item>/branch, only for a branch under
@@ -594,6 +639,8 @@ _handoff_offer() {
   local item="$1" row slug repos desc list="" EA_JOBS_CFG=""   # fresh config: the listener is long-lived
   HANDOFF_PROMPT="" HANDOFF_NONCE=""
   [ -e "${PR_PIPELINE_DIR}/${item%.md}/handoff_job" ] && return 0
+  # A feedback run's branch belongs to this project's PR.
+  [ -e "${PR_PIPELINE_DIR}/${item%.md}/feedback_branch" ] && return 0
   row="$(autopilot_lookup "$item")" || return 0
   command -v jobs_enumerate >/dev/null 2>&1 || . "${PLUGIN_ROOT}/scripts/lib-jobs.sh"
   jobs_cfg_load
