@@ -170,8 +170,8 @@ The poll's own per-run budget is capped with `--max-budget-usd`, default **`6.00
 full 6-project × 4-source poll that reads live Slack channels and may draft a PR review / ticket
 intent inline can exceed a low cap; when it does, `claude -p` aborts mid-run, writes no receipt, and
 the next fire re-attempts the same work — a flat `2.00` did exactly this once mcp-proxy Slack reads
-started succeeding. `cron-poll.sh` also takes a **PID lockfile** (`state/cron-poll.lock`) and exits
-early if another poll is already running (a stale lock from a dead PID is reclaimed): two concurrent
+started succeeding. `cron-poll.sh` also takes a **PID lockfile** (`state/drafting.lock`, shared with every job's
+`jobs-draft.sh`; see `lib-drafting-lock.sh`) and exits early if another drafter is already running (a stale lock from a dead PID is reclaimed): two concurrent
 polls thrash the same state/receipt files and each burns its full budget racing the other.
 
 > **The lockfile cannot catch a hung poll under launchd — launchd never starts a second instance of

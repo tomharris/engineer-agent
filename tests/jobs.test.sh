@@ -318,13 +318,22 @@ eq "incomplete drafting => partial" partial "$(rfield alpha.watch status)"
 reset_state; base_config
 echo "20261109-100000-slack-question-c.md" > "$TMP/h.alpha.watch.items"
 sleep 30 & LIVE=$!
-echo "$LIVE" > "$EA_AGENT_DIR/state/cron-poll.lock"
+echo "$LIVE" > "$EA_AGENT_DIR/state/drafting.lock"
 CLAUDE_MODE=move tick
-eq "poll running => drafting deferred" deferred "$(rfield alpha.watch drafting)"
+eq "another drafter running => drafting deferred" deferred "$(rfield alpha.watch drafting)"
 eq "deferral is not a failure" ok "$(rfield alpha.watch status)"
-[ -e "$TMP/claude.calls" ] && bad "claude ran despite the poll lock" || ok "claude not started while the poll runs"
-[ "$(cat "$EA_AGENT_DIR/state/cron-poll.lock")" = "$LIVE" ] && ok "the poll's lock is left alone" || bad "poll lock clobbered"
-kill "$LIVE" 2>/dev/null; wait "$LIVE" 2>/dev/null; rm -f "$EA_AGENT_DIR/state/cron-poll.lock"
+[ -e "$TMP/claude.calls" ] && bad "claude ran despite the drafting lock" || ok "claude not started while another drafter runs"
+has "deferred item stays in incoming/" "slack-question-c.md" "$(ls "$EA_AGENT_DIR/queue/incoming")"
+[ "$(cat "$EA_AGENT_DIR/state/drafting.lock")" = "$LIVE" ] && ok "the holder's lock is left alone" || bad "drafting lock clobbered"
+kill "$LIVE" 2>/dev/null; wait "$LIVE" 2>/dev/null
+
+reset_state; base_config
+echo "20261109-100000-slack-question-d.md" > "$TMP/h.alpha.watch.items"
+( exit 0 ) & DEAD=$!; wait "$DEAD"
+echo "$DEAD" > "$EA_AGENT_DIR/state/drafting.lock"
+CLAUDE_MODE=move tick
+eq "a dead holder's lock is reclaimed" done "$(rfield alpha.watch drafting)"
+[ -e "$EA_AGENT_DIR/state/drafting.lock" ] && bad "drafting lock left behind" || ok "drafting lock released"
 
 # --------------------------------------------------------------------------------------------
 echo "== 9. invalid jobs are recorded, not run =="
@@ -492,6 +501,61 @@ reset_state; watch_config jira '    jira:
       assignee: tom' | true
 sed -i.bak 's/tracker: "github-issues"/tracker: "jira"/' "$CFG"
 has "list names the missing dependency" "unavailable: agent.jira.site is not set" "$(bash "$CTL" list)"
+
+echo "== 10c4. resume sweep: each job re-emits only its own stranded items =="
+reset_state
+printf '#!/bin/bash\nexit 0\n' > "$TMP/bin/gh"; chmod +x "$TMP/bin/gh"
+cat > "$CFG" <<'YAML'
+projects:
+  alpha:
+    path: "/tmp/alpha"
+    tracker: "github-issues"
+    github:
+      owner: acme
+      repos: [web]
+      issues:
+        assignee: tom
+    jobs:
+      - id: w
+        integration: github-issues
+        action: watch
+        every: 5m
+  beta:
+    path: "/tmp/beta"
+    tracker: "github-issues"
+    github:
+      owner: acme
+      repos: [api]
+      issues:
+        assignee: tom
+    jobs:
+      - id: w
+        integration: github-issues
+        action: watch
+        every: 5m
+YAML
+rm -f "$EA_AGENT_DIR/state/.ea-config"*
+strand() {  # strand <name> <type> <source> <project>
+  printf -- '---\ntype: %s\nsource: %s\nsource_id: "acme/%s#1"\ntitle: "t"\nproject: "%s"\n---\n## Context\n' \
+    "$2" "$3" "$1" "$4" > "$EA_AGENT_DIR/queue/incoming/$1.md"
+}
+strand a-ticket ticket github alpha
+strand a-pr pr-review github alpha
+strand a-jira ticket jira alpha
+strand b-ticket ticket github beta
+strand u-ticket ticket github _unrouted
+resumed() {  # resumed <project> — manifest resume rows' basenames, sorted
+  : > "$TMP/wm.$1"
+  bash "$REPO_ROOT/scripts/job-watch.sh" --integration github-issues --project "$1" --job "$1.w" \
+    --manifest "$TMP/wm.$1" --errors "$TMP/we" --run-ts 2026-11-09T10:00:00Z >/dev/null 2>&1
+  awk -F'\t' '$1 == "resume" { n = split($2, p, "/"); print p[n] }' "$TMP/wm.$1" | sort | tr '\n' ' ' | sed 's/ $//'
+}
+eq "alpha's job takes its own ticket and the unrouted one (first key owns unrouted)" \
+   "a-ticket.md u-ticket.md" "$(resumed alpha)"
+eq "beta's job takes only its own ticket" "b-ticket.md" "$(resumed beta)"
+date -u +%Y-%m-%dT%H:%M:%SZ > "$STATE/alpha.w.paused"
+eq "a paused owner hands unrouted items to the next job" "b-ticket.md u-ticket.md" "$(resumed beta)"
+rm -f "$TMP/bin/gh"
 
 echo "== 10d. the real PR collector: own project only, own state file =="
 reset_state

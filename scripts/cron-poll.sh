@@ -4,6 +4,8 @@ set -euo pipefail
 PLUGIN_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 # shellcheck source=lib-paths.sh
 source "${PLUGIN_ROOT}/scripts/lib-paths.sh"
+# shellcheck source=lib-drafting-lock.sh
+source "${PLUGIN_ROOT}/scripts/lib-drafting-lock.sh"
 AGENT_DIR="$EA_AGENT_DIR"
 LOG_FILE="${AGENT_DIR}/state/cron-poll.log"
 
@@ -27,16 +29,15 @@ mkdir -p "${AGENT_DIR}/state"
 # Single-run lock: a scheduled poll normally finishes in minutes, but a slow run (large
 # backlog, many Slack reads) can still be in flight when the next fire lands — and a manual
 # run can collide with a scheduled one. Two concurrent polls thrash the same state/receipt
-# files and each burns the full budget racing the other (observed 2026-07-22). Take a PID
-# lock and exit early if another poll holds it; a stale lock (dead PID) is reclaimed.
-LOCK_FILE="${AGENT_DIR}/state/cron-poll.lock"
-if [ -f "$LOCK_FILE" ] && kill -0 "$(cat "$LOCK_FILE" 2>/dev/null)" 2>/dev/null; then
-  echo "--- Poll skipped at $(date -u +%Y-%m-%dT%H:%M:%SZ): another poll (PID $(cat "$LOCK_FILE")) is running ---" >> "$LOG_FILE"
+# files and each burns the full budget racing the other (observed 2026-07-22). Take the
+# drafting lock (shared with every job's drafting run) and exit early if it is held; a stale lock
+# (dead PID) is reclaimed.
+if ! holder="$(drafting_lock_acquire)"; then
+  echo "--- Poll skipped at $(date -u +%Y-%m-%dT%H:%M:%SZ): another drafter (PID ${holder}) is running ---" >> "$LOG_FILE"
   exit 0
 fi
-echo $$ > "$LOCK_FILE"
 WATCHDOG_PID=""
-trap 'rm -f "$LOCK_FILE"; [ -z "$WATCHDOG_PID" ] || kill "$WATCHDOG_PID" 2>/dev/null || true' EXIT
+trap 'drafting_lock_release; [ -z "$WATCHDOG_PID" ] || kill "$WATCHDOG_PID" 2>/dev/null || true' EXIT
 
 # Wall-clock cap on the whole run. launchd never starts a second instance of a job that is still
 # running, so the lock check above never fires under it: a run that hangs (a `gh` call once blocked
