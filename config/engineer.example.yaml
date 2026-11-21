@@ -538,7 +538,7 @@ projects:
     #         channel: C12345678         #   must be one of projects.<slug>.slack.channels
     #
     #   # Feedback on reopened GitHub issues: same keys and pipeline as gh-autopilot. Picks an issue
-    #   # whose latest reopen has a comment after it (once per reopen), puts those comments in the
+    #   # whose latest reopen has a comment since the close it undid (once per reopen), puts those comments in the
     #   # item, and pushes to the original PR's branch while that PR is open, else opens a new PR.
     #   - id: gh-feedback
     #     integration: github-issues

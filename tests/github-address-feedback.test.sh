@@ -157,8 +157,17 @@ fb_issue 3 '.reopens.nodes += [{__typename: "ClosedEvent", createdAt: "2025-11-0
 fb_issue 4
 echo "1 2 3 4" > "$ST/search"
 eq "never reopened, no feedback, closed again, and eligible" \
-  "acme/web#1 skip  reopened_with_feedback: never reopened|acme/web#2 skip  reopened_with_feedback: no comment since the last reopen|acme/web#3 skip  reopened_with_feedback: closed again since the last reopen|acme/web#4 PICK" \
+  "acme/web#1 skip  reopened_with_feedback: never reopened|acme/web#2 skip  reopened_with_feedback: no comment since it was closed|acme/web#3 skip  reopened_with_feedback: closed again since the last reopen|acme/web#4 PICK" \
   "$(verdicts | paste -sd'|' -)"
+
+reset; write_config "[]"
+fb_issue 1 '.comments.nodes[1].createdAt = "2025-11-08T10:00:00Z"'
+fb_issue 2 '.comments.nodes[1].createdAt = "2025-11-08T09:59:59Z"'
+fb_issue 3 '.comments.nodes[1].createdAt = "2025-11-05T09:59:59Z"'
+echo "1 2 3" > "$ST/search"
+eq "Reopen with comment counts (same second, or a second before); a comment before the close does not" \
+  "acme/web#1 PICK|acme/web#2 eligible|acme/web#3 skip  reopened_with_feedback: no comment since it was closed" \
+  "$(bash "$REPO_ROOT/scripts/jobs-ctl.sh" preview web.fb 2>&1 | sed -nE 's/^  ([a-z]+\/[a-z]+#[0-9]+)  (.*)$/\1 \2/p' | paste -sd'|' -)"
 
 echo "== per-reopen identity"
 reset; write_config "[]"
@@ -178,7 +187,7 @@ case "$ITEM" in *-ticket-gh-1-feedback.md) ok "completed/ record present" ;; *) 
 eq "item keyed per reopen" "acme/web#1@reopen-${R1}|${R1}" \
   "$(fm_of "$Q/completed/$ITEM" source_id)|$(fm_of "$Q/completed/$ITEM" feedback_reopen)"
 grep -qF "The button is misaligned on mobile" "$Q/completed/$ITEM" && ok "feedback comment in the item" || bad "feedback comment in the item"
-grep -qF "Looks good before the close" "$Q/completed/$ITEM" && bad "pre-reopen comment leaked into the item" || ok "pre-reopen comment left out"
+grep -qF "Looks good before the close" "$Q/completed/$ITEM" && bad "pre-close comment leaked into the item" || ok "pre-close comment left out"
 grep -qF "The button is misaligned on mobile" "$EA_AGENT_DIR/state/pr-pipeline/${ITEM%.md}/ticket.md" \
   && ok "feedback kept in the review guard's ticket text" || bad "feedback in ticket.md"
 eq "ledger keeps the plain issue key" "${ITEM}	web.fb	reopened	acme/web#1	github" "$(cat "$EA_AGENT_DIR/state/autopilot-items.tsv")"
@@ -250,7 +259,11 @@ reset; fb_issue 1 '.comments.nodes[1].userContentEdits = {totalCount: 40, nodes:
 untrusted_case "comment edit history truncated" "comment edit history truncated; cannot verify edits"
 
 reset; fb_issue 1 '.comments.totalCount = 300'; write_config "[implement, github-claim]"
-run_job; eq "truncation before the reopen does not hide feedback" "1" "$(grep -c . "$CLAUDE_LOG")"
+run_job; eq "truncation before the close does not hide feedback" "1" "$(grep -c . "$CLAUDE_LOG")"
+reset; fb_issue 1 '.comments.nodes[1].createdAt = "2025-11-08T09:59:59Z" | .comments.nodes[1].author.login = "stranger"'
+untrusted_case "untrusted Reopen-with-comment author" "feedback comment by stranger, not a trusted author"
+reset; fb_issue 1 '.comments.totalCount = 300 | .comments.nodes = [{createdAt: "2025-11-06T10:00:00Z", body: "x", author: {login: "lead"}, userContentEdits: {totalCount: 0, nodes: []}}]'
+untrusted_case "comment history truncated between the close and the reopen" "comment history truncated; cannot verify feedback"
 
 echo "== dispatcher"
 reset; write_config "[implement, github-claim]"
