@@ -261,7 +261,7 @@ eq "resumed job runs and succeeds" ok "$(rfield alpha.watch status)"
 
 echo 3 > "$TMP/h.alpha.watch.rc"
 EA_NOW=$((T0 + 1500)) tick
-has "exit 3 explains the missing credential" "agent.typesafe credential" "$(cat "$STATE/alpha.watch.receipt")"
+has "exit 3 with no recorded reason still says the collector was unavailable" "collector unavailable (exit 3)" "$(cat "$STATE/alpha.watch.receipt")"
 rm -f "$TMP/h.alpha.watch.rc"
 
 echo "collector: C9 read failed" > "$TMP/h.alpha.watch.err"
@@ -441,13 +441,57 @@ printf '#!/bin/bash\nexit 0\n' > "$TMP/bin/gh"; chmod +x "$TMP/bin/gh"
 reset_state; watch_config jira '    jira:
       project: ENG
       assignee: tom'
-out="$(wrun jira)"; has "jira maps to poll-jira.sh" "poll-jira:" "$out"; has "jira unavailable exits 3" "rc=3" "$out"
+out="$(wrun jira)"; has "jira unavailable exits 3" "rc=3" "$out"
+eq "jira preflight reason recorded" "collector unavailable: agent.jira.site is not set" "$(cat "$TMP/we")"
 reset_state; watch_config slite '    slite:
       doc_labels: [needs-review]'
-out="$(wrun slite)"; has "slite maps to poll-slite.sh" "poll-slite:" "$out"; has "slite unavailable exits 3" "rc=3" "$out"
+: > "$TMP/we"; out="$(wrun slite)"; has "slite unavailable exits 3" "rc=3" "$out"
+eq "slite preflight reason recorded" "collector unavailable: no Slite API key available (checked env/file/keychain)" "$(cat "$TMP/we")"
 reset_state; watch_config github-issues
-out="$(wrun github-issues)"; has "github-issues maps to poll-github-issues.sh" "Found 0 issue(s)" "$out"; has "rc 0" "rc=0" "$out"
+: > "$TMP/we"; out="$(wrun github-issues)"; has "github-issues maps to poll-github-issues.sh" "Found 0 issue(s)" "$out"; has "rc 0" "rc=0" "$out"
 has "unknown integration is a usage error" "rc=2" "$(wrun gitlab)"
+
+echo "== 10c2. collector --check: availability without network or state =="
+export NET_CALLS="$TMP/net.calls"
+printf '#!/bin/bash\necho "gh $*" >> "$NET_CALLS"; exit 0\n'   > "$TMP/bin/gh";   chmod +x "$TMP/bin/gh"
+printf '#!/bin/bash\necho "curl $*" >> "$NET_CALLS"; exit 0\n' > "$TMP/bin/curl"; chmod +x "$TMP/bin/curl"
+check() {  # check <collector> — prints "rc=<n> <last stderr line>"
+  local out rc; : > "$NET_CALLS"
+  out="$(bash "$REPO_ROOT/scripts/$1.sh" --check 2>&1 >/dev/null)"; rc=$?
+  printf 'rc=%s %s' "$rc" "$(printf '%s' "$out" | tail -1)"
+}
+check_cfg() { printf '%s\n' "$@" > "$CFG"; rm -f "$EA_AGENT_DIR/state/.ea-config"*; }
+reset_state; check_cfg 'projects:' '  alpha:' '    path: "/tmp/alpha"'
+eq "github PRs available when gh is installed" "rc=0 " "$(check poll-github-prs)"
+eq "github issues available when gh is installed" "rc=0 " "$(check poll-github-issues)"
+if command -v jq >/dev/null 2>&1; then
+  has "jira without site" "rc=3 poll-jira: agent.jira.site is not set" "$(check poll-jira)"
+  check_cfg 'agent:' '  jira:' '    site: acme.atlassian.net'
+  has "jira without email" "rc=3 poll-jira: agent.jira.email is not set" "$(check poll-jira)"
+  check_cfg 'agent:' '  jira:' '    site: acme.atlassian.net' '    email: dev@example.com' '    api_token_env: EA_TEST_JIRA'
+  has "jira without token" "rc=3 poll-jira: no Jira API token available" "$(check poll-jira)"
+  eq "jira with token is available" "rc=0 " "$(EA_TEST_JIRA=t check poll-jira)"
+  check_cfg 'agent:' '  slite:' '    api_key_env: EA_TEST_SLITE'
+  has "slite without key" "rc=3 poll-slite: no Slite API key available" "$(check poll-slite)"
+  eq "slite with key is available" "rc=0 " "$(EA_TEST_SLITE=k check poll-slite)"
+  check_cfg 'agent:' '  slack:' '    bin: "/nonexistent/spy"' '  typesafe:' '    api_key_env: EA_TEST_TSK'
+  has "slack without TypeSafe" "rc=3 poll-slack: no TypeSafe credential available" "$(check poll-slack)"
+  has "slack without its binary" "rc=3 poll-slack: Slack binary '/nonexistent/spy' not found" "$(EA_TEST_TSK=k check poll-slack)"
+  check_cfg 'agent:' '  slack:' "    bin: \"$TMP/bin/gh\"" '  typesafe:' '    api_key_env: EA_TEST_TSK'
+  eq "slack with TypeSafe and binary is available" "rc=0 " "$(EA_TEST_TSK=k check poll-slack)"
+else
+  echo "  SKIP: jq not installed"
+fi
+eq "--check made no gh or curl call" "" "$(cat "$NET_CALLS")"
+[ -e "$EA_AGENT_DIR/state/last-poll.yaml" ] && bad "--check wrote poll state" || ok "--check wrote no poll state"
+rm -f "$TMP/bin/gh" "$TMP/bin/curl"
+
+echo "== 10c3. jobs list shows why a watch job's collector cannot run =="
+reset_state; watch_config jira '    jira:
+      project: ENG
+      assignee: tom' | true
+sed -i.bak 's/tracker: "github-issues"/tracker: "jira"/' "$CFG"
+has "list names the missing dependency" "unavailable: agent.jira.site is not set" "$(bash "$CTL" list)"
 
 echo "== 10d. the real PR collector: own project only, own state file =="
 reset_state

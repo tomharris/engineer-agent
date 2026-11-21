@@ -79,8 +79,7 @@ job_body() {
   esac
   case "${kind}:${rc}" in
     *:0) ;;
-    slack:watch:3) status=error; echo "collector unavailable (exit 3): check agent.typesafe credential, curl and jq — see state/jobs.log" >> "$w/errors" ;;
-    *:watch:3) status=error; echo "collector unavailable (exit 3): check jq, curl and the ${kind%%:*} credential — see state/jobs.log" >> "$w/errors" ;;
+    *:watch:3) status=error; [ -s "$w/errors" ] || echo "collector unavailable (exit 3) — see state/jobs.log" >> "$w/errors" ;;
     *:watch:*) status=error; echo "collector exited ${rc} — see state/jobs.log" >> "$w/errors" ;;
     *:3) status=error; [ -s "$w/errors" ] || echo "${kind} unavailable (exit 3) — see state/jobs.log" >> "$w/errors" ;;
     *) status=error; [ -s "$w/errors" ] || echo "${kind} exited ${rc} — see state/jobs.log" >> "$w/errors" ;;

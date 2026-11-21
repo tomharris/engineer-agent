@@ -46,6 +46,10 @@ Things a reader will otherwise "fix" back:
   reason from `_source_state`). The collector would skip the source and report `ok` forever. Slack
   is exempt: `mentions` / `my-threads` need no channels. "Owned by scheduled job" counts as
   configured, since ownership only hides the source from the global poll.
+- **Collector availability is checked per run, not in `jobs_validate`.** `jobs_watch_preflight`
+  runs `poll-<source>.sh --check`, which resolves credentials (a Keychain call on macOS); doing
+  that for every job on every tick costs too much. A failed check is a failed run, so it pushes and
+  pauses like any failure. `jobs-ctl list` runs it too, for `unavailable:`.
 - **`poll-slack.sh --project` reads only that project's channels.** A channel the project doesn't
   watch has no Tier 0 route to it, so reading it only buys messages the filter discards.
 - **Failure pushes: first failure, then the pause** (`guards.pause_after_failures`, default 3) —

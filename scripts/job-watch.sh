@@ -11,7 +11,8 @@
 #
 # Usage: job-watch.sh --integration <github|github-issues|jira|slite|slack> --project <slug>
 #                     --job <key> --manifest <file> --errors <file> [--run-ts <iso>]
-# Exit:  the collector's (0 ok, 3 unavailable — e.g. no jq or credential); 2 usage.
+# Exit:  the collector's (0 ok, 3 unavailable); 2 usage. An unavailable collector (`--check` fails)
+#        records why in --errors and does not run.
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -32,18 +33,17 @@ done
 [ -n "$INTEG" ] && [ -n "$PROJECT" ] && [ -n "$JOB" ] && [ -n "$MANIFEST" ] \
   || { echo "job-watch.sh: missing arguments" >&2; exit 2; }
 
-case "$INTEG" in
-  github)        COLLECTOR=poll-github-prs.sh ;;
-  github-issues) COLLECTOR=poll-github-issues.sh ;;
-  jira)          COLLECTOR=poll-jira.sh ;;
-  slite)         COLLECTOR=poll-slite.sh ;;
-  slack)         COLLECTOR=poll-slack.sh ;;
-  *) echo "job-watch.sh: unsupported integration '$INTEG'" >&2; exit 2 ;;
-esac
+. "${SCRIPT_DIR}/lib-jobs.sh"
+COLLECTOR="$(jobs_watch_collector "$INTEG")"
+[ -n "$COLLECTOR" ] || { echo "job-watch.sh: unsupported integration '$INTEG'" >&2; exit 2; }
+
+if ! reason="$(jobs_watch_preflight "$INTEG")"; then
+  echo "collector unavailable: ${reason}" >> "${ERRORS:-/dev/stderr}"
+  exit 3
+fi
 
 EXTRA=()
 if [ "$INTEG" = slack ]; then
-  . "${SCRIPT_DIR}/lib-jobs.sh"
   jobs_cfg_load
   IDX="$(jobs_enumerate | awk -F'|' -v k="$JOB" '($1 "." $3) == k { print $2; exit }')"
   [ -n "$IDX" ] || { echo "job-watch.sh: no such job: $JOB" >&2; exit 2; }

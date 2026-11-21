@@ -26,7 +26,8 @@
 #      source_id dedup handed a shared repo's issue to whichever project the loop reached first —
 #      an arbitrary misroute that looked like a confident decision, with no _unrouted escape.
 #
-# Usage: poll-github-issues.sh [--project <slug>] [--run-ts <iso>] [--dry-run] [--manifest <file>]
+# Usage: poll-github-issues.sh [--project <slug>] [--run-ts <iso>] [--dry-run] [--manifest <file>] [--check]
+#        --check: exit 0 if the collector could run, else log why and exit 3. No network, no state.
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -52,12 +53,13 @@ TAB="$(printf '\t')"
 # field (e.g. no labels) and shift every column after it.
 US="$(printf '\037')"
 
-ONLY_PROJECT=""; RUN_TS=""; DRY_RUN=0; MANIFEST=""
+ONLY_PROJECT=""; RUN_TS=""; DRY_RUN=0; MANIFEST=""; CHECK=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --project)  ONLY_PROJECT="$2"; shift 2 ;;
     --run-ts)   RUN_TS="$2"; shift 2 ;;
     --dry-run)  DRY_RUN=1; shift ;;
+    --check)    CHECK=1; shift ;;
     --manifest) MANIFEST="$2"; shift 2 ;;
     -h|--help)  sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "poll-github-issues.sh: unknown argument '$1'" >&2; exit 2 ;;
@@ -76,6 +78,7 @@ emit() { [ -n "$MANIFEST" ] && printf '%s\n' "$*" >> "$MANIFEST"; return 0; }
 b64d() { base64 -d 2>/dev/null || base64 -D 2>/dev/null; }
 
 command -v gh >/dev/null 2>&1 || { log "poll-github-issues: gh not found; skipping"; exit 3; }
+[ "$CHECK" -eq 1 ] && exit 0   # --check: every precondition above passed; no network, no state
 GH_TIMEOUT="${EA_POLL_CMD_TIMEOUT:-120}"
 
 EA_CFG="$("${SCRIPT_DIR}/ea-config.sh" dump)"; export EA_CFG

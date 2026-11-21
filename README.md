@@ -868,7 +868,9 @@ one project with its own state file (`state/jobs/<project>.<id>.state.yaml`):
 | `slite` | docs tagged for review | `slite.doc_labels`; a Slite token, `curl`, `jq` |
 
 A job whose source is not configured is invalid (shown by `/engineer-agent jobs list`), not silently
-idle. A collector that cannot run (missing `jq` or credential) fails the job.
+idle. Before each run the job checks that its collector can run (`poll-<source>.sh --check`: `jq`,
+`curl`, credentials, required config; no network). If not, the run fails with the reason (first
+failure pushes, repeated failures pause the job) and `jobs list` shows it as `unavailable: <reason>`.
 
 When it finds something, a drafting run starts using the poll's read-only allowlist; drafts land in
 `drafts/` and push to ntfy as usual. Reaction triggers are specified in

@@ -55,6 +55,9 @@ cmd_list() {
     printf '%-32s %-16s %-6s %-12s %-26s %s\n' "$key" "${integ}:${action}" "$every" "$state" \
       "$(fmt_epoch "$last")${rstat:+ ($rstat)}" "$next"
     [ "$state" = invalid ] && printf '    invalid: %s\n' "$reason"
+    if [ "$state" != invalid ] && [ "$action" = watch ] && ! reason="$(jobs_watch_preflight "$integ")"; then
+      printf '    unavailable: %s\n' "$reason"
+    fi
     if [ -n "$rstat" ] && [ "$rstat" != ok ]; then
       printf '    last error: %s\n' "$(awk '/^errors:/ {f=1; next} f && /^  - / {sub(/^  - "?/, ""); sub(/"$/, ""); print; exit}' "$(job_path "$key" receipt)")"
     fi
