@@ -111,47 +111,30 @@ The new entry should follow this structure:
     # Include slack/slite sections only if the user configured them
 ```
 
-### 6. Initialize State Entry
+### 6. Offer Default Watch Jobs
 
-Read `~/.local/share/engineer-agent/state/last-poll.yaml`. Add entries for the new project:
+Do **not** write anything under `state/`. Each watch job keeps its own cutoff file and starts from
+the collector's default; queue reconciliation dedups.
 
-1. Add a `projects.<slug>` entry with initial state:
+Run:
 
-```yaml
-projects:
-  {slug}:
-    github:
-      last_checked: "1970-01-01T00:00:00Z"
-      seen_prs: []
-    slack:
-      last_checked_ts: "0"
-    jira:
-      seen_tickets: []
-    github_issues:
-      last_checked: "1970-01-01T00:00:00Z"
-      seen_issues: []
-    slite:
-      last_checked: "1970-01-01T00:00:00Z"
-      seen_docs: []
+```bash
+${CLAUDE_PLUGIN_ROOT}/scripts/jobs-default-watch.sh {slug}
 ```
 
-Only include sections for integrations the user configured. Include `github_issues` if tracker is `github-issues`, `jira` if tracker is `jira`.
+It prints one `watch` job entry per source this project configures (PR reviews, the tracker,
+Slack, Slite), or nothing. If it printed nothing, skip to step 7. Otherwise show the output and ask:
 
-2. If tracker is `jira`, also add entries to the top-level `jira_projects` section for each Jira project key in the sources (if not already present):
+> Add these watch jobs? They discover new work for this project every 15 minutes
+> (dispatched by `scripts/jobs-tick.sh`; install with `scripts/install-jobs.sh` if you haven't).
 
-```yaml
-jira_projects:
-  {JIRA_KEY}:
-    last_checked: "1970-01-01T00:00:00Z"
-```
+On yes, Edit the new project entry in `engineer.yaml`: add a `    jobs:` line at the end of the entry
+followed by the script's output **verbatim** (it is already indented for that position). Do not
+hand-write or alter job entries. Then run `${CLAUDE_PLUGIN_ROOT}/scripts/jobs-ctl.sh list` and
+report any job it marks `invalid`.
 
-3. If tracker is `github-issues`, add entries to the top-level `github_repos` section for each `{owner}/{repo}` (if not already present). This is the per-repo collection boundary `poll-github-issues` uses, mirroring `jira_projects`:
-
-```yaml
-github_repos:
-  {owner}/{repo}:
-    last_checked: "1970-01-01T00:00:00Z"
-```
+On no, say that `/engineer-agent status` will list its sources as UNCOVERED: only the legacy
+global poll (while installed) or a manual `/engineer-agent poll` will discover work for it.
 
 ### 7. Print Summary
 
@@ -163,6 +146,8 @@ Project "{slug}" registered!
   Tracker: {GitHub Issues | Jira | not configured}
   Slack:   {configured | not configured}
   Slite:   {configured | not configured}
+  Jobs:    {ids of the watch jobs added | none}
 
-Run /engineer-agent poll to start polling this project's sources.
+{If jobs were added:} Run `/engineer-agent jobs` to see when each runs next.
+{Otherwise:} Run `/engineer-agent poll` to check this project's sources by hand.
 ```

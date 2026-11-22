@@ -263,6 +263,24 @@ run > "$TMP/out2"
 if [ -z "$(ls -A "$EA_AGENT_DIR/queue/incoming" 2>/dev/null)" ]; then ok "completed ticket not re-queued"; else bad "re-queued a completed ticket (the self-sustaining comment loop)"; fi
 if grep -q 'Skipped (terminal): ENG-10' "$TMP/out2"; then ok "skip is REPORTED, not hidden as 0 new"; else bad "skipped ids must be reported"; fi
 
+echo "== a manually added ticket is not re-queued by its jira:watch job (no seen_tickets needed) =="
+# add-ticket writes no poll state: queue reconciliation alone must absorb the key. The shape below is
+# add-ticket's template; the job runs with its own, empty state file.
+write_config; reset
+manual() {  # manual <dir> [draft]
+  printf -- '---\ntype: ticket\nsource: jira\nsource_id: "ENG-40"\ntitle: "Manually added"\nstatus: drafted\nproject: "alpha"\nmanual: true\n---\n## Context\nBody.\n' \
+    > "$EA_AGENT_DIR/queue/$1/20260820-090000-ticket-ENG-40.md"
+  [ "${2:-}" = draft ] && printf '\n## Draft Response\nPlan.\n' >> "$EA_AGENT_DIR/queue/$1/20260820-090000-ticket-ENG-40.md"
+}
+set_issues "[$(issue ENG-40 'Manually added' Story)]"
+for where in "drafts draft" "incoming"; do
+  rm -f "$EA_AGENT_DIR"/queue/*/*.md "$TMP/job.state.yaml"; : > "$TMP/manifest"
+  manual $where
+  EA_POLL_STATE_FILE="$TMP/job.state.yaml" EA_JOBS_IGNORE_EXCLUSIVE=1 run --project alpha >/dev/null
+  eq "manual item in ${where%% *}/: no second file" 1 "$(ls "$EA_AGENT_DIR"/queue/*/*ENG-40* | wc -l | tr -d ' ')"
+  eq "manual item in ${where%% *}/: no draft row" 0 "$(grep -c '^draft	' "$TMP/manifest")"
+done
+
 echo "== a completed investigation absorbs a rival ticket (one source_id family) =="
 write_config; reset
 set_issues "[$(issue ENG-11 'Spike: pick a queue' Spike)]"

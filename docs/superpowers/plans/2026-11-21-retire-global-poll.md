@@ -85,10 +85,10 @@ The resume sweep emits every undrafted `incoming/` item regardless of project or
 
 **Files:** modify `commands/add-ticket.md`, `commands/add-project.md`; add `scripts/state-seed.sh`; test `tests/state-seed.test.sh`.
 
-- [ ] Verify first: does queue reconciliation alone stop a manually added ticket from being re-queued? (`queue_disposition` returns `unchanged`/`skip` for any existing item in a non-terminal or terminal dir.) If yes, delete add-ticket step 8 and add a regression test proving a `jira:watch` run over the same key produces no new file. If no, continue below.
-- [ ] `state-seed.sh seen --project <slug> --source <src> --id <source_id>`: appends to every job state file owning that project/source (via `state_list_add`), creating the job state file if missing. `add-ticket` calls it instead of editing YAML by hand (deterministic, no model-authored state).
-- [ ] `add-project`: drop the `last-poll.yaml` seeding step. Instead offer to append default `watch` jobs for each configured source (Task 7's generator for one project).
-- [ ] Tests: seeded id is skipped by the next job run; seeding with no job configured creates no stray file and exits 0 with a message.
+- [x] Verify first: does queue reconciliation alone stop a manually added ticket from being re-queued? (`queue_disposition` returns `unchanged`/`skip` for any existing item in a non-terminal or terminal dir.) If yes, delete add-ticket step 8 and add a regression test proving a `jira:watch` run over the same key produces no new file. If no, continue below.
+- [x] ~~`state-seed.sh seen --project <slug> --source <src> --id <source_id>`: appends to every job state file owning that project/source (via `state_list_add`), creating the job state file if missing. `add-ticket` calls it instead of editing YAML by hand (deterministic, no model-authored state).~~ Not needed: verification passed (collectors never read `seen_*`).
+- [x] `add-project`: drop the `last-poll.yaml` seeding step. Instead offer to append default `watch` jobs for each configured source (Task 7's generator for one project). Generator: `scripts/jobs-default-watch.sh <slug> [--every]`; Task 7 reuses it.
+- [x] ~~Tests: seeded id is skipped by the next job run; seeding with no job configured creates no stray file and exits 0 with a message.~~ Replaced by the regression tests (jira + github-issues) and generator tests.
 
 ## Task 7: Migration from global poll to jobs
 

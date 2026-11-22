@@ -46,6 +46,11 @@ Things a reader will otherwise "fix" back:
   heal racing a draft would move or reject a file a model is still editing. A held lock skips the run
   without stamping `last-run`, so the next tick retries. Skipped under `--only` (manual single-job
   runs) and when no jobs are configured. The global poll calls the same script with `--lock-held`.
+- **Manual adds write no poll state.** `add-ticket` relies on queue reconciliation alone (the
+  scripted collectors never read `seen_*`); `poll-jira.test.sh` / `poll-github-issues.test.sh` pin
+  that a watch run over a manually added key creates nothing. `add-project` offers
+  `jobs-default-watch.sh` output (one `watch` job per configured, unwatched source) instead of
+  seeding `last-poll.yaml`.
 - **`status` reads job state** (`queue-status.sh`). Per configured project source, "last checked"
   is the newest of its watch jobs' `last_checked` (state file) and `ok`/`partial` receipt
   `finished_at`; Slack's state holds a message ts, not a wall clock, so it counts only through the

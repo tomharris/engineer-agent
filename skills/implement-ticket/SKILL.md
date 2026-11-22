@@ -30,8 +30,7 @@ Otherwise the ticket has no queue item, so the next poll would find it assigned,
 queue, and mint a duplicate `ticket` item for work already in progress. The pollers dedup on queue
 files (`references/queue-reconciliation.md`), **not** on `seen_*` state — the scripted collectors
 never read `seen_*` at all — so recording the ticket in `seen_tickets` / `seen_issues` alone would
-not prevent it. The ticket needs both a queue item and its seen entry, which is exactly what
-`add-ticket` writes:
+not prevent it. The ticket needs a queue item, which is exactly what `add-ticket` writes:
 
 1. Parse the reference exactly as `add-ticket` Step 2 does to get `source_id`.
 2. Look in `queue/incoming/*.md` and `queue/drafts/*.md` for an item whose frontmatter `source_id`
@@ -40,11 +39,11 @@ not prevent it. The ticket needs both a queue item and its seen entry, which is 
    via `/engineer-agent review-queue` (or `add-ticket {ref} --implement` after removing it) — never
    create a second live item.
 3. Otherwise read `${CLAUDE_PLUGIN_ROOT}/commands/add-ticket.md` (fall back to
-   `{plugin-root}/commands/add-ticket.md` if the env var is unset) and follow its Steps 1–8 with
+   `{plugin-root}/commands/add-ticket.md` if the env var is unset) and follow its Steps 1–7 with
    `--implement` forced (this skill writes code, so the deliverable is not re-decided) and
    `--project` passed through if the user gave one. Do **not** pass `--no-draft`: the item must land
    in `drafts/`, because Step 7's direct-invocation path leaves it there for `review-queue` to open
-   the PR from. Step 8 of `add-ticket` appends the ticket to `seen_tickets` / `seen_issues`.
+   the PR from. `add-ticket` writes no poll state; the queue item itself is the dedup record.
 4. Use the resulting `drafts/` item as the input for Step 1.
 
 Once the item is in `drafts/`, a poll reconciles it as `unchanged`; once it is in `completed/`, as
