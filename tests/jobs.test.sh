@@ -733,6 +733,18 @@ eq "unknown project: message" "jobs-default-watch: no project 'nope' in engineer
 out="$(bash "$DW" alpha --every 5 2>&1)"; rc=$?
 eq "malformed --every: exit 2" 2 "$rc"
 eq "malformed --every: message" "jobs-default-watch: --every '5' must look like 30s, 5m, 2h or 1d" "$out"
+want="      - id: slack-watch-2
+        integration: slack
+        action: watch
+        every: 1h
+        hours: \"9-17\"
+        watch: [channels]"
+eq "--hours adds a window to each entry" "$want" "$(bash "$DW" beta --every 1h --hours 9-17)"
+out="$(bash "$DW" beta --hours 17-9 2>&1)"; rc=$?
+eq "inverted --hours: exit 2" 2 "$rc"
+eq "inverted --hours: message" "jobs-default-watch: --hours '17-9' must be start-end with 0 <= start < end <= 24" "$out"
+out="$(bash "$DW" beta --hours 9-25 2>&1)"; rc=$?
+eq "--hours past 24: exit 2" 2 "$rc"
 
 echo "== 12. queue hygiene runs in the tick, at most every EA_HYGIENE_EVERY, under drafting.lock =="
 hitem() {  # hitem <dir> <file> <source_id> [draft]

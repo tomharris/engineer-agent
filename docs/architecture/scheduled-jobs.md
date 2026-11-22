@@ -65,6 +65,17 @@ Things a reader will otherwise "fix" back:
   is computed in `ea-config.sh`'s `_source_state`, so the scripted path, the bash receipt and the
   model's `EXCLUSIVE:` prompt line all agree. A paused job claiming a source would make it silently
   unpolled. The job's own collector sets `EA_JOBS_IGNORE_EXCLUSIVE=1`.
+- **`migrate-poll-to-jobs.sh` drops `exclusive:` and removes the poll in one step.** Dropping it
+  while the poll still ran would hand an owned source (e.g. a cr-qa channel) back to the poll and
+  its status reactions, so `--apply` removes the poll's LaunchAgent / crontab entry in the same run
+  and refuses while the dispatcher isn't installed. New jobs come from `jobs-default-watch.sh` at
+  the poll's cadence (`StartInterval` / `*/N`; a `StartCalendarInterval` poll becomes `every: 1h`
+  plus `hours:` only when its hours are contiguous). Each new job's state file is seeded from
+  `last-poll.yaml`: the `projects.<slug>.<source>` subtree, plus `jira_projects.<KEY>` for the
+  project's Jira keys and `github_repos.<owner/repo>` for its repos, because those watermarks are
+  what the Jira and GitHub-issues collectors actually filter on. An existing state file is never
+  overwritten. The rewritten config must read back (via `ea-config.sh dump`) as exactly the old
+  jobs plus the new ones, none exclusive, before anything is written.
 - **A non-Slack `watch` job on an unconfigured source is invalid** (`jobs_validate_watch_source`,
   reason from `_source_state`). The collector would skip the source and report `ok` forever. Slack
   is exempt: `mentions` / `my-threads` need no channels. "Owned by scheduled job" counts as
@@ -412,8 +423,9 @@ Things a reader will otherwise "fix" back:
   That message is read alone (its real header comes first) and the job acts on what that read
   says; if it is not a trusted request for this project the ts is marked `untrusted` (safe: no
   trusted request lives there), so a forged header can neither inject nor suppress a request.
-- **Pair it with `exclusive: true`.** The global poll's own "detected" status reaction defaults to
-  `eyes`; without exclusivity it would mark requests claimed before cr-qa sees them.
+- **Pair it with `exclusive: true` while the global poll runs.** The global poll's own "detected"
+  status reaction defaults to `eyes`; without exclusivity it would mark requests claimed before
+  cr-qa sees them. Once the poll is gone (`migrate-poll-to-jobs.sh --apply`) the key is dropped.
 - **Review.** One read-only model run runs `/code-review high origin/<base>` through the Skill
   tool (granted `Skill(code-review)`, `Agent`, `ReportFindings`, and Read on the worktree and workdir
   only — `Read(...)` also scopes Grep/Glob, so neither is granted bare) and replies with nonce-bearing

@@ -3,7 +3,7 @@
 # source that has no watch job yet. YAML list items indented for `projects.<slug>.jobs:`, ready to
 # append. Prints nothing when every configured source is already watched. Read-only.
 #
-# Usage: jobs-default-watch.sh <project> [--every <dur>]   (default 15m)
+# Usage: jobs-default-watch.sh <project> [--every <dur>] [--hours <start-end>]   (default 15m)
 set -uo pipefail
 
 PLUGIN_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -14,16 +14,21 @@ PLUGIN_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
 die() { echo "jobs-default-watch: $*" >&2; exit 2; }
 
-SLUG="${1:-}"; [ -n "$SLUG" ] || die "usage: jobs-default-watch.sh <project> [--every <dur>]"
+SLUG="${1:-}"; [ -n "$SLUG" ] || die "usage: jobs-default-watch.sh <project> [--every <dur>] [--hours <start-end>]"
 shift
-EVERY=15m
+EVERY=15m; HOURS=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --every) EVERY="${2:-}"; shift 2 ;;
+    --hours) HOURS="${2:-}"; shift 2 ;;
     *) die "unknown argument '$1'" ;;
   esac
 done
 [ -n "$(jobs_duration_seconds "$EVERY")" ] || die "--every '${EVERY}' must look like 30s, 5m, 2h or 1d"
+if [ -n "$HOURS" ]; then
+  [[ "$HOURS" =~ ^([0-9]{1,2})-([0-9]{1,2})$ ]] && [ $((10#${BASH_REMATCH[1]})) -lt $((10#${BASH_REMATCH[2]})) ] \
+    && [ $((10#${BASH_REMATCH[2]})) -le 24 ] || die "--hours '${HOURS}' must be start-end with 0 <= start < end <= 24"
+fi
 
 jobs_cfg_load
 printf '%s\n' "$EA_JOBS_CFG" | grep -Fqx "project[]=${SLUG}" || die "no project '${SLUG}' in engineer.yaml"
@@ -49,6 +54,7 @@ for src in github github_issues jira slack slite; do
   while id_taken "$id"; do id="${integ}-watch-${n}"; n=$((n+1)); done
   NEW_IDS="${NEW_IDS} ${id}"
   printf '      - id: %s\n        integration: %s\n        action: watch\n        every: %s\n' "$id" "$integ" "$EVERY"
+  [ -n "$HOURS" ] && printf '        hours: "%s"\n' "$HOURS"
   [ "$integ" = slack ] && printf '        watch: [channels]\n'
 done
 exit 0
