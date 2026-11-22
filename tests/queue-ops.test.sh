@@ -158,6 +158,82 @@ rm -f "$EA_AGENT_DIR/state/last-poll-receipt.yaml"
 SOUT="$("$STATUS")"
 if printf '%s' "$SOUT" | grep -q 'No receipt'; then ok "missing receipt reported"; else bad "missing receipt must be reported"; fi
 
+echo "== queue-status: discovery reads job state =="
+JA="$TMP/jobs-agent"; JS="$JA/state/jobs"
+mkdir -p "$JA"/queue/{incoming,drafts,completed,rejected} "$JS"
+cat > "$JA/engineer.yaml" <<'YAML'
+projects:
+  alpha:
+    path: "/tmp/alpha"
+    tracker: "jira"
+    jira:
+      project: "ENG"
+    slack:
+      channels: ["C1"]
+    jobs:
+      - id: jira-a
+        integration: jira
+        action: watch
+        every: 5m
+      - id: jira-b
+        integration: jira
+        action: watch
+        every: 5m
+      - id: sw
+        integration: slack
+        action: watch
+        every: 5m
+        watch: [channels]
+  beta:
+    path: "/tmp/beta"
+    tracker: "none"
+    github:
+      owner: acme
+      repos: [web]
+      review_requested_for: tom
+YAML
+receipt() { # receipt <key> <status> <finished> [error]
+  { printf 'run_id: "r"\nstarted_at: "%s"\nfinished_at: "%s"\nstatus: %s\nitems: 0\ndrafting: none\n' "$3" "$3" "$2"
+    if [ -n "${4:-}" ]; then printf 'errors:\n  - "%s"\n' "$4"; else printf 'errors: []\n'; fi
+  } > "$JS/$1.receipt"
+}
+printf 'projects:\n  alpha:\n    jira:\n      last_checked: "2026-11-09T09:00:00Z"\n' > "$JS/alpha.jira-a.state.yaml"
+receipt alpha.jira-a ok "2026-11-09T08:00:00Z"
+printf 'projects:\n  alpha:\n    jira:\n      last_checked: "2026-11-09T08:30:00Z"\n' > "$JS/alpha.jira-b.state.yaml"
+receipt alpha.jira-b ok "2026-11-09T09:30:00Z"
+receipt alpha.sw error "2026-11-09T09:10:00Z" "slack auth expired"
+echo "auto 2026-11-09T09:10:00Z" > "$JS/alpha.sw.paused"
+
+JOUT="$(EA_AGENT_DIR="$JA" "$STATUS")"
+line() { printf '%s\n' "$JOUT" | grep -F -- "$1" | head -1; }
+case "$(line '  alpha / jira ')" in
+  *"via alpha.jira-b"*) ok "newest timestamp wins across two jobs of one source" ;;
+  *) bad "alpha / jira should show alpha.jira-b — got [$(line '  alpha / jira ')]" ;;
+esac
+case "$(line '  alpha / jira ')" in *UNCOVERED*) bad "a source with a valid job is covered" ;; *) ok "a source with a valid job is covered" ;; esac
+case "$(line 'alpha / slack')" in
+  *"UNCOVERED"*"alpha.sw paused"*) ok "a source whose only job is paused is uncovered" ;;
+  *) bad "alpha / slack should be uncovered with alpha.sw paused — got [$(line 'alpha / slack')]" ;;
+esac
+case "$(line 'beta / github')" in
+  *"UNCOVERED"*"no watch job"*) ok "a configured source with no watch job is uncovered" ;;
+  *) bad "beta / github should be uncovered — got [$(line 'beta / github')]" ;;
+esac
+eq "unconfigured sources are not listed" "" "$(line 'beta / slack')"
+eq "job health aggregate" "Job health: 2 ok, 0 partial, 0 error, 1 paused, 0 invalid, 0 never run" "$(line 'Job health:' | sed 's/^ *//')"
+eq "paused job listed with its error" "alpha.sw paused: slack auth expired" "$(line 'alpha.sw paused:' | sed 's/^ *//')"
+case "$JOUT" in *"No receipt"*) bad "jobs configured: a missing global-poll receipt is not a problem" ;; *) ok "no legacy receipt section without a legacy receipt" ;; esac
+JJ="$(EA_AGENT_DIR="$JA" "$STATUS" --json)"
+eq "json job counts" '"jobs":{"ok":2,"partial":0,"error":0,"paused":1,"invalid":0,"never":0}' \
+  "$(printf '%s' "$JJ" | grep -o '"jobs":{[^}]*}')"
+eq "json uncovered count" "2" "$(printf '%s' "$JJ" | sed -n 's/.*"uncovered":\([0-9]*\).*/\1/p')"
+
+printf 'projects:\n  alpha:\n    jira:\n      last_checked: "2026-11-09T06:00:00Z"\n' > "$JA/state/last-poll.yaml"
+case "$(EA_AGENT_DIR="$JA" "$STATUS")" in
+  *"Global poll (legacy)"*) ok "legacy last-poll.yaml labelled as the legacy global poll" ;;
+  *) bad "legacy section must be labelled" ;;
+esac
+
 echo
 echo "Passed: $PASS  Failed: $FAIL"
 [ "$FAIL" -eq 0 ]

@@ -363,7 +363,12 @@ heal was declined and needs a look.
 /engineer-agent status
 ```
 
-When scheduled jobs are configured, `status` also lists them (see `/engineer-agent jobs`).
+When scheduled jobs are configured, `status` also shows, per project and source, when a watch job
+last checked it (newest across that source's jobs) and which job did; flags **UNCOVERED** sources (configured, but no
+valid, unpaused `watch` job, so nothing will discover new work there once the global poll is
+removed); and sums job health (`ok` / `partial` / `error` / `paused` / `invalid` / `never run`),
+listing each job that is not ok with its first error. The global poll's `last-poll.yaml` and receipt
+are shown, labelled "legacy", only while they exist.
 
 ### `/engineer-agent jobs [list | run <project>.<id> | pause <project>.<id> | resume <project>.<id> | preview <project>.<id>]`
 

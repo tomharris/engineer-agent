@@ -36,11 +36,16 @@ path; the poll moves these to `drafts/`, so a non-zero count means the move was 
 duplicate `(type, source_id)` groups that auto-healing declined to resolve — the poll pushes about
 each of those exactly once, so `status` is where a standing duplicate stays visible.
 
-When scheduled jobs are configured it ends with a "Scheduled jobs" table (from
-`scripts/jobs-ctl.sh list`). Call out any job that is `paused`, `invalid`, or whose last run was not
-`ok` — the dispatcher skips those silently every minute.
+When scheduled jobs are configured it prints a "Discovery" section (per project / source: when a
+watch job last checked it, and which job) and a "Job health" line, then ends with a "Scheduled jobs"
+table (from `scripts/jobs-ctl.sh list`). Call out every **UNCOVERED** source — configured, but no
+valid, unpaused watch job, so nothing discovers new work there once the global poll is gone — and
+every job listed under "Job health" (paused, invalid, partial or error); the dispatcher skips or
+fails those silently every minute. Sections labelled "Global poll (legacy)" appear only while
+`state/last-poll.yaml` / `last-poll-receipt.yaml` exist.
 
-`--json` is available if you need the numbers rather than the table (it omits jobs).
+`--json` is available if you need the numbers rather than the table: it includes `jobs` counts and
+`uncovered`, not the per-job detail.
 
 ### 3. Check Integrations
 

@@ -86,9 +86,107 @@ count_block() {
 R_ERRS="$(count_block errors)";   R_ERRS="${R_ERRS:-0}"
 R_SKIPPED="$(count_block skipped)"; R_SKIPPED="${R_SKIPPED:-0}"
 
+# --- Scheduled jobs: discovery coverage and health ----------------------------------------------
+. "${SCRIPT_DIR}/lib-jobs.sh"
+jobs_cfg_load
+JOB_ROWS="$(jobs_enumerate)"
+J_OK=0; J_PARTIAL=0; J_ERROR=0; J_PAUSED=0; J_INVALID=0; J_NEVER=0; UNCOVERED=0
+DISCOVERY=""; JOB_PROBLEMS=""; JOB_STATES=""
+nl='
+'
+
+job_first_error() {
+  awk '/^errors:/ {f=1; next} f && /^  - / {sub(/^  - "?/, ""); sub(/"$/, ""); print; exit}' \
+    "$(job_path "$1" receipt)" 2>/dev/null
+}
+# job_state <row> — invalid | paused | ok | partial | error | never
+job_state() {
+  local slug id rest key
+  IFS='|' read -r slug _ id rest <<< "$1"
+  key="$(job_key "$slug" "$id")"
+  if ! jobs_validate "$1" "$JOB_ROWS" >/dev/null; then echo invalid
+  elif job_is_paused "$key"; then echo paused
+  else
+    case "$(job_receipt_field "$key" status)" in
+      ok|partial|error) job_receipt_field "$key" status ;;
+      *) echo never ;;
+    esac
+  fi
+}
+
+while IFS= read -r row; do
+  [ -n "$row" ] || continue
+  IFS='|' read -r slug _ id _ <<< "$row"
+  key="$(job_key "$slug" "$id")"
+  st="$(job_state "$row")"
+  JOB_STATES="${JOB_STATES}${key}=${st}${nl}"
+  case "$st" in
+    ok) J_OK=$((J_OK+1)) ;;
+    partial) J_PARTIAL=$((J_PARTIAL+1)) ;;
+    error) J_ERROR=$((J_ERROR+1)) ;;
+    paused) J_PAUSED=$((J_PAUSED+1)) ;;
+    invalid) J_INVALID=$((J_INVALID+1)) ;;
+    never) J_NEVER=$((J_NEVER+1)) ;;
+  esac
+  case "$st" in
+    ok|never) ;;
+    invalid) JOB_PROBLEMS="${JOB_PROBLEMS}${key} invalid: $(jobs_validate "$row" "$JOB_ROWS")${nl}" ;;
+    *) e="$(job_first_error "$key")"
+       [ -n "$e" ] || e="$(cat "$(job_path "$key" paused)" 2>/dev/null)"
+       JOB_PROBLEMS="${JOB_PROBLEMS}${key} ${st}: ${e:-no error recorded}${nl}" ;;
+  esac
+done <<< "$JOB_ROWS"
+
+# Per configured project source: the newest last_checked across its watch jobs' state files and
+# ok/partial receipts. A source with no valid, unpaused watch job is UNCOVERED: once the global poll
+# is gone nothing else discovers it.
+state_last_checked() {  # state_last_checked <key> <slug> <src>
+  local f; f="$(job_path "$1" state.yaml)"
+  [ -f "$f" ] || return 0
+  YAML_SEP='|' yaml_dump "$f" | sed -n "s/^projects|$2|$3|last_checked=//p" | head -1 | sed 's/^"//; s/"$//'
+}
+while IFS= read -r slug; do
+  [ -n "$slug" ] || continue
+  for src in github github_issues jira slack slite; do
+    case "$(_jcfg "projects.${slug}.source.${src}")" in
+      configured|"skipped:owned by scheduled job "*) ;;
+      *) continue ;;
+    esac
+    integ="$src"; [ "$src" = github_issues ] && integ=github-issues
+    best=""; best_key=""; covered=0; notes=""
+    while IFS= read -r row; do
+      [ -n "$row" ] || continue
+      IFS='|' read -r rslug _ id rinteg action _ <<< "$row"
+      [ "$rslug" = "$slug" ] && [ "$rinteg" = "$integ" ] && [ "$action" = watch ] || continue
+      key="$(job_key "$slug" "$id")"
+      case "$(printf '%s' "$JOB_STATES" | awk -F= -v k="$key" '$1==k {print $2; exit}')" in
+        invalid) notes="${notes}, ${key} invalid" ;;
+        paused)  notes="${notes}, ${key} paused" ;;
+        *) covered=1 ;;
+      esac
+      for ts in "$(state_last_checked "$key" "$slug" "$src")" \
+                "$(case "$(job_receipt_field "$key" status)" in ok|partial) job_receipt_field "$key" finished_at ;; esac)"; do
+        [ -n "$ts" ] || continue
+        if [ -z "$best" ] || [[ "$ts" > "$best" ]]; then best="$ts"; best_key="$key"; fi
+      done
+    done <<< "$JOB_ROWS"
+    label="$(printf '%s / %s' "$slug" "$integ")"
+    if [ "$covered" -eq 0 ]; then
+      UNCOVERED=$((UNCOVERED+1))
+      DISCOVERY="${DISCOVERY}$(printf '  %-30s UNCOVERED: no watch job%s' "$label" "${notes:+ runnable (${notes#, })}")${nl}"
+    elif [ -n "$best" ]; then
+      DISCOVERY="${DISCOVERY}$(printf '  %-30s %-10s via %s' "$label" "$(relative_age "$best")" "$best_key")${nl}"
+    else
+      DISCOVERY="${DISCOVERY}$(printf '  %-30s %-10s' "$label" "never")${nl}"
+    fi
+  done
+done < <(printf '%s\n' "${EA_JOBS_CFG:-}" | awk 'index($0,"project[]=")==1 {print substr($0,11)}')
+
 if [ "$JSON" -eq 1 ]; then
   printf '{"incoming":%d,"drafts":%d,"completed":%d,"rejected":%d,"unrouted":%d,"stranded":%d,"stranded_drafted":%d,"duplicates":%d,' \
     "$INCOMING" "$DRAFTS" "$COMPLETED" "$REJECTED" "$UNROUTED" "$STRANDED" "$STRANDED_DRAFTED" "$DUPES"
+  printf '"jobs":{"ok":%d,"partial":%d,"error":%d,"paused":%d,"invalid":%d,"never":%d},"uncovered":%d,' \
+    "$J_OK" "$J_PARTIAL" "$J_ERROR" "$J_PAUSED" "$J_INVALID" "$J_NEVER" "$UNCOVERED"
   printf '"receipt":{"status":"%s","items_queued":"%s","finished_at":"%s","errors":%d,"skipped":%d}}\n' \
     "${R_STATUS:-unknown}" "${R_ITEMS:-0}" "${R_WHEN:-}" "$R_ERRS" "$R_SKIPPED"
   exit 0
@@ -119,10 +217,21 @@ if [ "$DUPES" -gt 0 ]; then
 fi
 echo
 
-echo "Last poll (per project / per source)"
-if [ ! -f "$STATE" ]; then
-  echo "  No polls have run yet."
-else
+if [ -n "$JOB_ROWS" ] || [ -n "$DISCOVERY" ]; then
+  echo "Discovery (per project / per source, from scheduled watch jobs)"
+  if [ -n "$DISCOVERY" ]; then printf '%s' "$DISCOVERY"; else echo "  No configured sources."; fi
+  [ "$UNCOVERED" -gt 0 ] && [ -f "$STATE" ] \
+    && echo "  (the legacy global poll may still cover UNCOVERED sources until it is removed)"
+  echo
+  printf 'Job health: %d ok, %d partial, %d error, %d paused, %d invalid, %d never run\n' \
+    "$J_OK" "$J_PARTIAL" "$J_ERROR" "$J_PAUSED" "$J_INVALID" "$J_NEVER"
+  [ -n "$JOB_PROBLEMS" ] && printf '%s' "$JOB_PROBLEMS" | sed 's/^/  /'
+  echo
+fi
+
+# Global poll (cron-poll.sh) state, read while it exists.
+if [ -f "$STATE" ]; then
+  echo "Global poll (legacy): last checked per project / per source"
   YAML_SEP='|' YAML_DUMP_CACHE="$(YAML_SEP='|' yaml_dump "$STATE")"
   export YAML_DUMP_CACHE
   printf '%s\n' "$YAML_DUMP_CACHE" \
@@ -136,13 +245,11 @@ else
         esac
       done
   unset YAML_DUMP_CACHE
+  echo
 fi
-echo
 
-echo "Last poll receipt"
-if [ ! -f "$RECEIPT" ]; then
-  echo "  No receipt — the poll has never recorded a completed run."
-else
+if [ -f "$RECEIPT" ]; then
+  echo "Global poll (legacy): last receipt"
   printf '  finished %s (%s), status=%s, items_queued=%s\n' \
     "${R_WHEN:-?}" "$(relative_age "${R_WHEN:-}")" "${R_STATUS:-unknown}" "${R_ITEMS:-0}"
   # A non-empty skipped: list is a NORMAL result — a source that is not configured was never
@@ -157,6 +264,10 @@ else
     partial|error) printf '  PROBLEM: poll status is %s\n' "$R_STATUS" ;;
     *) printf '  PROBLEM: receipt has no recognisable status\n' ;;
   esac
+  echo
+elif [ -z "$JOB_ROWS" ]; then
+  echo "No receipt — nothing has run discovery yet (no global poll receipt, no scheduled jobs)."
+  echo
 fi
 
 # Scheduled jobs (scripts/jobs-tick.sh). Printed only when some are configured, so installs that
@@ -164,7 +275,6 @@ fi
 # skips it every minute without a push.
 JOBS_OUT="$("${SCRIPT_DIR}/jobs-ctl.sh" list 2>/dev/null)"
 if [ -n "$JOBS_OUT" ] && [ "$JOBS_OUT" != "No scheduled jobs configured." ]; then
-  echo
   echo "Scheduled jobs"
   printf '%s\n' "$JOBS_OUT" | sed 's/^/  /'
 fi

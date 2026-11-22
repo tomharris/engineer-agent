@@ -75,11 +75,11 @@ The resume sweep emits every undrafted `incoming/` item regardless of project or
 
 **Files:** modify `scripts/queue-status.sh`, `commands/status.md`; test `tests/queue-ops.test.sh` (or the status suite).
 
-- [ ] Per project × source, "last checked" = the newest `last_checked` across that source's job state files (`state/jobs/*.state.yaml`) and receipts. Show the owning job key.
-- [ ] Replace the single poll-receipt health line with an aggregate: count of jobs `ok`/`partial`/`error`/`paused`/`invalid`, listing the non-ok ones with their first error.
-- [ ] Flag **uncovered sources**: a configured project source with no valid `watch` job. Without the global poll this is now silent loss, so make it visible.
-- [ ] Keep reading `last-poll.yaml` / `last-poll-receipt.yaml` while they exist (until Task 8), labelled "global poll (legacy)".
-- [ ] Tests: uncovered source listed; paused job listed with its error; newest timestamp wins across two jobs of one source.
+- [x] Per project × source, "last checked" = the newest `last_checked` across that source's job state files (`state/jobs/*.state.yaml`) and receipts. Show the owning job key.
+- [x] Replace the single poll-receipt health line with an aggregate: count of jobs `ok`/`partial`/`error`/`paused`/`invalid`, listing the non-ok ones with their first error.
+- [x] Flag **uncovered sources**: a configured project source with no valid `watch` job. Without the global poll this is now silent loss, so make it visible.
+- [x] Keep reading `last-poll.yaml` / `last-poll-receipt.yaml` while they exist (until Task 8), labelled "global poll (legacy)".
+- [x] Tests: uncovered source listed; paused job listed with its error; newest timestamp wins across two jobs of one source.
 
 ## Task 6: `add-ticket` / `add-project` stop writing `last-poll.yaml`
 
