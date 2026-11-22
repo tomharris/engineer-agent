@@ -664,6 +664,76 @@ else
   echo "  SKIP: jq not installed"
 fi
 
+echo "== 11b. jobs-default-watch.sh: one watch job per configured, unwatched source =="
+DW="$REPO_ROOT/scripts/jobs-default-watch.sh"
+cat > "$CFG" <<'YAML'
+projects:
+  alpha:
+    path: "/tmp/alpha"
+    tracker: "jira"
+    jira:
+      project: "ENG"
+    github:
+      owner: acme
+      repos: [web]
+      review_requested_for: tom
+    slack:
+      channels: ["C1"]
+    jobs:
+      - id: sw
+        integration: slack
+        action: watch
+        every: 5m
+        watch: [channels]
+  beta:
+    path: "/tmp/beta"
+    tracker: "none"
+    slack:
+      channels: ["C2"]
+    jobs:
+      - id: slack-watch
+        integration: jira
+        action: implement-next
+        every: 5m
+  gamma:
+    path: "/tmp/gamma"
+    tracker: "none"
+YAML
+want="      - id: github-watch
+        integration: github
+        action: watch
+        every: 15m
+      - id: jira-watch
+        integration: jira
+        action: watch
+        every: 15m"
+eq "configured, unwatched sources only; an existing slack watch is kept" "$want" "$(bash "$DW" alpha)"
+cp "$CFG" "$TMP/dw.yaml"
+awk -v add="$want" '{print} /^        watch: \[channels\]$/ && !d {print add; d=1}' "$TMP/dw.yaml" > "$CFG"
+reset_state
+eq "appended entries are valid jobs" "alpha.github-watch:ok alpha.jira-watch:ok" \
+  "$( . "$REPO_ROOT/scripts/lib-paths.sh"; . "$REPO_ROOT/scripts/lib-jobs.sh"; rows="$(jobs_enumerate)"
+      printf '%s\n' "$rows" | awk -F'|' '$1=="alpha" && $3 ~ /-watch$/' | while IFS= read -r r; do
+        printf '%s.%s:%s ' alpha "$(printf '%s' "$r" | cut -d'|' -f3)" "$(jobs_validate "$r" "$rows" >/dev/null && echo ok || echo bad)"
+      done | sed 's/ $//')"
+eq "re-running after appending proposes nothing" "" "$(bash "$DW" alpha)"
+cp "$TMP/dw.yaml" "$CFG"
+want="      - id: slack-watch-2
+        integration: slack
+        action: watch
+        every: 10m
+        watch: [channels]"
+eq "slack gets watch: [channels]; a taken id gets a suffix; --every applies" "$want" "$(bash "$DW" beta --every 10m)"
+out="$(bash "$DW" gamma 2>&1)"; rc=$?
+eq "nothing configured: no output" "" "$out"
+eq "nothing configured: exit 0" 0 "$rc"
+out="$(bash "$DW" nope 2>&1)"; rc=$?
+eq "unknown project: exit 2" 2 "$rc"
+eq "unknown project: message" "jobs-default-watch: no project 'nope' in engineer.yaml" "$out"
+out="$(bash "$DW" alpha --every 5 2>&1)"; rc=$?
+eq "malformed --every: exit 2" 2 "$rc"
+eq "malformed --every: message" "jobs-default-watch: --every '5' must look like 30s, 5m, 2h or 1d" "$out"
+
 echo "== 12. queue hygiene runs in the tick, at most every EA_HYGIENE_EVERY, under drafting.lock =="
 hitem() {  # hitem <dir> <file> <source_id> [draft]
   printf -- '---\ntype: ticket\nsource: jira\nsource_id: "%s"\ntitle: "t"\nstatus: drafted\nproject: "alpha"\n---\n## Context\nBody.\n' "$3" \

@@ -247,18 +247,11 @@ investigation: its "opens a draft PR" line is what the human reads at the gate.
 
 Append a `## Draft Response` section with the implementation plan, then move the file from `incoming/` to `drafts/` and update `status: drafted` in the frontmatter.
 
-### 8. Update Dedup State
+No poll state is written. The item's `(type, source_id)` in the queue is what stops the owning
+watch job (or a poll) from queueing the ticket again: `queue_disposition` finds it in any queue
+directory and leaves it alone (`references/queue-reconciliation.md`).
 
-Read `~/.local/share/engineer-agent/state/last-poll.yaml`. Append to the relevant list under the resolved project so the next poll cycle won't re-queue:
-
-- **Jira:** append `ticket_key` to `projects.<slug>.jira.seen_tickets` (create the list if missing).
-- **GitHub:** append `source_id` (i.e. `owner/repo#N`) to `projects.<slug>.github_issues.seen_issues` (create the list if missing).
-
-Do **not** modify any `last_checked` timestamps — those should keep tracking real poll boundaries.
-
-Write the file back.
-
-### 9. Report
+### 8. Report
 
 Print a one-line confirmation. **Name the deliverable** — the line reads identically for both shapes otherwise, so a wrong classification would be invisible at exactly the moment a human could cheaply fix it:
 

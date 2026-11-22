@@ -180,6 +180,22 @@ fixture "acme/shared|me|101|${NOW}|$(b64 'Spike: Add payroll endpoint')|$(b64 'b
 M4="$TMP/m4"; : > "$M4"; run "$M4" >/dev/null
 if [ -z "$(item gh-101)" ]; then ok "retitled issue absorbed by completed ticket (family rule)"; else bad "family rule failed: rival item created"; fi
 
+echo "== a manually added issue is not re-queued by its github-issues:watch job (no seen_issues needed) =="
+fixture "acme/alpha-only|me|301|${NOW}|$(b64 'Manually added')|$(b64 'body')||https://gh/301"
+for where in "drafts draft" "incoming"; do
+  set -- $where
+  rm -f "$EA_AGENT_DIR"/queue/*/*gh-301* "$TMP/job.state.yaml"
+  f="$EA_AGENT_DIR/queue/$1/20260820-090000-ticket-gh-301.md"
+  printf -- '---\ntype: ticket\nsource: github\nsource_id: "acme/alpha-only#301"\ntitle: "Manually added"\nstatus: drafted\nproject: "alpha"\nmanual: true\n---\n## Context\nBody.\n' > "$f"
+  [ "${2:-}" = draft ] && printf '\n## Draft Response\nPlan.\n' >> "$f"
+  M5="$TMP/m5"; : > "$M5"
+  : > "$GH_CALLS"; EA_POLL_STATE_FILE="$TMP/job.state.yaml" EA_JOBS_IGNORE_EXCLUSIVE=1 \
+    "$POLL" --run-ts "$NOW" --manifest "$M5" --project alpha >"$TMP/out" 2>"$TMP/err"
+  eq "manual item in $1/: no second file" 1 "$(ls "$EA_AGENT_DIR"/queue/*/*gh-301* | wc -l | tr -d ' ')"
+  eq "manual item in $1/: no draft row" 0 "$(grep -c '^draft	' "$M5")"
+done
+rm -f "$EA_AGENT_DIR"/queue/*/*gh-301*
+
 echo "== recency guard (agent.max_issue_age_days) =="
 fixture "acme/shared|me|301|${OLD}|$(b64 'Ancient backlog item')|$(b64 'x')|backend|https://gh/301"
 M5="$TMP/m5"; : > "$M5"; run "$M5" >/dev/null
