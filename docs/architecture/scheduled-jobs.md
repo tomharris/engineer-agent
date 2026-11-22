@@ -40,6 +40,12 @@ Things a reader will otherwise "fix" back:
   Stranded `_unrouted` items go to one job per integration: the first key among its valid, unpaused
   watch jobs (`jobs_unrouted_owner`), which `job-watch.sh` passes `--resume-unrouted`. Unscoped,
   every job would re-emit every stranded file. The global poll keeps the unscoped sweep.
+- **Queue hygiene runs in the tick** (`queue-hygiene.sh`: `queue-heal-stranded.sh --heal`, then
+  `queue-dedup-check.sh --heal` and the push-once duplicate ledger), after dispatch, at most every
+  `EA_HYGIENE_EVERY` (default `15m`, `state/jobs/_hygiene.last-run`). It takes `drafting.lock`: a
+  heal racing a draft would move or reject a file a model is still editing. A held lock skips the run
+  without stamping `last-run`, so the next tick retries. Skipped under `--only` (manual single-job
+  runs) and when no jobs are configured. The global poll calls the same script with `--lock-held`.
 - **The drafting allowlist is the poll's**, via `lib-poll-allowlist.sh`. Do not fork a second copy;
   allowlist drift caused most past silent outages.
 - **Drafting success is ground truth**: a row counts only if its file is in `drafts/` (or carries a

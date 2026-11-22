@@ -188,4 +188,21 @@ while IFS='|' read -r slug idx id integ action every hours days watch excl sup b
 done <<< "$ROWS"
 
 for p in "${PIDS[@]+"${PIDS[@]}"}"; do wait "$p"; done
+
+# Queue hygiene (heal stranded drafts, heal/notify duplicates). Not on a manual single-job run.
+# queue-hygiene.sh stamps last-run only once it holds drafting.lock, so a skip retries next tick.
+HYGIENE_LAST="${JOBS_STATE_DIR}/_hygiene.last-run"
+if [ -z "$ONLY" ]; then
+  hlast="$(cat "$HYGIENE_LAST" 2>/dev/null || true)"
+  hevery="$(jobs_duration_seconds "${EA_HYGIENE_EVERY:-15m}")"
+  case "$hlast" in ''|*[!0-9]*) hlast=0 ;; esac
+  if [ "$NOW" -ge $((hlast + ${hevery:-900})) ]; then
+    if [ "$FOREGROUND" = "1" ]; then
+      bash "${PLUGIN_ROOT}/scripts/queue-hygiene.sh" --stamp "$HYGIENE_LAST" --log "$LOG_FILE"
+    else
+      bash "${PLUGIN_ROOT}/scripts/queue-hygiene.sh" --stamp "$HYGIENE_LAST" --log "$LOG_FILE" </dev/null >/dev/null 2>&1 &
+      disown
+    fi
+  fi
+fi
 exit 0

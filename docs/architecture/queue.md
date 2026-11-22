@@ -12,8 +12,9 @@ Files move through: `~/.local/share/engineer-agent/queue/incoming/` → `queue/d
 
 **Invariant: at most one item per `(type, source_id)`.** `references/queue-reconciliation.md` is the
 rule every poller follows to uphold it — skip / update-in-place / create, one branch each — and
-`scripts/queue-dedup-check.sh` is the executable check, run automatically at the end of each
-`cron-poll.sh`. A duplicate is otherwise invisible: queue filenames carry a `{YYYYMMDD-HHmmss}`
+`scripts/queue-dedup-check.sh` is the executable check, run automatically by `queue-hygiene.sh` (each
+jobs tick, at most every `EA_HYGIENE_EVERY`, and after each `cron-poll.sh`). A duplicate is otherwise
+invisible: queue filenames carry a `{YYYYMMDD-HHmmss}`
 minted at write time, so a second copy of a ticket never collides with the first — it just sits
 alongside it and the human reviews (or implements) the same work twice.
 
@@ -22,7 +23,7 @@ alongside it and the human reviews (or implements) the same work twice.
 > hand-rejected a copy — on the very topic the Approve/Reject buttons arrive on, which is the one
 > topic that must never be trained into background noise. Two changes, both in
 > `references/queue-reconciliation.md` → "Auto-healing":
-> - **`--heal` (how `cron-poll.sh` now runs it) resolves what needs no judgement.** A group with no
+> - **`--heal` (how `queue-hygiene.sh` runs it) resolves what needs no judgement.** A group with no
 >   `completed/` copy and at most one *substantive* copy (in `drafts/`, or carrying a
 >   `## Draft Response`) is resolved by moving the others to `rejected/` with a `rejected_reason` —
 >   keeping the substantive copy, else the oldest, so `created_at` ordering survives. Rejected, not

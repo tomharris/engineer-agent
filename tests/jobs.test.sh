@@ -664,6 +664,57 @@ else
   echo "  SKIP: jq not installed"
 fi
 
+echo "== 12. queue hygiene runs in the tick, at most every EA_HYGIENE_EVERY, under drafting.lock =="
+hitem() {  # hitem <dir> <file> <source_id> [draft]
+  printf -- '---\ntype: ticket\nsource: jira\nsource_id: "%s"\ntitle: "t"\nstatus: drafted\nproject: "alpha"\n---\n## Context\nBody.\n' "$3" \
+    > "$EA_AGENT_DIR/queue/$1/$2"
+  [ "${4:-}" = draft ] && printf '\n## Draft Response\nPlan.\n' >> "$EA_AGENT_DIR/queue/$1/$2"
+}
+dup_pushes() { grep -c '^engineer-agent: duplicate queue items$' "$PUSHES"; }
+HLAST="$STATE/_hygiene.last-run"
+
+reset_state; base_config
+hitem incoming 20260801-090000-ticket-ENG-1.md ENG-1 draft
+EA_NOW="$T0" tick
+[ -f "$EA_AGENT_DIR/queue/drafts/20260801-090000-ticket-ENG-1.md" ] \
+  && ok "a stranded drafted item moves to drafts/ after one tick" || bad "stranded item not healed by the tick"
+eq "last-run stamped with the tick's clock" "$T0" "$(cat "$HLAST" 2>/dev/null)"
+
+hitem incoming 20260801-090100-ticket-ENG-2.md ENG-2 draft
+EA_NOW="$((T0 + 600))" tick
+[ -f "$EA_AGENT_DIR/queue/incoming/20260801-090100-ticket-ENG-2.md" ] \
+  && ok "not due before 15m: hygiene does not run" || bad "hygiene ran before EA_HYGIENE_EVERY elapsed"
+EA_HYGIENE_EVERY=5m EA_NOW="$((T0 + 600))" tick
+[ -f "$EA_AGENT_DIR/queue/drafts/20260801-090100-ticket-ENG-2.md" ] \
+  && ok "EA_HYGIENE_EVERY overrides the cadence" || bad "EA_HYGIENE_EVERY ignored"
+
+reset_state; base_config
+hitem drafts 20260801-090000-ticket-ENG-5.md ENG-5 draft
+hitem drafts 20260802-090000-ticket-ENG-5.md ENG-5 draft
+EA_NOW="$T0" tick
+eq "an unresolved duplicate pushes on first sighting" 1 "$(dup_pushes)"
+EA_NOW="$((T0 + 900))" tick
+eq "an unchanged duplicate set does not push again" 1 "$(dup_pushes)"
+hitem drafts 20260801-090000-ticket-ENG-6.md ENG-6 draft
+hitem drafts 20260802-090000-ticket-ENG-6.md ENG-6 draft
+EA_NOW="$((T0 + 1800))" tick
+eq "a changed duplicate set pushes again" 2 "$(dup_pushes)"
+
+reset_state; base_config
+hitem incoming 20260801-090000-ticket-ENG-7.md ENG-7 draft
+sleep 30.0421 & LIVE=$!
+echo "$LIVE" > "$EA_AGENT_DIR/state/drafting.lock"
+EA_NOW="$T0" tick
+[ -f "$EA_AGENT_DIR/queue/incoming/20260801-090000-ticket-ENG-7.md" ] \
+  && ok "held drafting.lock skips hygiene" || bad "hygiene ran under a held drafting.lock"
+[ -e "$HLAST" ] && bad "skipped hygiene stamped last-run" || ok "skipped hygiene leaves last-run unset"
+eq "holder's lock left alone" "$LIVE" "$(cat "$EA_AGENT_DIR/state/drafting.lock")"
+kill "$LIVE" 2>/dev/null; wait "$LIVE" 2>/dev/null; rm -f "$EA_AGENT_DIR/state/drafting.lock"
+EA_NOW="$((T0 + 60))" tick
+[ -f "$EA_AGENT_DIR/queue/drafts/20260801-090000-ticket-ENG-7.md" ] \
+  && ok "next tick after the lock frees runs hygiene" || bad "hygiene not retried after the lock freed"
+reset_state
+
 echo "== config lookups under pipefail (a match early in a config larger than a pipe buffer)"
 { printf 'agent.autonomy.auto_execute[]=implement\nprojects.p.trusted_authors[]=lead\nprojects.p.x=1\n'; seq -f 'filler.%g=x' 20000; } > "$TMP/bigcfg"
 out="$(bash -c 'set -uo pipefail; source "$1/scripts/lib-jobs.sh"; source "$1/scripts/lib-assign-rules.sh"; EA_JOBS_CFG="$(cat "$2")"
