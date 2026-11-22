@@ -842,7 +842,6 @@ projects:
         every: 5m
         hours: "8-18"            # optional, machine-local time
         days: [mon, tue, wed, thu, fri]
-        exclusive: true          # optional: the global poll stops reading this project's Slack
         watch: [channels, mentions, my-threads]
         thread_ttl: 7d           # my-threads: how long after your answer a thread stays watched
 ```
@@ -853,6 +852,15 @@ Install the dispatcher once; it fires every minute and runs whatever is due:
 /path/to/engineer-agent/scripts/install-jobs.sh              # macOS LaunchAgent / Linux crontab
 /path/to/engineer-agent/scripts/install-jobs.sh --uninstall
 ```
+
+**Moving off the global poll.** `scripts/migrate-poll-to-jobs.sh` adds a `watch` job for every
+configured source that has none, at the poll's old cadence (its `StartInterval` / `*/N`; an
+`EA_POLL_HOURS` poll becomes `every: 1h` with `hours:` when the hours are contiguous). It seeds each
+new job's state from `last-poll.yaml` so the first run doesn't re-discover the backlog, drops
+`exclusive:` (it only hid a source from the global poll), and removes the poll's LaunchAgent /
+crontab entry. It is a dry run that prints the `engineer.yaml` diff until you pass `--apply`, which
+backs up `engineer.yaml` to `engineer.yaml.bak-<epoch>` first, refuses while the dispatcher isn't
+installed, and never overwrites a job's existing state file. Re-running it is a no-op.
 
 `slack` / `watch` uses the scripted Slack collector's relevance judgment and routing, so it
 requires an `agent.typesafe` credential (plus `curl` and `jq`). Its `watch` sources:
@@ -939,8 +947,7 @@ project's `github.repos` and one Jira ticket, claims it with 👀, then:
 Each verdict is posted as a PR comment and as a reply in the request's Slack thread.
 
 It needs the tiers `slack-react`, `slack-post`, `pr-comment`, `jira-comment`, `jira-transition` and
-`security-review`, and should be `exclusive: true` so the global poll's status reactions don't land
-on requests first. A ticket written or edited by anyone outside `trusted_authors` is skipped with a
+`security-review`. A ticket written or edited by anyone outside `trusted_authors` is skipped with a
 comment before any model sees it.
 
 ```yaml
@@ -948,7 +955,6 @@ comment before any model sees it.
         integration: slack
         action: cr-qa
         every: 5m
-        exclusive: true
         channel: C0123456789
         trusted_slack_users: [U0123ABCD]
         trusted_authors: ["5b10ac8d82e05b22cc7d4ef5"]
@@ -1259,6 +1265,7 @@ scripts/
   install-cron.sh              Cron setup script
   jobs-tick.sh                 Scheduled-jobs dispatcher (every 60s)
   install-jobs.sh              Installs the scheduled-jobs dispatcher
+  migrate-poll-to-jobs.sh      Replaces the global poll with per-project watch jobs (dry run unless --apply)
   jobs-ctl.sh                  List / run / pause / resume scheduled jobs
   jobs-draft.sh                Drafting run for a job's collected items
   job-watch.sh                 <integration>/watch job collector (github, github-issues, jira, slite, slack)

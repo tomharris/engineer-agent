@@ -94,18 +94,18 @@ The resume sweep emits every undrafted `incoming/` item regardless of project or
 
 **Files:** create `scripts/migrate-poll-to-jobs.sh`; modify `commands/setup.md`, `config/engineer.example.yaml`; test `tests/migrate-poll-to-jobs.test.sh`.
 
-- [ ] For each project and each configured source with no existing `watch` job, emit a job: `id: <source>-watch`, `integration`, `action: watch`, `every` = the old poll interval (read from the installed launchd plist / crontab, else `15m`), and `hours` copied from `EA_POLL_HOURS` when it was a contiguous range.
-- [ ] Seed each new job's state file from `last-poll.yaml` (copy that project/source subtree) so the first job run does not re-discover the whole backlog.
-- [ ] Dry run by default (prints the YAML diff); `--apply` writes `engineer.yaml` (backup first) and the state files. Idempotent.
-- [ ] Remove `exclusive:` from migrated config and from `config/engineer.example.yaml` (meaningless once there is no poll to exclude).
-- [ ] `setup`: install `install-jobs.sh` instead of `install-cron.sh`; offer the migration when a poll is installed.
-- [ ] Tests: two-project config produces exactly the expected jobs; a project already having `slack:watch` gets no duplicate; state subtree copied; second `--apply` is a no-op.
+- [x] For each project and each configured source with no existing `watch` job, emit a job: `id: <source>-watch`, `integration`, `action: watch`, `every` = the old poll interval (read from the installed launchd plist / crontab, else `15m`), and `hours` copied from `EA_POLL_HOURS` when it was a contiguous range.
+- [x] Seed each new job's state file from `last-poll.yaml` (copy that project/source subtree) so the first job run does not re-discover the whole backlog.
+- [x] Dry run by default (prints the YAML diff); `--apply` writes `engineer.yaml` (backup first) and the state files. Idempotent. `--apply` also removes the poll (Task 8's uninstall bullet, pulled forward: dropping `exclusive:` while the poll runs would hand owned sources back to it) and refuses while the jobs dispatcher is not installed.
+- [x] Remove `exclusive:` from migrated config and from `config/engineer.example.yaml` (meaningless once there is no poll to exclude).
+- [x] `setup`: install `install-jobs.sh` instead of `install-cron.sh`; offer the migration when a poll is installed.
+- [x] Tests: two-project config produces exactly the expected jobs; a project already having `slack:watch` gets no duplicate; state subtree copied; second `--apply` is a no-op.
 
 ## Task 8: Remove the global poll
 
 **Files:** delete `scripts/cron-poll.sh`, `scripts/install-cron.sh`, `tests/cron-poll-scripted.test.sh`; modify `scripts/ea-config.sh` (drop `_exclusive_owner`, `EA_JOBS_IGNORE_EXCLUSIVE`), `scripts/job-*.sh` (drop `EA_JOBS_IGNORE_EXCLUSIVE`), `scripts/queue-status.sh` (drop legacy branch), `scripts/claude-bin` preflight users (`approval-listener.sh` comment re: shared record), `references/routing-ladder.md`, `references/ticket-kind.md` (the "cron-poll allowlists `Read` but not `Skill`" rationale now refers to `jobs-draft.sh`).
 
-- [ ] `install-cron.sh --uninstall` logic moves into `migrate-poll-to-jobs.sh --apply` (bootout + remove plist / crontab line) so existing installs are cleaned up.
+- [x] `install-cron.sh --uninstall` logic moves into `migrate-poll-to-jobs.sh --apply` (bootout + remove plist / crontab line) so existing installs are cleaned up. (Done in Task 7.)
 - [ ] Port any `cron-poll-scripted.test.sh` cases still meaningful (scripted-note, skip-model-when-empty) to `jobs.test.sh` before deleting; delete the rest.
 - [ ] `grep -rn "cron-poll\|last-poll\|install-cron\|exclusive" scripts commands skills references tests` is empty apart from intentional history notes.
 

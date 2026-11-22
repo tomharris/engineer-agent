@@ -6,7 +6,8 @@ allowed-tools: ["Bash", "Read", "Write", "Glob"]
 
 # Engineer Agent Setup
 
-Initialize engineer-agent at the user level: create config, directories, install cron, and register the current project.
+Initialize engineer-agent at the user level: create config, directories, install the scheduled-jobs
+dispatcher, and register the current project.
 
 ## Steps
 
@@ -14,7 +15,22 @@ Initialize engineer-agent at the user level: create config, directories, install
 
 Read `~/.local/share/engineer-agent/engineer.yaml`.
 
-If it exists, report:
+If it exists, check whether the legacy global poll is still installed: a
+`~/Library/LaunchAgents/engineer-agent-poll.plist` file, or a `crontab -l` line matching
+`engineer-agent.*cron-poll.sh`. If it is, resolve `PLUGIN_ROOT` (step 2), then offer the migration
+to scheduled jobs:
+
+1. Run `bash {PLUGIN_ROOT}/scripts/migrate-poll-to-jobs.sh` (a dry run) and show its output: the
+   `engineer.yaml` diff (one `watch` job per source the poll covered, at the poll's cadence; any
+   `exclusive:` lines dropped), the job state files it would seed from `last-poll.yaml`, and the
+   poll it would remove.
+2. Ask: "Replace the global poll with these scheduled jobs?"
+3. On yes: `bash {PLUGIN_ROOT}/scripts/install-jobs.sh` (if `crontab -l` / the
+   `engineer-agent-jobs.plist` shows it is not installed yet), then
+   `bash {PLUGIN_ROOT}/scripts/migrate-poll-to-jobs.sh --apply`, and print its output. It backs up
+   `engineer.yaml` to `engineer.yaml.bak-<epoch>` first and is safe to re-run.
+
+Then (or if no poll is installed) report:
 > Engineer-agent is already set up. Run `/engineer-agent add-project` to register another project, or `/engineer-agent status` to check health.
 
 Stop here — do not continue to further steps.
@@ -60,30 +76,30 @@ Write the template contents to `~/.local/share/engineer-agent/engineer.yaml`, re
 - Replace `owner` and `repos` with detected GitHub values
 - Leave other integration fields as placeholder values for the user to fill in
 
-### 5. Run install-cron.sh
+### 5. Run install-jobs.sh
 
 Execute via Bash:
 
 ```bash
-bash {PLUGIN_ROOT}/scripts/install-cron.sh
+bash {PLUGIN_ROOT}/scripts/install-jobs.sh
 ```
 
 This script handles:
-- Creating `queue/{incoming,drafts,completed,rejected}` directories
-- Creating `state/` directory
-- Initializing `state/last-poll.yaml` with empty projects map
-- Installing the scheduled poll: a **launchd LaunchAgent** (`engineer-agent-poll`) on macOS, or a
-  **crontab entry** on Linux (default 15-minute interval)
+- Creating `queue/{incoming,drafts,completed,rejected}`, `state/jobs/` and `investigations/`
+- Installing the scheduled-jobs dispatcher (`scripts/jobs-tick.sh`, every minute): a **launchd
+  LaunchAgent** (`engineer-agent-jobs`) on macOS, or a **crontab entry** on Linux
 
-If the user runs a non-default `claude` binary, pass `CLAUDE_BIN=/abs/path bash …/install-cron.sh`
-so it's baked into the LaunchAgent/crontab. On macOS, to confine polling to business hours (caps
-first-poll spend on a large backlog), pass `EA_POLL_HOURS=9,10,11,13,14,15,16 EA_POLL_MINUTE=3`.
+Discovery is per-project `watch` jobs (`projects.<slug>.jobs`); nothing is discovered until the
+project has some. Business hours and cadence are per job (`every`, `hours`, `days`).
+
+If the user runs a non-default `claude` binary, pass `CLAUDE_BIN=/abs/path bash …/install-jobs.sh`
+so it's baked into the LaunchAgent/crontab.
 
 ### 5b. Headless auth (macOS): launchd, not cron
 
 On macOS the Claude credential lives in the login keychain, which only unlocks *inside* the GUI
 login session. A **crontab** poll runs outside that session and fails with `Not logged in`; a
-**launchd LaunchAgent** in your GUI session reads the keychain fine — which is why `install-cron.sh`
+**launchd LaunchAgent** in your GUI session reads the keychain fine — which is why `install-jobs.sh`
 uses a LaunchAgent on macOS. No token on disk; it only polls while you're logged in.
 
 Separately, if this machine has a `forceLoginOrgUUID` managed policy
@@ -101,12 +117,14 @@ Engineer-agent setup complete!
 
   Config:  ~/.local/share/engineer-agent/engineer.yaml
   Queue:   ~/.local/share/engineer-agent/queue/{incoming,drafts,completed,rejected}
-  State:   ~/.local/share/engineer-agent/state/last-poll.yaml
-  Cron:    Polling every 15 minutes
+  State:   ~/.local/share/engineer-agent/state/jobs/
+  Jobs:    dispatcher installed (runs due jobs every minute)
   Project: {slug} ({path})
 
 Next steps:
-  1. Edit ~/.local/share/engineer-agent/engineer.yaml with your Slack channels, Jira project, etc.
+  1. Edit ~/.local/share/engineer-agent/engineer.yaml with your Slack channels, Jira project, etc.,
+     then add a watch job per configured source: {PLUGIN_ROOT}/scripts/migrate-poll-to-jobs.sh
+     (dry run; --apply writes them).
   2. For Slack, pick a backend via agent.slack.method:
        • spy (default): install the Spy CLI (https://github.com/tomharris/spy), sign in to the
          Slack desktop app, run `spy auth` to confirm, and set agent.slack.workspace.

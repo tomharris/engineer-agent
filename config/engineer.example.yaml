@@ -389,7 +389,8 @@ projects:
       document_to: ""                    # where to document completed QA plans: "slite" | "" (empty/absent disables)
       document_parent: ""                # Slite channel/note id for the QA doc; empty → user's private (personal) channel
     # Scheduled jobs: per-integration work on its own interval, dispatched every minute by
-    # scripts/jobs-tick.sh (install with scripts/install-jobs.sh). Runs ALONGSIDE the global poll.
+    # scripts/jobs-tick.sh (install with scripts/install-jobs.sh). An install still running the global
+    # poll moves to jobs with scripts/migrate-poll-to-jobs.sh.
     # A slack watch job uses the scripted Slack collector, so it needs an agent.typesafe
     # credential (curl + jq too).
     jobs: []
@@ -400,7 +401,6 @@ projects:
     #     every: 5m                      # 30s | 5m | 2h | 1d; minimum 1m
     #     hours: "8-18"                  # optional; machine-local hours, start inclusive, end exclusive
     #     days: [mon, tue, wed, thu, fri]  # optional
-    #     exclusive: false               # true => the global poll skips this project's slack source
     #     watch: [channels]              # any of: channels, mentions (needs agent.slack.user_id),
     #                                    #   my-threads (threads you answered via engineer-agent)
     #     thread_ttl: 7d                 # my-threads: stop watching a thread this long after you answered
@@ -421,7 +421,6 @@ projects:
     #     integration: slack
     #     action: cr-qa
     #     every: 5m
-    #     exclusive: true                # keep the global poll's status reactions off requests
     #     channel: C0123456789
     #     trusted_slack_users: [U0123ABCD]
     #     trusted_authors: ["5b10ac8d82e05b22cc7d4ef5"]   # Jira account ids

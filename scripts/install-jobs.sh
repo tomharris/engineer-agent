@@ -21,7 +21,7 @@ SERVICE_NAME="engineer-agent-jobs"
 UNINSTALL=0
 [ "${1:-}" = "--uninstall" ] && UNINSTALL=1
 
-mkdir -p "${AGENT_DIR}/state/jobs" "${AGENT_DIR}/queue/"{incoming,drafts,completed,rejected}
+mkdir -p "${AGENT_DIR}/state/jobs" "${AGENT_DIR}/queue/"{incoming,drafts,completed,rejected} "${AGENT_DIR}/investigations"
 chmod +x "$TICK_SCRIPT"
 
 if [ "$(uname)" = "Darwin" ] && command -v launchctl >/dev/null 2>&1; then
