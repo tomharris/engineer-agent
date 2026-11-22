@@ -46,6 +46,12 @@ Things a reader will otherwise "fix" back:
   heal racing a draft would move or reject a file a model is still editing. A held lock skips the run
   without stamping `last-run`, so the next tick retries. Skipped under `--only` (manual single-job
   runs) and when no jobs are configured. The global poll calls the same script with `--lock-held`.
+- **`status` reads job state** (`queue-status.sh`). Per configured project source, "last checked"
+  is the newest of its watch jobs' `last_checked` (state file) and `ok`/`partial` receipt
+  `finished_at`; Slack's state holds a message ts, not a wall clock, so it counts only through the
+  receipt. A configured source with no valid, unpaused watch job is reported **UNCOVERED**: without
+  the global poll, that is silent loss. Job health is an aggregate count plus each non-ok job's first
+  error (a pause falls back to the `.paused` marker's text).
 - **The drafting allowlist is the poll's**, via `lib-poll-allowlist.sh`. Do not fork a second copy;
   allowlist drift caused most past silent outages.
 - **Drafting success is ground truth**: a row counts only if its file is in `drafts/` (or carries a
