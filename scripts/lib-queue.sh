@@ -166,10 +166,37 @@ queue_disposition() {
 # reconciliation table says an incoming/ item with a resolved project is "leave alone", so nothing
 # would ever pick it up again. Re-emitting these into each run's manifest makes stranding
 # self-healing on the next 15-minute tick instead of permanent and invisible.
+#
+# Usage: poll_resume_candidates [--project <slug> [--unrouted]] [--source <s>] [--type <t>]...
+# No filters = every stranded item (the global poll, `status`). A watch job scopes the sweep to its
+# own project, source and types, or every concurrent job would re-emit the same file. --unrouted
+# also keeps _unrouted / project-less items; the caller passes it from exactly one job.
 poll_resume_candidates() {
-  local f
+  local f proj want_proj="" unrouted=0 want_src="" types=" "
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --project)  want_proj="$2"; shift 2 ;;
+      --unrouted) unrouted=1; shift ;;
+      --source)   want_src="$2"; shift 2 ;;
+      --type)     types="${types}$2 "; shift 2 ;;
+      *) echo "poll_resume_candidates: unknown argument '$1'" >&2; return 2 ;;
+    esac
+  done
   while IFS= read -r f; do
-    has_section "$f" "## Draft Response" || printf '%s\n' "$f"
+    has_section "$f" "## Draft Response" && continue
+    [ -z "$want_src" ] || [ "$(fm "$f" source)" = "$want_src" ] || continue
+    if [ "$types" != " " ]; then
+      case "$types" in *" $(fm "$f" type) "*) ;; *) continue ;; esac
+    fi
+    if [ -n "$want_proj" ]; then
+      proj="$(fm "$f" project)"
+      if [ "$proj" = "_unrouted" ] || [ -z "$proj" ]; then
+        [ "$unrouted" -eq 1 ] || continue
+      elif [ "$proj" != "$want_proj" ]; then
+        continue
+      fi
+    fi
+    printf '%s\n' "$f"
   done < <(queue_items incoming)
 }
 

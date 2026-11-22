@@ -100,6 +100,21 @@ jobs_watch_preflight() {
   return 3
 }
 
+# jobs_unrouted_owner <integration> — key of the one watch job that re-emits that integration's
+# stranded _unrouted items: the first key among its valid, unpaused watch jobs. Empty if none.
+# Without one owner every project's job would re-emit them, or none would.
+jobs_unrouted_owner() {
+  local rows row slug idx id integ action rest
+  rows="$(jobs_enumerate)"
+  while IFS= read -r row; do
+    IFS='|' read -r slug idx id integ action rest <<< "$row"
+    [ "$integ" = "$1" ] && [ "$action" = watch ] || continue
+    jobs_validate "$row" "$rows" >/dev/null || continue
+    job_is_paused "$(job_key "$slug" "$id")" && continue
+    job_key "$slug" "$id"; echo
+  done <<< "$rows" | LC_ALL=C sort | head -1
+}
+
 # jobs_validate_watch_source <slug> <integration> — the collector would skip an unconfigured source
 # and report ok forever, so reject the job with ea-config's skip reason instead. A source "owned"
 # by an exclusive job is configured; ownership only hides it from the global poll.

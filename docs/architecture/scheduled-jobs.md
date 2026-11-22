@@ -31,9 +31,15 @@ Things a reader will otherwise "fix" back:
   honored by `lib-state.sh`). Sharing `last-poll.yaml` with the global poll would be two
   unsynchronized read-modify-writes. Overlap between the two paths is the queue's job: the
   `(type, source_id)` reconciliation dedups.
-- **`jobs-draft.sh` takes the global poll's lock**, and a held lock means *deferred*, not failed.
-  The poll's resume sweep re-emits every undrafted `incoming/` item, so drafting concurrently could
-  put two models on one file. Deferral never strands: the job's next collector run re-emits them.
+- **One drafter at a time: `state/drafting.lock`**, shared by `jobs-draft.sh` and the global poll,
+  and a held lock means *deferred*, not failed. Jobs dispatch concurrently, so acquiring is atomic
+  (`ln` of a temp PID file, `lib-drafting-lock.sh`). Deferral never strands: the job's next collector
+  run re-emits them.
+- **The resume sweep is scoped per job.** Under `--project`, a collector re-emits only stranded items
+  of its own project, `source` and types (`poll_resume_candidates --project --source --type`).
+  Stranded `_unrouted` items go to one job per integration: the first key among its valid, unpaused
+  watch jobs (`jobs_unrouted_owner`), which `job-watch.sh` passes `--resume-unrouted`. Unscoped,
+  every job would re-emit every stranded file. The global poll keeps the unscoped sweep.
 - **The drafting allowlist is the poll's**, via `lib-poll-allowlist.sh`. Do not fork a second copy;
   allowlist drift caused most past silent outages.
 - **Drafting success is ground truth**: a row counts only if its file is in `drafts/` (or carries a

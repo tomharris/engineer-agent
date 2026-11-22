@@ -5,16 +5,16 @@
 # collector found, so it gets this narrower prompt. The ALLOWLIST is not narrower: it is the poll's,
 # from lib-poll-allowlist.sh, so the two cannot drift.
 #
-# It takes the GLOBAL poll's lock (state/cron-poll.lock), deliberately. The global poll's resume
-# sweep re-emits every undrafted incoming/ item, so a job drafting while the poll runs could have
-# two models editing the same file. Held lock => exit 4 (deferred); the items stay in incoming/ and
-# the next job tick's own resume sweep re-emits them, so deferral never strands anything.
+# It takes state/drafting.lock (lib-drafting-lock.sh), shared with the global poll and every other
+# job: one drafter at a time, so no two models edit the same file. Held lock => exit 4 (deferred);
+# the items stay in incoming/ and the next job tick's own resume sweep re-emits them, so deferral
+# never strands anything.
 #
 # Success is GROUND TRUTH, not the model's word: a manifest row counts as drafted only if its file
 # now exists in drafts/.
 #
 # Usage: jobs-draft.sh --manifest <file> --job <key> [--budget <usd>]
-# Exit:  0 every row drafted | 4 deferred (poll running) | 5 some rows not drafted | 2 usage
+# Exit:  0 every row drafted | 4 deferred (another drafter holds the lock) | 5 some rows not drafted | 2 usage
 set -uo pipefail
 
 PLUGIN_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -22,6 +22,8 @@ PLUGIN_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 . "${PLUGIN_ROOT}/scripts/lib-paths.sh"
 # shellcheck source=lib-poll-allowlist.sh
 . "${PLUGIN_ROOT}/scripts/lib-poll-allowlist.sh"
+# shellcheck source=lib-drafting-lock.sh
+. "${PLUGIN_ROOT}/scripts/lib-drafting-lock.sh"
 AGENT_DIR="$EA_AGENT_DIR"
 
 MANIFEST=""; JOB=""; BUDGET="${EA_JOB_DRAFT_BUDGET_USD:-2.00}"
@@ -38,13 +40,11 @@ done
 export PATH="${PATH}:${HOME}/.local/bin:${HOME}/bin:/usr/local/bin:/opt/homebrew/bin"   # appended: a caller's PATH (the installers', a test's stubs) wins
 CLAUDE_BIN="${CLAUDE_BIN:-$(command -v claude || echo "${HOME}/.local/bin/claude")}"
 
-LOCK_FILE="${AGENT_DIR}/state/cron-poll.lock"
-if [ -f "$LOCK_FILE" ] && kill -0 "$(cat "$LOCK_FILE" 2>/dev/null)" 2>/dev/null; then
-  echo "jobs-draft: poll (PID $(cat "$LOCK_FILE")) holds the lock; deferring"
+if ! holder="$(drafting_lock_acquire)"; then
+  echo "jobs-draft: another drafter (PID ${holder}) holds the lock; deferring"
   exit 4
 fi
-echo $$ > "$LOCK_FILE"
-trap 'rm -f "$LOCK_FILE"' EXIT
+trap drafting_lock_release EXIT
 
 if NEW_CLAUDE_BIN="$(claude_bin_changed "$CLAUDE_BIN")"; then
   "${PLUGIN_ROOT}/scripts/notify.sh" \

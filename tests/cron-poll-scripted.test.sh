@@ -305,12 +305,21 @@ CLAUDE_HANG=1 EA_POLL_MAX_SECONDS=2 run_cron "github-issues github"
 elapsed=$(( $(date +%s) - start ))
 if [ "$elapsed" -lt 20 ]; then ok "hung model run killed (${elapsed}s)"; else bad "run took ${elapsed}s; watchdog did not fire"; fi
 if grep -q 'poll exceeded 2s' "$LOG"; then ok "watchdog logged the kill"; else bad "watchdog did not log"; fi
-if [ -f "$EA_AGENT_DIR/state/cron-poll.lock" ]; then bad "lock left behind after watchdog kill"; else ok "lock released"; fi
+if [ -f "$EA_AGENT_DIR/state/drafting.lock" ]; then bad "lock left behind after watchdog kill"; else ok "lock released"; fi
 sleep 1
 # Anchored, unique durations: a bare 'sleep 30' pattern also matches unrelated processes on the box
 # (and pkill would kill them).
 if pgrep -f '^sleep 30\.041[78]$' >/dev/null; then bad "hung child survived the watchdog"; pkill -f '^sleep 30\.041[78]$'; else ok "no surviving children"; fi
 rm -f "$EA_AGENT_DIR"/queue/*/*.md; : > "$GH_FIXTURE"
+
+echo "== 10. a job drafting holds the shared lock, so the poll skips =="
+: > "$LOG"
+sleep 30.0419 & LIVE=$!
+echo "$LIVE" > "$EA_AGENT_DIR/state/drafting.lock"
+run_cron "github-issues github"
+if grep -q "another drafter (PID ${LIVE}) is running" "$LOG"; then ok "poll skipped while drafting.lock is held"; else bad "poll ran despite drafting.lock"; fi
+eq "holder's lock left alone" "$LIVE" "$(cat "$EA_AGENT_DIR/state/drafting.lock")"
+kill "$LIVE" 2>/dev/null; wait "$LIVE" 2>/dev/null; rm -f "$EA_AGENT_DIR/state/drafting.lock"
 
 echo
 echo "Passed: $PASS  Failed: $FAIL"

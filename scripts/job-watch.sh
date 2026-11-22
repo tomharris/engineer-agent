@@ -51,6 +51,7 @@ if [ "$INTEG" = slack ]; then
   TTL="$(_jcfg "projects.${PROJECT}.job.${IDX}.thread_ttl")"; TTL="$(jobs_duration_seconds "${TTL:-7d}")"
   EXTRA=(--sources "$SOURCES" --thread-ttl "$TTL")
 fi
+[ "$(jobs_unrouted_owner "$INTEG")" = "$JOB" ] && EXTRA+=(--resume-unrouted)
 
 EA_POLL_STATE_FILE="${EA_AGENT_DIR}/state/jobs/${JOB}.state.yaml" \
 EA_JOBS_IGNORE_EXCLUSIVE=1 \

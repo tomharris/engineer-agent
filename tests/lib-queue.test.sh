@@ -153,6 +153,34 @@ eq "family of investigation" "ticket" "$(type_family ticket-investigation)"
 # Exact match, never prefix: ticket-plan is its own type and must NOT join the ticket family.
 eq "ticket-plan is its own"  "ticket-plan" "$(type_family ticket-plan)"
 
+echo "== resume sweep scoped to one job =="
+# Every watch job runs the sweep. Unscoped, N jobs would each re-emit every stranded item and N
+# models would draft the same file.
+rm -f "$EA_AGENT_DIR"/queue/incoming/*.md
+mkres() {  # mkres <name> <type> <source> <project> [--drafted]
+  { printf -- '---\ntype: %s\nsource: %s\nsource_id: "x/%s"\nproject: "%s"\n---\n' "$2" "$3" "$1" "$4"
+    [ "${5:-}" = --drafted ] && printf '## Draft Response\nd\n'; } > "$EA_AGENT_DIR/queue/incoming/$1.md"
+}
+mkres a1 ticket jira alpha
+mkres a2 ticket-investigation jira alpha
+mkres a3 pr-review github alpha
+mkres b1 ticket jira beta
+mkres u1 ticket jira _unrouted
+mkres u2 ticket github _unrouted
+mkres e1 ticket jira ""
+mkres d1 ticket jira alpha --drafted
+res() { poll_resume_candidates "$@" | sed 's|.*/||; s|\.md$||' | sort | tr '\n' ' ' | sed 's/ $//'; }
+eq "unscoped sweep returns every undrafted item" "a1 a2 a3 b1 e1 u1 u2" "$(res)"
+eq "project + source + types keeps only the job's own items" "a1 a2" \
+   "$(res --project alpha --source jira --type ticket --type ticket-investigation)"
+eq "--unrouted adds unrouted and project-less items of that source" "a1 a2 e1 u1" \
+   "$(res --project alpha --source jira --type ticket --type ticket-investigation --unrouted)"
+eq "pr-review job does not take tickets from the same project" "a3" \
+   "$(res --project alpha --source github --type pr-review)"
+eq "another project gets only the other source's unrouted item" "u2" \
+   "$(res --project beta --source github --type ticket --unrouted)"
+rm -f "$EA_AGENT_DIR"/queue/incoming/*.md
+
 echo
 echo "Passed: $PASS  Failed: $FAIL"
 [ "$FAIL" -eq 0 ]

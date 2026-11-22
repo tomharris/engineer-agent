@@ -25,8 +25,9 @@
 # tag comparison. An unrecognisable response shape exits 3 rather than guessing: a collector that
 # silently decides no docs need review is indistinguishable from a quiet week.
 #
-# Usage: poll-slite.sh [--project <slug>] [--run-ts <iso>] [--dry-run] [--manifest <file>] [--check]
+# Usage: poll-slite.sh [--project <slug>] [--run-ts <iso>] [--dry-run] [--manifest <file>] [--check] [--resume-unrouted]
 #        --check: exit 0 if the collector could run, else log why and exit 3. No network, no state.
+#        --resume-unrouted: with --project, also resume stranded _unrouted items (one job per source).
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -45,18 +46,28 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "${SCRIPT_DIR}/lib-typesafe.sh"
 . "${SCRIPT_DIR}/lib-routing-judge.sh"
 
-ONLY_PROJECT=""; RUN_TS=""; DRY_RUN=0; MANIFEST=""; CHECK=0
+ONLY_PROJECT=""; RUN_TS=""; DRY_RUN=0; MANIFEST=""; CHECK=0; RESUME_UNROUTED=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --project)  ONLY_PROJECT="$2"; shift 2 ;;
     --run-ts)   RUN_TS="$2"; shift 2 ;;
     --dry-run)  DRY_RUN=1; shift ;;
     --check)    CHECK=1; shift ;;
+    --resume-unrouted) RESUME_UNROUTED=1; shift ;;
     --manifest) MANIFEST="$2"; shift 2 ;;
-    -h|--help)  sed -n '2,26p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help)  sed -n '2,27p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "poll-slite.sh: unknown argument '$1'" >&2; exit 2 ;;
   esac
 done
+
+# Resume sweep scope: a --project run re-emits only its own source and types, so concurrent jobs
+# never claim the same stranded file. The global poll (no --project) keeps the unscoped sweep.
+RESUME_ARGS=()
+if [ -n "$ONLY_PROJECT" ]; then
+  RESUME_ARGS=(--project "$ONLY_PROJECT" --source slite --type doc-review)
+  [ "$RESUME_UNROUTED" -eq 1 ] && RESUME_ARGS+=(--unrouted)
+fi
+
 [ -n "$RUN_TS" ] || RUN_TS="$(iso_now)"
 TS_PREFIX="$(queue_ts)"
 
@@ -290,7 +301,7 @@ while IFS= read -r f; do
   RESUMED=$((RESUMED+1))
   emit "$(printf 'resume\t%s\t%s\t%s\t%s\t0\t0\t%s' \
     "$f" "$(fm "$f" type)" "$(fm "$f" project)" "$(fm "$f" source_id)" "$(fm "$f" title)")"
-done < <(poll_resume_candidates)
+done < <(poll_resume_candidates ${RESUME_ARGS[@]+"${RESUME_ARGS[@]}"})
 
 if [ "$DRY_RUN" -eq 0 ]; then
   # Advance the cutoff for every project polled, even at zero docs: this source FILTERS on

@@ -153,7 +153,8 @@ minutes. Both test suites assert the secret never appears in argv.
 the reconciliation table says a resolved `incoming/` item is "leave alone" — so an item written by
 Phase A whose drafting phase died would sit there **forever, invisibly**. Two guards:
 `poll_resume_candidates()` re-emits any `incoming/` item lacking a `## Draft Response` into every
-subsequent manifest (self-healing on the next tick), and `queue-status.sh` reports the count as a
+subsequent manifest (self-healing on the next tick; a `--project` run only its own project, source
+and types, see `scheduled-jobs.md`), and `queue-status.sh` reports the count as a
 warning. `tests/lib-queue.test.sh` and `tests/poll-github-issues.test.sh` both pin it.
 
 > **There are TWO stranding shapes, and for eight weeks only one was detected.**

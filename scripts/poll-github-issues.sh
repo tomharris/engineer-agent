@@ -26,8 +26,9 @@
 #      source_id dedup handed a shared repo's issue to whichever project the loop reached first —
 #      an arbitrary misroute that looked like a confident decision, with no _unrouted escape.
 #
-# Usage: poll-github-issues.sh [--project <slug>] [--run-ts <iso>] [--dry-run] [--manifest <file>] [--check]
+# Usage: poll-github-issues.sh [--project <slug>] [--run-ts <iso>] [--dry-run] [--manifest <file>] [--check] [--resume-unrouted]
 #        --check: exit 0 if the collector could run, else log why and exit 3. No network, no state.
+#        --resume-unrouted: with --project, also resume stranded _unrouted items (one job per source).
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -53,18 +54,28 @@ TAB="$(printf '\t')"
 # field (e.g. no labels) and shift every column after it.
 US="$(printf '\037')"
 
-ONLY_PROJECT=""; RUN_TS=""; DRY_RUN=0; MANIFEST=""; CHECK=0
+ONLY_PROJECT=""; RUN_TS=""; DRY_RUN=0; MANIFEST=""; CHECK=0; RESUME_UNROUTED=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --project)  ONLY_PROJECT="$2"; shift 2 ;;
     --run-ts)   RUN_TS="$2"; shift 2 ;;
     --dry-run)  DRY_RUN=1; shift ;;
     --check)    CHECK=1; shift ;;
+    --resume-unrouted) RESUME_UNROUTED=1; shift ;;
     --manifest) MANIFEST="$2"; shift 2 ;;
-    -h|--help)  sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help)  sed -n '2,26p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "poll-github-issues.sh: unknown argument '$1'" >&2; exit 2 ;;
   esac
 done
+
+# Resume sweep scope: a --project run re-emits only its own source and types, so concurrent jobs
+# never claim the same stranded file. The global poll (no --project) keeps the unscoped sweep.
+RESUME_ARGS=()
+if [ -n "$ONLY_PROJECT" ]; then
+  RESUME_ARGS=(--project "$ONLY_PROJECT" --source github --type ticket --type ticket-investigation)
+  [ "$RESUME_UNROUTED" -eq 1 ] && RESUME_ARGS+=(--unrouted)
+fi
+
 [ -n "$RUN_TS" ] || RUN_TS="$(iso_now)"
 TS_PREFIX="$(queue_ts)"
 
@@ -356,7 +367,7 @@ while IFS= read -r f; do
   RESUMED=$((RESUMED+1))
   emit "$(printf 'resume\t%s\t%s\t%s\t%s\t0\t0\t%s' \
     "$f" "$(fm "$f" type)" "$(fm "$f" project)" "$(fm "$f" source_id)" "$(fm "$f" title)")"
-done < <(poll_resume_candidates)
+done < <(poll_resume_candidates ${RESUME_ARGS[@]+"${RESUME_ARGS[@]}"})
 
 if [ "$DRY_RUN" -eq 0 ]; then
   while IFS= read -r slug; do
