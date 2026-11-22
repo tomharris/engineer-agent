@@ -169,7 +169,7 @@ warning. `tests/lib-queue.test.sh` and `tests/poll-github-issues.test.sh` both p
 > nothing healed what it had already left behind, because the reconciliation table correctly says a
 > resolved `incoming/` item is "leave alone".
 > `poll_stranded_drafted()` is the second predicate and `scripts/queue-heal-stranded.sh --heal`
-> (run by `cron-poll.sh`, before the dedup check) is the remedy. It is a **separate** predicate on
+> (run by `queue-hygiene.sh`, before the dedup check) is the remedy. It is a **separate** predicate on
 > purpose: the two remedies differ — an undrafted item needs the *model*, a drafted one just needs
 > *moving* — and merging them into one looser condition would re-draft finished work on every tick.
 > Three deliberate refusals: `_unrouted` items are left parked (`review-queue` surfaces those from

@@ -1074,6 +1074,10 @@ How it behaves:
   `exclusive`, so the global poll picks that source back up.
 - **One drafter at a time.** Drafting runs (every job's and the poll's) share `state/drafting.lock`.
   If another is running, drafting is deferred (`drafting: deferred` in the receipt) and the next tick retries.
+- **The tick also keeps the queue healthy.** At most every `EA_HYGIENE_EVERY` (default `15m`) it
+  moves finished drafts out of `incoming/`, resolves mechanical duplicates, and pushes once about
+  duplicates that need a decision (`scripts/queue-hygiene.sh`). It skips while a drafter holds
+  `state/drafting.lock` and retries next tick. Not run by `/engineer-agent jobs run`.
 - **Invalid entries are reported, not run.** `/engineer-agent jobs` shows the reason.
 
 ## Push Notifications & Remote Approval
@@ -1209,6 +1213,7 @@ scripts/
   draft-lint.sh                Flags AI-writing tells in a draft's postable text (review-queue)
   queue-dedup-check.sh         Asserts (and with --heal, resolves) the one-item-per-(type, source_id) invariant
   queue-heal-stranded.sh       Moves finished drafts out of incoming/, where no approval path can see them
+  queue-hygiene.sh             Runs both heals under drafting.lock; pushes once per unresolved duplicate set
   lib-*.sh                     Shared libraries (yaml, time, queue, routing, ticket-kind, state)
 tests/
   run-all.sh                   Runs every test suite
