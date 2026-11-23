@@ -232,10 +232,12 @@ jobs_validate_cr_qa() {
   [ -n "$(gr_project_repos "$1")" ] || { echo "cr-qa needs projects.$1.github.repos"; return 1; }
   _ar_check_keys "$p.reactions" "claim approve" "reactions" || return 1
   _ar_check_keys "$p.security" "command timeout" "security" || return 1
-  _ar_check_keys "$p.qa" "timeout" "qa" || return 1
+  _ar_check_keys "$p.qa" "timeout script_runner" "qa" || return 1
   v="$(_jcfg "$p.security.command")"
   [ -n "$v" ] || { echo "cr-qa security.command is required"; return 1; }
   case "$v" in /*|"~/"*) ;; *) echo "cr-qa security.command '${v}' must be an absolute or ~/ path"; return 1 ;; esac
+  v="$(_jcfg "$p.qa.script_runner")"
+  case "$v" in ""|/*|"~/"*) ;; *) echo "cr-qa qa.script_runner '${v}' must be an absolute or ~/ path"; return 1 ;; esac
   for v in security.timeout qa.timeout; do
     [ -z "$(_jcfg "$p.$v")" ] || [ -n "$(jobs_duration_seconds "$(_jcfg "$p.$v")")" ] \
       || { echo "cr-qa ${v} '$(_jcfg "$p.$v")' must look like 30s, 5m, 2h or 1d"; return 1; }

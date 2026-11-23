@@ -390,6 +390,9 @@ eq "needs github repos" "cr-qa needs projects.web.github.repos" "$(inv 'repos: \
 eq "needs security.command" "cr-qa security.command is required" "$(inv 'command:')"
 eq "relative security.command" "cr-qa security.command 'bin/review.sh' must be an absolute or ~/ path" \
   "$(reset_state; crqa_config '' ; sed -i.bak 's#~/bin/review.sh#bin/review.sh#' "$CFG"; tick; cat "$STATE/web.crqa.invalid")"
+eq "absolute qa.script_runner is valid" "" "$(inv '^\$NONE' '        qa: { script_runner: ~/bin/qa-php.sh }')"
+eq "relative qa.script_runner refused" "cr-qa qa.script_runner 'bin/qa-php.sh' must be an absolute or ~/ path" \
+  "$(inv '^\$NONE' '        qa: { script_runner: bin/qa-php.sh }')"
 has "unknown reactions key" "reactions" "$(inv '^\$NONE' '        reactions: { claim: eyes, aprove: approve }')"
 eq "invalid job did not run" 0 "$(calls web.crqa)"
 crqa_channel() { reset_state; crqa_config '^        channel: C0123456789$' "$1"; tick; cat "$STATE/web.crqa.invalid" 2>/dev/null; }

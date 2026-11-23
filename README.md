@@ -940,7 +940,14 @@ comment before any model sees it.
         transition: "Ready for Upload"
         security:
           command: ~/.local/share/engineer-agent/adapters/security-review/review.sh
+        qa:
+          script_runner: ~/.local/share/engineer-agent/adapters/main/qa-php.sh   # optional
 ```
+
+`qa.script_runner` (optional, absolute or `~/` path) is for projects whose scripts can't run on the
+host, such as PHP in a container. Each QA script is then run as `<runner> <script>` from the
+directory the plan picks, and the runner must also be in `exec.allowed_commands`. With QA scripts,
+the PR worktree is prepared with `exec.worktree_setup` first.
 
 GitHub `implement-next` (`integration: github-issues`) does the same for GitHub issues. Differences:
 
