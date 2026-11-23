@@ -128,7 +128,7 @@ run_generic_execute() {
   # The PREFIX varies too, not just the root: the model has been observed emitting
   # `bash <abs>/scripts/slack-mcp.sh auth …`, whose executable is `bash` — matching no `<abs>/…`
   # rule, so the call is refused outright. In the poll that denial was fatal (it cascaded to the
-  # unlisted direct connector and errored every Slack source; see cron-poll.sh). The same latent
+  # unlisted direct connector and errored every Slack source; see lib-poll-allowlist.sh). The same latent
   # bug lives here on the SEND path — it just hasn't been hit yet, because approvals are far rarer
   # than polls. Emit both the bare and `bash `-prefixed form for every root.
   local slack_rules=()
@@ -215,7 +215,7 @@ run_ticket_investigation() {
   fi
 
   # Pin the comment target in plain bash, on the privileged side of the sandbox boundary — the same
-  # treatment cron-poll.sh gives ${SLACK_BIN}. MCP permission rules CANNOT be scoped to arguments,
+  # treatment lib-poll-allowlist.sh gives ${SLACK_BIN}. MCP permission rules CANNOT be scoped to arguments,
   # so mcp__atlassian__addCommentToJiraIssue is a capability over every issue the token can reach;
   # naming the key here (and in the prompt) is the only scoping that exists. Refuse rather than let
   # the model rediscover the target from untrusted ticket text.
@@ -345,9 +345,9 @@ ${NO_MEMORY_RULE} Be concise."
 # binary that moved). claude_bin_changed() records as it reports, so at most one push fires per
 # new binary no matter how many times this is called.
 #
-# The record (state/claude-bin.path) is SHARED with cron-poll.sh deliberately: the two jobs run
-# as the same user against the same grants, so whichever notices first is the one that warns,
-# and the user gets one push per update rather than two.
+# The record (state/claude-bin.path) is SHARED with jobs-draft.sh deliberately: both run as the
+# same user against the same grants, so whichever notices first is the one that warns, and the
+# user gets one push per update rather than two.
 tcc_preflight() {
   local newbin
   newbin="$(claude_bin_changed "$CLAUDE_BIN")" || return 0

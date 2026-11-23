@@ -59,7 +59,7 @@ eq "follows a symlink to its target" "$TMP/versions/2.1.248" "$(resolve_real_pat
 eq "leaves a real file alone" "$TMP/versions/2.1.251" "$(resolve_real_path "$TMP/versions/2.1.251")"
 # A BARE command name must resolve through PATH, then follow symlinks like any other input.
 # Returned verbatim instead, the record could never change and the preflight would silently
-# never fire — install-cron.sh bakes in whatever CLAUDE_BIN held at install time, bare or not.
+# never fire — install-jobs.sh bakes in whatever CLAUDE_BIN held at install time, bare or not.
 chmod +x "$TMP/localbin/claude"
 eq "resolves a bare name via PATH, then follows it" "$TMP/versions/2.1.248" \
   "$(PATH="$TMP/localbin:$PATH" resolve_real_path claude)"

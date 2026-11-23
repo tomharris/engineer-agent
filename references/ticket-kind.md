@@ -3,9 +3,9 @@
 Single source of truth for deciding **what a ticket delivers**: a code change (branch → draft PR →
 QA) or a findings document (a `## Findings` comment on the ticket + a local archive).
 
-Read this file and follow it verbatim from:
-- `skills/poll-jira/SKILL.md` (Jira tickets)
-- `skills/poll-github-issues/SKILL.md` (GitHub issues)
+`scripts/lib-ticket-kind.sh` implements its deterministic tiers for the collectors
+(`scripts/poll-*.sh`). Read this file and follow it verbatim from:
+- `scripts/jobs-draft.sh` (Tier 3 Form B only, for an item flagged `needs_kind_check`)
 - `commands/add-ticket.md` (manual add, either tracker)
 - `commands/review-queue.md` (only when assigning a previously `_unrouted` item — see "Unrouted
   items are classified late")
@@ -16,10 +16,10 @@ reason: three prose copies of a rule drift, and the copies that drift are always
 reads.
 
 This is a plain reference document, not a skill. Callers reach it with `Read`. That is deliberate:
-`scripts/cron-poll.sh` allowlists `Read` but **not** `Skill` or `Agent`, so a skill-shaped or
-subagent-shaped ladder would be unreachable from the cron — the one path with no human to fall back
-on. Reference it via `${CLAUDE_PLUGIN_ROOT}/references/ticket-kind.md`, never a bare relative path:
-cron runs from `$HOME`, where `references/…` does not exist, and that failure is invisible
+`scripts/jobs-draft.sh` allowlists `Read` but **not** `Skill` or `Agent`, so a skill-shaped or
+subagent-shaped ladder would be unreachable from the scheduled drafting run — the one path with no
+human to fall back on. Reference it via `${CLAUDE_PLUGIN_ROOT}/references/ticket-kind.md`, never a
+bare relative path: scheduled runs start from `$HOME`, where `references/…` does not exist, and that failure is invisible
 interactively.
 
 ## Relationship to the routing ladder
@@ -309,8 +309,8 @@ gate.
 
 **What it cannot do:**
 
-1. **Reach a posting verb.** Classification happens during *polling*, and `cron-poll.sh` passes a
-   read-only allowlist — no `addCommentToJiraIssue`, no `gh issue comment`, no
+1. **Reach a posting verb.** Classification happens during *polling*: the collectors are bash, and
+   `jobs-draft.sh` passes a read-only allowlist — no `addCommentToJiraIssue`, no `gh issue comment`, no
    `transitionJiraIssue`. Every write for either shape lives behind the approval gate, in
    `execute-item` / `implement-ticket` / `investigate-ticket`.
 2. **Invent or redirect a target.** The comment target is `ticket_key` / `source_id` / `source_url`

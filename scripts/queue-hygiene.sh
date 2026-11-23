@@ -1,6 +1,6 @@
 #!/bin/bash
 # queue-hygiene.sh — heal stranded drafts, heal duplicates, push once per unresolved duplicate set.
-# Run by jobs-tick.sh (at most every EA_HYGIENE_EVERY) and by cron-poll.sh after its drafting run.
+# Run by jobs-tick.sh, at most every EA_HYGIENE_EVERY.
 #
 # Takes drafting.lock unless --lock-held: a heal racing a draft in progress would move or reject a
 # file a model is still editing. A held lock skips the run and leaves --stamp untouched, so the

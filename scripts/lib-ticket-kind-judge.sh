@@ -11,7 +11,7 @@
 #
 # WHAT THIS CHANGES, AND WHAT IT DOES NOT. Before this, a Form B candidate was written out as
 # `ticket` with `needs_kind_check=1` and re-examined in Phase B by the drafting model, guided by one
-# sentence inside cron-poll.sh's ~900-word note. That still happens whenever this judgment is not
+# sentence inside the drafting prompt. That still happens whenever this judgment is not
 # configured or cannot be made. What this adds is that the kind is FINAL when the item is written:
 # `type:` in the frontmatter and the `{YYYYMMDD-HHmmss}-{type}-{id}.md` filename are correct the
 # first time, rather than being a placeholder a later phase is trusted to correct.

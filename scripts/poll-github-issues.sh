@@ -1,15 +1,15 @@
 #!/bin/bash
 # poll-github-issues.sh — deterministic collector for GitHub Issues.
 #
-# Replaces the mechanical half of skills/poll-github-issues/SKILL.md: fetch, recency filter,
+# Collects for `github-issues` / `watch` jobs: fetch, recency filter,
 # reconciliation, routing (tiers 0-3a), kind classification (tiers 0-2, 3-Form-A, and 3-Form-B when
 # the judgment is opted into), queue-file writing, and state. It does NOT draft — it writes items to
 # queue/incoming/ and emits a manifest naming what still needs a model, which is the only thing a
 # model is then asked to do.
 #
 # NO EXTERNAL jq ON THE COLLECTION PATH. Field extraction uses `gh --jq`, gh's own embedded jq
-# engine, so this adds no dependency beyond `gh` itself and stays inside the "the cron path is
-# jq-free" policy that cron-poll.sh sets. Titles and bodies are carried as base64 through the TSV
+# engine, so this adds no dependency beyond `gh` itself and stays inside the plugin's jq-free
+# policy. Titles and bodies are carried as base64 through the TSV
 # because both routinely contain tabs, newlines and quotes.
 #
 # The one exception proves the policy rather than breaking it: the OPTIONAL ticket-kind Form B
@@ -69,7 +69,7 @@ while [ $# -gt 0 ]; do
 done
 
 # Resume sweep scope: a --project run re-emits only its own source and types, so concurrent jobs
-# never claim the same stranded file. The global poll (no --project) keeps the unscoped sweep.
+# never claim the same stranded file. Without --project the sweep is unscoped.
 RESUME_ARGS=()
 if [ -n "$ONLY_PROJECT" ]; then
   RESUME_ARGS=(--project "$ONLY_PROJECT" --source github --type ticket --type ticket-investigation)
@@ -138,7 +138,7 @@ if [ ! -s "$REPOS" ]; then
   exit 0
 fi
 
-state_load
+state_load || exit 2   # no state file: a usage error, never a run against shared state
 
 FOUND=0; ROUTED=0; UNROUTED=0; SKIPPED=0; UNCHANGED=0; CREATED=0; RESUMED=0
 SKIPPED_IDS=""

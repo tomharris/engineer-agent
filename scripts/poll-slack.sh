@@ -1,27 +1,24 @@
 #!/bin/bash
 # poll-slack.sh — deterministic collector for Slack questions that need an answer.
 #
-# Replaces the mechanical half of skills/poll-slack/SKILL.md: channel reads, the keyword and
+# Collects for `slack` / `watch` jobs: channel reads, the keyword and
 # recency filters, reconciliation, routing, queue-file writing and state. It does NOT draft — it
 # writes slack-question items to queue/incoming/ and emits a manifest naming what still needs a
 # model.
 #
 # WHY THIS WAS THE LAST SOURCE TO BE SCRIPTED. Every other collector's "is this work?" test is
-# mechanical — a Jira status, a GitHub assignee, a Slite tag. Slack's is not: SKILL.md §3b is
-# literally "use judgment to determine if it's actually a question directed at the user", and a
+# mechanical — a Jira status, a GitHub assignee, a Slite tag. Slack's is not: the old poll skill
+# literally said "use judgment to determine if it's actually a question directed at the user", and a
 # keyword match alone is mostly false positives ("deploy" appears in every deploy announcement).
 # That one sentence is why Slack kept every poll paying for a model session even on a quiet day.
 # scripts/lib-typesafe.sh answers exactly that shape of question as four probabilities, which bash
 # can threshold — see "The relevance gate" below.
 #
-# ⚠ DOUBLE OPT-IN, AND THE SECOND GATE IS NOT A FORMALITY. This collector runs only when BOTH
-#   1. `slack` appears in agent.poll.scripted_sources (or EA_POLL_SCRIPTED_SOURCES), and
-#   2. an agent.typesafe.* credential resolves (plus curl and jq).
-# Absent either, it exits 3 and cron-poll.sh leaves Slack to the model, exactly as before. The
-# second gate exists because this is the ONLY thing in the poll path that sends your content to a
-# third party: Slack message and thread text goes to api.typesafe.ai. gh, Jira and Slite all talk
-# to systems that already hold the data being sent. Anyone enabling this should know that, so it is
-# a separate, explicit decision rather than a side effect of listing "slack" in a config array.
+# ⚠ EGRESS IS AN EXPLICIT OPT-IN. This collector runs only for a configured slack watch job AND when
+# an agent.typesafe.* credential resolves (plus curl and jq); without the credential it exits 3
+# and the job reports it unavailable. It is the ONLY thing in the poll path that sends your
+# content to a third party: Slack message and thread text goes to api.typesafe.ai. gh, Jira and
+# Slite all talk to systems that already hold the data being sent.
 #
 # ONE COLLECTION PASS, NOT ONE PER PROJECT — the same correction poll-slite.sh makes, for the same
 # reason. SKILL.md iterates over projects and queues a matching message for each, so two projects
@@ -55,11 +52,11 @@
 #                      [--sources channels,mentions,my-threads] [--thread-ttl <seconds>]
 #        --check: exit 0 if the collector could run, else log why and exit 3. No network, no state.
 #        --resume-unrouted: with --project, also resume stranded _unrouted items (one job per source).
-#        --sources defaults to channels (the global poll). mentions and my-threads need --project:
+#        --sources defaults to channels. mentions and my-threads need --project:
 #        they are slack/watch job sources.
 # Exit:  0 ok (including "nothing to do" and a clean token-expiry skip)
 #        2 usage
-#        3 unavailable — leave Slack to the model
+#        3 unavailable, or a run with errors (the cutoff is not advanced)
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -91,7 +88,7 @@ while [ $# -gt 0 ]; do
 done
 
 # Resume sweep scope: a --project run re-emits only its own source and types, so concurrent jobs
-# never claim the same stranded file. The global poll (no --project) keeps the unscoped sweep.
+# never claim the same stranded file. Without --project the sweep is unscoped.
 RESUME_ARGS=()
 if [ -n "$ONLY_PROJECT" ]; then
   RESUME_ARGS=(--project "$ONLY_PROJECT" --source slack --type slack-question)
@@ -115,8 +112,8 @@ WRITTEN="$TMPD/written"; : > "$WRITTEN"
 log()  { printf '%s\n' "$*" >&2; }
 emit() { [ -n "$MANIFEST" ] && printf '%s\n' "$*" >> "$MANIFEST"; return 0; }
 
-command -v curl >/dev/null 2>&1 || { log "poll-slack: curl not found; leaving Slack to the model"; exit 3; }
-command -v jq   >/dev/null 2>&1 || { log "poll-slack: jq not found; leaving Slack to the model"; exit 3; }
+command -v curl >/dev/null 2>&1 || { log "poll-slack: curl not found; skipping"; exit 3; }
+command -v jq   >/dev/null 2>&1 || { log "poll-slack: jq not found; skipping"; exit 3; }
 
 EA_CFG="$("${SCRIPT_DIR}/ea-config.sh" dump)"; export EA_CFG
 cfg()  { printf '%s\n' "$EA_CFG" | awk -F= -v k="$1" '$1==k {sub(/^[^=]*=/,""); print; exit}'; }
@@ -138,7 +135,7 @@ fi
 # leave some channels read and some not, and would advance no cutoff — a half-done poll is worse
 # than one that cleanly declined.
 if ! ts_available; then
-  log "poll-slack: no TypeSafe credential available (checked env/file/keychain); leaving Slack to the model"
+  log "poll-slack: no TypeSafe credential available (checked env/file/keychain); skipping"
   exit 3
 fi
 
@@ -148,7 +145,7 @@ MAX_ANSWERED="$(ts_threshold slack.max_answered 0.40)"
 MIN_ENGINEER="$(ts_threshold slack.min_engineer 0.50)"
 
 # --- The Slack binary, resolved in plain bash --------------------------------------------------
-# Same resolution cron-poll.sh does, and for the same reason: which backend runs must never depend
+# Same resolution lib-poll-allowlist.sh does, and for the same reason: which backend runs must never depend
 # on anything the run reads. Both backends expose read/thread with identical flags.
 SLACK_METHOD="$(cfg agent.slack.method)"; SLACK_METHOD="${SLACK_METHOD:-spy}"
 if [ "$SLACK_METHOD" = "mcp-proxy" ]; then
@@ -157,7 +154,7 @@ else
   SLACK_BIN="$(cfg agent.slack.bin)"; SLACK_BIN="${SLACK_BIN:-spy}"
 fi
 command -v "$SLACK_BIN" >/dev/null 2>&1 || [ -x "$SLACK_BIN" ] || {
-  log "poll-slack: Slack binary '${SLACK_BIN}' not found or not executable; leaving Slack to the model"; exit 3; }
+  log "poll-slack: Slack binary '${SLACK_BIN}' not found or not executable; skipping"; exit 3; }
 [ "$CHECK" -eq 1 ] && exit 0   # --check: every precondition above passed; no network, no state
 
 USER_NAME="$(cfg agent.slack.user_name)"
@@ -195,7 +192,7 @@ slack_shape_ok() {
   jq -e 'type == "array" or has("messages") or has("results")' "$1" >/dev/null 2>&1
 }
 
-state_load
+state_load || exit 2   # no state file: a usage error, never a run against shared state
 
 # --- Phase 1: the deduplicated channel set -----------------------------------------------------
 # Keyed by CHANNEL, not by project: several projects legitimately watch the same channel, and each
@@ -261,7 +258,7 @@ QJSON
 # consider_msg <mode> <channel> <msg-json> <cands> <parent-ts>
 #
 # One message through filter → route → reconcile → judge → write. <mode> is the watch source:
-#   channels    keyword filter + per-project last_checked_ts; the global poll's only mode
+#   channels    keyword filter + per-project last_checked_ts
 #   mentions    found by search; the caller applies the mentions cutoff
 #   my-threads  a reply in a thread the user answered; the caller applies last_seen_ts and
 #               provides the thread in $THREAD_PRE. directed_at_user is NOT thresholded: being in
@@ -411,8 +408,8 @@ consider_msg() {
 
   if ! ts_ask "$TMPD/state.json" "$TMPD/questions.json" "$TMPD/answers.json"; then
     # A judgment that could not be made must NOT become a silent "no". Count it as an error so
-    # the run reports non-zero and cron-poll.sh hands Slack back to the model, rather than
-    # advancing the cutoff past a message nobody ever looked at.
+    # the run reports non-zero and the job fails, rather than advancing the cutoff past a message
+    # nobody ever looked at.
     log "poll-slack: relevance request failed for ${sid}; not queuing, leaving the cutoff alone"
     ERRORS=$((ERRORS+1)); LOCAL_ERR=1; return 0
   fi
@@ -522,7 +519,7 @@ if has_source channels; then
     slack_call "$TMPD/read.json" read "$channel" "$READ_COUNT"
     slack_rc_ok $? "reading ${channel}" || continue
     if ! slack_shape_ok "$TMPD/read.json"; then
-      log "poll-slack: unrecognised read response shape for ${channel}; leaving Slack to the model"
+      log "poll-slack: unrecognised read response shape for ${channel}; skipping"
       exit 3
     fi
 
@@ -640,9 +637,9 @@ done < <(poll_resume_candidates ${RESUME_ARGS[@]+"${RESUME_ARGS[@]}"})
 # The value written is the highest ts this run actually CONSIDERED — including messages the
 # relevance gate rejected. That is deliberate: a rejected message has been judged, so re-examining
 # it next tick would pay for the same judgment forever.
-# AND NOT ON A RUN THAT HAD ERRORS. An error exits 3, which hands Slack back to the model — but a
-# cutoff already advanced past the messages this run judged would hide them from that fallback too,
-# so a transient failure would silently eat every message around it. Re-judging a handful next tick
+# AND NOT ON A RUN THAT HAD ERRORS. An error exits 3 and the next run retries — but a cutoff
+# already advanced past the messages this run judged would hide them from that retry, so a
+# transient failure would silently eat every message around it. Re-judging a handful next tick
 # is the cheaper mistake; reconciliation stops anything already written from being duplicated.
 STATE_DIRTY=0
 if [ "$DRY_RUN" -eq 0 ] && [ "$TOKEN_SKIP" -eq 0 ] && [ "$ERRORS" -eq 0 ] && [ -s "$HIGHEST" ]; then

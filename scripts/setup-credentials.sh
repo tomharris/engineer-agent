@@ -78,9 +78,9 @@ EOF
     echo
     echo "NOTE: this key authorises sending some of your content to api.typesafe.ai. Nothing else"
     echo "in the poll sends your content to a third party. The key alone enables nothing — each"
-    echo "feature is opted into separately, and stays model-driven until you do:"
+    echo "feature is opted into separately, and stays off until you do:"
     echo
-    echo "  Slack relevance     'slack' in agent.poll.scripted_sources"
+    echo "  Slack relevance     a slack / watch scheduled job"
     echo "                      sends: message text + thread context"
     echo "  Ticket-kind Form B  agent.typesafe.ticket_kind.enabled: true"
     echo "                      sends: GitHub issue title + labels (never the body), and only"
@@ -99,15 +99,15 @@ EOF
     tst="$(ea_secret_resolve "$(cfg agent.typesafe.api_key_env)" "$(cfg agent.typesafe.api_key_file)" "$(ea_secret_service typesafe)" "")"
     printf 'jira.site        : %s\n' "$(cfg agent.jira.site)"
     printf 'jira.email       : %s\n' "$jmail"
-    printf 'jira token       : %s\n'  "$([ -n "$jt" ] && echo 'resolved' || echo 'NOT FOUND (Jira stays model-driven)')"
-    printf 'slite key        : %s\n'  "$([ -n "$st" ] && echo 'resolved' || echo 'NOT FOUND (Slite stays model-driven)')"
+    printf 'jira token       : %s\n'  "$([ -n "$jt" ] && echo 'resolved' || echo 'NOT FOUND (jira watch jobs unavailable)')"
+    printf 'slite key        : %s\n'  "$([ -n "$st" ] && echo 'resolved' || echo 'NOT FOUND (slite watch jobs unavailable)')"
     printf 'typesafe key     : %s\n'  "$([ -n "$tst" ] && echo 'resolved' || echo 'NOT FOUND (every TypeSafe-backed judgment stays model-driven)')"
     # Reported separately from the key: the per-feature opt-in is the gate people actually forget,
     # and "the key resolves" is not an answer to "is this feature on".
     printf 'ticket-kind judge: %s\n' "$([ "$(cfg agent.typesafe.ticket_kind.enabled)" = "true" ] && { [ -n "$tst" ] && echo 'judged in the collector' || echo 'enabled, but NO KEY (deferred to the model)'; } || echo 'off (deferred to the model)')"
     printf 'routing judge    : %s\n' "$([ "$(cfg agent.typesafe.routing.enabled)" = "true" ] && { [ -n "$tst" ] && echo 'judged in the collector' || echo 'enabled, but NO KEY (deferred to the model)'; } || echo 'off (deferred to the model)')"
     for dep in curl jq; do
-      printf '%-17s: %s\n' "$dep" "$(command -v "$dep" >/dev/null 2>&1 && echo present || echo "MISSING (source stays model-driven)")"
+      printf '%-17s: %s\n' "$dep" "$(command -v "$dep" >/dev/null 2>&1 && echo present || echo "MISSING (its collector is unavailable)")"
     done
     # A token that only resolves from the environment is the launchd trap: it will not be there when
     # the LaunchAgent runs. Say so, because nothing else ever will.

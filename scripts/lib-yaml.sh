@@ -10,7 +10,7 @@
 #
 # DELIBERATELY NOT jq/yq/PyYAML. yq is not installed and is not a dependency anywhere in this
 # repo; jq is a soft dependency that only the separately-installed approval-listener may
-# hard-require (see the "deliberately NOT jq" note in cron-poll.sh); and PyYAML is NOT in the
+# hard-require (CLAUDE.md's jq convention); and PyYAML is NOT in the
 # Python standard library, so a `python3 -c "import yaml"` would work on a dev box and die on a
 # macOS launchd run with a minimal environment — this repo's signature failure shape (works
 # interactively, silently fatal unattended). awk is everywhere.

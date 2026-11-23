@@ -460,7 +460,7 @@ fi
 teardown
 
 # ---------------------------------------------------------------------------
-# --keys is what cron-poll.sh diffs against its last push, so its SHAPE is load-bearing: prose on
+# --keys is what queue-hygiene.sh diffs against its last push, so its SHAPE is load-bearing: prose on
 # stdout, or a key that changes spelling between runs, would re-notify on every poll.
 echo "--keys"
 setup

@@ -30,6 +30,7 @@ eq()  { if [ "$2" = "$3" ]; then ok "$1"; else bad "$1 — want [$2] got [$3]"; 
 
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 export EA_AGENT_DIR="$TMP/agent"
+export EA_POLL_STATE_FILE="$EA_AGENT_DIR/state/poll.state.yaml"
 mkdir -p "$EA_AGENT_DIR"/queue/{incoming,drafts,completed,rejected} "$EA_AGENT_DIR/state"
 STUB="$TMP/bin"; mkdir -p "$STUB"
 export PATH="$STUB:$PATH"
@@ -154,7 +155,7 @@ if grep -q '^## Draft Response' "$F"; then bad "collector must NOT write a draft
 if [ -z "$(fmv "$(item gh-103)" ticket_kind_method)" ]; then ok "_unrouted has no kind method"; else bad "_unrouted must not carry a kind"; fi
 
 echo "== state =="
-S="$EA_AGENT_DIR/state/last-poll.yaml"
+S="$EA_POLL_STATE_FILE"
 if grep -q 'acme/shared' "$S"; then ok "repo cutoff recorded"; else bad "missing repo cutoff"; fi
 if grep -q 'acme/shared#101' "$S"; then ok "routed issue in seen_issues"; else bad "routed issue missing from seen"; fi
 # An unrouted issue must be re-checked next poll, so it is deliberately NOT recorded as seen.
@@ -189,12 +190,22 @@ for where in "drafts draft" "incoming"; do
   printf -- '---\ntype: ticket\nsource: github\nsource_id: "acme/alpha-only#301"\ntitle: "Manually added"\nstatus: drafted\nproject: "alpha"\nmanual: true\n---\n## Context\nBody.\n' > "$f"
   [ "${2:-}" = draft ] && printf '\n## Draft Response\nPlan.\n' >> "$f"
   M5="$TMP/m5"; : > "$M5"
-  : > "$GH_CALLS"; EA_POLL_STATE_FILE="$TMP/job.state.yaml" EA_JOBS_IGNORE_EXCLUSIVE=1 \
+  : > "$GH_CALLS"; EA_POLL_STATE_FILE="$TMP/job.state.yaml" \
     "$POLL" --run-ts "$NOW" --manifest "$M5" --project alpha >"$TMP/out" 2>"$TMP/err"
   eq "manual item in $1/: no second file" 1 "$(ls "$EA_AGENT_DIR"/queue/*/*gh-301* | wc -l | tr -d ' ')"
   eq "manual item in $1/: no draft row" 0 "$(grep -c '^draft	' "$M5")"
 done
 rm -f "$EA_AGENT_DIR"/queue/*/*gh-301*
+
+echo "== no state file: a usage error, never a run against a shared default =="
+fixture "acme/alpha-only|me|302|${NOW}|$(b64 'No state file')|$(b64 'body')||https://gh/302"
+M6="$TMP/m6"; : > "$M6"
+( unset EA_POLL_STATE_FILE; "$POLL" --run-ts "$NOW" --manifest "$M6" --project alpha >"$TMP/out" 2>"$TMP/err" ); rc=$?
+eq "exit 2" 2 "$rc"
+eq "says why" "lib-state: no state file (pass one or set EA_POLL_STATE_FILE)" "$(grep '^lib-state:' "$TMP/err")"
+eq "no item written" "" "$(ls "$EA_AGENT_DIR"/queue/*/*gh-302* 2>/dev/null)"
+eq "no manifest row" 0 "$(grep -c . "$M6")"
+eq "no state file written anywhere" "" "$(find "$EA_AGENT_DIR/state" -newer "$M6" -type f 2>/dev/null)"
 
 echo "== recency guard (agent.max_issue_age_days) =="
 fixture "acme/shared|me|301|${OLD}|$(b64 'Ancient backlog item')|$(b64 'x')|backend|https://gh/301"

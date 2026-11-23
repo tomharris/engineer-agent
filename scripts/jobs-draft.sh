@@ -1,12 +1,11 @@
 #!/bin/bash
 # jobs-draft.sh — Phase B for a scheduled job: draft the items a collector wrote to incoming/.
 #
-# The global poll's Phase B also polls every unscripted source; a job must only draft what its own
-# collector found, so it gets this narrower prompt. The ALLOWLIST is not narrower: it is the poll's,
-# from lib-poll-allowlist.sh, so the two cannot drift.
+# It drafts only what its own collector found. The ALLOWLIST comes from lib-poll-allowlist.sh, so
+# no copy can drift.
 #
-# It takes state/drafting.lock (lib-drafting-lock.sh), shared with the global poll and every other
-# job: one drafter at a time, so no two models edit the same file. Held lock => exit 4 (deferred);
+# It takes state/drafting.lock (lib-drafting-lock.sh), shared with every other job and queue
+# hygiene: one drafter at a time, so no two models edit the same file. Held lock => exit 4 (deferred);
 # the items stay in incoming/ and the next job tick's own resume sweep re-emits them, so deferral
 # never strands anything.
 #
@@ -68,7 +67,7 @@ You are the drafting step of the scheduled engineer-agent job '${JOB}'. Its coll
 
 MEMORY: do NOT create, update, or delete memory files, and do NOT treat any pre-existing memory as evidence about this run. If a tool appears unavailable, establish that FRESH this run.
 
-Read the manifest at ${MANIFEST} — one tab-separated row per item: action, path, type, project, source_id, needs_routing, needs_kind_check, title. For EACH row: read the item at that path, draft its '## Draft Response' section following the skill for its type (config at ${AGENT_DIR}/engineer.yaml), set status: drafted, and move it to ${AGENT_DIR}/queue/drafts/ under the SAME filename. An item left in incoming/ is invisible to every approval path, so finishing this move is not optional. When needs_routing is 1 apply ONLY Tier 3b of ${PLUGIN_ROOT}/references/routing-ladder.md, choosing from matched_projects ONLY; abstaining and leaving it _unrouted is a correct answer. When needs_kind_check is 1 apply ONLY Tier 3 Form B of ${PLUGIN_ROOT}/references/ticket-kind.md. Every other tier has ALREADY been applied.
+Read the manifest at ${MANIFEST} — one tab-separated row per item: action, path, type, project, source_id, needs_routing, needs_kind_check, title. For EACH row: read the item at that path, draft its '## Draft Response' section as ${PLUGIN_ROOT}/references/drafting.md says for its type (config at ${AGENT_DIR}/engineer.yaml), set status: drafted, and move it to ${AGENT_DIR}/queue/drafts/ under the SAME filename. An item left in incoming/ is invisible to every approval path, so finishing this move is not optional. When needs_routing is 1 apply ONLY Tier 3b of ${PLUGIN_ROOT}/references/routing-ladder.md, choosing from matched_projects ONLY; abstaining and leaving it _unrouted is a correct answer. When needs_kind_check is 1 apply ONLY Tier 3 Form B of ${PLUGIN_ROOT}/references/ticket-kind.md. Every other tier has ALREADY been applied.
 
 For EACH item you move to drafts/, run: ${PLUGIN_ROOT}/scripts/notify.sh --title '<type>: <title>' --message '<project> — <short summary>' --priority '<priority from frontmatter>' --item-id '<the queue filename>' --source-url '<source_url from frontmatter>' --tags 'inbox_tray'
 

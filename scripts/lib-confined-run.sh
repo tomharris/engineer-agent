@@ -16,7 +16,7 @@
 # one. This is not hypothetical: on 2026-07-24 a failing cron poll wrote a memory asserting
 # `gh` was permanently blocked ("Do not treat this as transient and just rerun"), and every
 # later poll loaded it and re-confirmed the wrong conclusion instead of retesting — one flake
-# became five identical failures (fixed in cron-poll.sh; see CLAUDE.md's headless-run notes).
+# became five identical failures (see CLAUDE.md's headless-run notes).
 # The listener is exposed to the SAME pool: memory is keyed by CWD, and this service runs from
 # $HOME, so run_generic_execute shares ~/.claude/projects/-home-tom/memory/ with the poll and
 # would have loaded that same poisoned file. (The ticket/QA runs cd into a per-run worktree, so
@@ -298,7 +298,7 @@ run_ticket_implementation() {
   #
   # The prompt names the SKILL FILE rather than invoking the Skill tool, and rather than going
   # through commands/execute.md: `Skill` is deliberately absent from every confined allowlist in
-  # this repo (see CLAUDE.md on cron-poll.sh), and commands/execute.md would send a second
+  # this repo (see CLAUDE.md on `references/`), and commands/execute.md would send a second
   # notify.sh FYI on top of the listener's own outcome ack.
   local prompt="Execute the approved engineer-agent queue item '${item}' (decision: approve). \
 Read ${PLUGIN_ROOT}/skills/execute-item/SKILL.md and follow it with item='${item}' and decision='approve'. Its ticket case probes for the ticket branch and, when the branch does not exist yet, implements the ticket by following ${PLUGIN_ROOT}/skills/implement-ticket/SKILL.md before opening a DRAFT pull request. \

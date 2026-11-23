@@ -106,8 +106,9 @@ The resume sweep emits every undrafted `incoming/` item regardless of project or
 **Files:** delete `scripts/cron-poll.sh`, `scripts/install-cron.sh`, `tests/cron-poll-scripted.test.sh`; modify `scripts/ea-config.sh` (drop `_exclusive_owner`, `EA_JOBS_IGNORE_EXCLUSIVE`), `scripts/job-*.sh` (drop `EA_JOBS_IGNORE_EXCLUSIVE`), `scripts/queue-status.sh` (drop legacy branch), `scripts/claude-bin` preflight users (`approval-listener.sh` comment re: shared record), `references/routing-ladder.md`, `references/ticket-kind.md` (the "cron-poll allowlists `Read` but not `Skill`" rationale now refers to `jobs-draft.sh`).
 
 - [x] `install-cron.sh --uninstall` logic moves into `migrate-poll-to-jobs.sh --apply` (bootout + remove plist / crontab line) so existing installs are cleaned up. (Done in Task 7.)
-- [ ] Port any `cron-poll-scripted.test.sh` cases still meaningful (scripted-note, skip-model-when-empty) to `jobs.test.sh` before deleting; delete the rest.
-- [ ] `grep -rn "cron-poll\|last-poll\|install-cron\|exclusive" scripts commands skills references tests` is empty apart from intentional history notes.
+- [x] Port any `cron-poll-scripted.test.sh` cases still meaningful (scripted-note, skip-model-when-empty) to `jobs.test.sh` before deleting; delete the rest.
+- [x] `grep -rn "cron-poll\|last-poll\|install-cron\|exclusive" scripts commands skills references tests` is empty apart from intentional history notes. (Remaining: `migrate-poll-to-jobs.sh` and its test and `setup`'s migration offer, which migrate from those files; tests asserting a leftover `exclusive:` / legacy file is ignored; "mutually exclusive" / "17:00 exclusive".)
+- [x] Also (decided during the task): `/engineer-agent poll` and the five `poll-*` skills are deleted, overriding the "`/engineer-agent poll` stays" ruling above. Their ticket draft templates moved to `references/drafting.md` (used by `jobs-draft.sh` and `add-ticket`). `lib-state.sh` has no default state file (collectors exit 2 without `EA_POLL_STATE_FILE`). `agent.poll.scripted_sources` is dropped (only `cron-poll.sh` read it; a slack watch job is the TypeSafe opt-in).
 
 ## Task 9: Docs
 

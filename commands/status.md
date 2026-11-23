@@ -1,5 +1,5 @@
 ---
-description: "Show engineer-agent status: queue counts, last poll times, config health"
+description: "Show engineer-agent status: queue counts, discovery coverage, job health"
 allowed-tools: ["Bash", "Read", "Glob", "Grep"]
 ---
 
@@ -18,7 +18,7 @@ If it does not exist, report:
 
 If it exists, confirm: "Config loaded." List the registered project slugs from the `projects` map.
 
-### 2. Queue counts, poll times, and receipt health
+### 2. Queue counts, discovery coverage, and job health
 
 Run:
 
@@ -26,23 +26,20 @@ Run:
 ${CLAUDE_PLUGIN_ROOT}/scripts/queue-status.sh
 ```
 
-Print its output. **Do not recompute any of it.** The script counts the queue directories, renders
-each source's last-poll time as a relative age, and applies the receipt-reading rules — including
-the two that are easy to get wrong: `status: ok` with `items_queued: 0` is **healthy**, and a
-non-empty `skipped:` list is **normal** and is never a problem. It also reports both stranding
-shapes — items in `incoming/` **without** a draft (invisible until drafted; the next poll re-emits
-them) and items in `incoming/` **with a finished draft** (done, but unreachable by every approval
-path; the poll moves these to `drafts/`, so a non-zero count means the move was declined) — and any
-duplicate `(type, source_id)` groups that auto-healing declined to resolve — the poll pushes about
-each of those exactly once, so `status` is where a standing duplicate stays visible.
+Print its output. **Do not recompute any of it.** The script counts the queue directories and
+reports both stranding shapes — items in `incoming/` **without** a draft (invisible until drafted;
+the owning watch job re-emits them) and items in `incoming/` **with a finished draft** (done, but
+unreachable by every approval path; queue hygiene moves these to `drafts/`, so a non-zero count
+means the move was declined) — and any duplicate `(type, source_id)` groups that auto-healing
+declined to resolve. Hygiene pushes about each of those exactly once, so `status` is where a
+standing duplicate stays visible.
 
-When scheduled jobs are configured it prints a "Discovery" section (per project / source: when a
-watch job last checked it, and which job) and a "Job health" line, then ends with a "Scheduled jobs"
-table (from `scripts/jobs-ctl.sh list`). Call out every **UNCOVERED** source — configured, but no
-valid, unpaused watch job, so nothing discovers new work there once the global poll is gone — and
-every job listed under "Job health" (paused, invalid, partial or error); the dispatcher skips or
-fails those silently every minute. Sections labelled "Global poll (legacy)" appear only while
-`state/last-poll.yaml` / `last-poll-receipt.yaml` exist.
+It then prints a "Discovery" section (per project / source: when a watch job last checked it, and
+which job), a "Job health" line, and a "Scheduled jobs" table (from `scripts/jobs-ctl.sh list`).
+Call out every **UNCOVERED** source — configured, but no valid, unpaused watch job, so nothing
+discovers new work there — and every job listed under "Job health" (paused, invalid, partial or
+error); the dispatcher skips or fails those silently every minute. With no jobs at all it says so:
+nothing discovers new work.
 
 `--json` is available if you need the numbers rather than the table: it includes `jobs` counts and
 `uncovered`, not the per-job detail.

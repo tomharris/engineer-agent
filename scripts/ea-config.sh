@@ -2,12 +2,10 @@
 # ea-config.sh — normalize engineer.yaml into a flat, greppable view for the scripted pollers.
 #
 # WHY A NORMALIZER RATHER THAN LETTING EACH SCRIPT READ THE YAML: the rules that turn raw config
-# into effective config are subtle, and they are currently restated in prose in every poll skill —
-# tracker inference (poll-github-issues step 3, poll-jira step 3), the investigation REPLACE-not-
-# merge override (references/ticket-kind.md), the agent-vs-project Slack workspace fallback
-# (poll-slack step 1), and the per-source "is this even configured" test that produces the receipt's
-# `skipped:` bucket. Restating those in each collector would recreate exactly the drift CLAUDE.md
-# warns about. Resolve them ONCE, here, and let every consumer grep the result.
+# into effective config are subtle: tracker inference, the investigation REPLACE-not-merge override
+# (references/ticket-kind.md), the agent-vs-project Slack workspace fallback, and the per-source
+# "is this even configured" test. Restating those in each collector would recreate exactly the
+# drift CLAUDE.md warns about. Resolve them ONCE, here, and let every consumer grep the result.
 #
 # SECURITY — this deliberately emits a CURATED view, not the whole document. agent.notify.ntfy.*
 # (topic, command_topic, auth_token) is omitted: on public ntfy.sh a topic name is effectively a
@@ -75,8 +73,8 @@ _effective_kind_list() {
   for w in $shipped; do printf '%s\n' "$w"; done
 }
 
-# _tracker <slug> — explicit projects.<slug>.tracker, else inferred exactly as poll-github-issues
-# step 3 and poll-jira step 3 describe: a jira section wins, then a github.issues section, else none.
+# _tracker <slug> — explicit projects.<slug>.tracker, else inferred: a jira section wins, then a
+# github.issues section, else none.
 _tracker() {
   local slug="$1" t
   t="$(_get "projects.${slug}.tracker")"
@@ -88,15 +86,10 @@ _tracker() {
 
 # _source_state <slug> <source> — "configured" or "skipped:<reason>".
 #
-# This is the single source of truth for the receipt's `skipped:` bucket. cron-poll.sh's prompt
-# currently makes the MODEL decide which of three buckets each source belongs in, and the rule it
-# must apply ("a skipped source is a normal, expected result and MUST NOT affect status") is exactly
-# the kind of bookkeeping a script does not get wrong. The reason strings match the wording already
-# appearing in state/last-poll-receipt.yaml so the change is invisible in the receipt's diff.
+# The single source of truth for whether a source is set up: the collectors skip a source that is
+# not, `watch` job validation rejects one, and `status` reports coverage only for configured ones.
 _source_state() {
-  local slug="$1" src="$2" tracker owner; tracker="$(_tracker "$slug")"
-  owner="$(_exclusive_owner "$slug" "$src")"
-  if [ -n "$owner" ]; then printf 'skipped:owned by scheduled job %s' "$owner"; return 0; fi
+  local slug="$1" src="$2" tracker; tracker="$(_tracker "$slug")"
   case "$src" in
     github)
       [ -n "$(_get "projects.${slug}.github.owner")" ] || { printf 'skipped:no github section configured'; return 0; }
@@ -111,8 +104,6 @@ _source_state() {
       [ -n "$(_list "projects.${slug}.slack.channels")" ] || { printf 'skipped:slack.channels is empty'; return 0; }
       printf 'configured' ;;
     jira)
-      # Wording matched to what the model has been writing, so switching to the scripted path
-      # produces no spurious diff in state/last-poll-receipt.yaml.
       [ "$tracker" = "jira" ] || { printf 'skipped:tracker is %s, no jira section' "$tracker"; return 0; }
       printf 'configured' ;;
     slite)
@@ -125,43 +116,8 @@ _source_state() {
 
 # --- Scheduled jobs (scripts/jobs-tick.sh) -----------------------------------------------------
 # The (integration:action) pairs the dispatcher has a handler for. Single source of truth: jobs
-# naming anything else are reported unsupported and never run, and never claim `exclusive`.
+# naming anything else are reported unsupported and never run.
 JOBS_SUPPORTED="slack:watch github:watch github-issues:watch jira:watch slite:watch slack:cr-qa jira:implement-next github-issues:implement-next github-issues:address-feedback"
-
-# Job integration name -> the source name used by _source_state / the receipt.
-_job_source() {
-  case "$1" in
-    github-issues) printf 'github_issues' ;;
-    *)             printf '%s' "$1" ;;
-  esac
-}
-
-# _exclusive_owner <slug> <source> — id of a job that owns this source exclusively, else nothing.
-#
-# Only a job that can actually run takes ownership: supported, and not paused. A paused job reading
-# as the owner would leave the source polled by nobody, with the receipt calling it "skipped" — a
-# silent outage. EA_JOBS_IGNORE_EXCLUSIVE=1 is set by the job's own collector run, which must see
-# the source as configured.
-_exclusive_owner() {
-  local slug="$1" src="$2" n i id integ action
-  [ "${EA_JOBS_IGNORE_EXCLUSIVE:-}" = "1" ] && return 0
-  n="$(yaml_seq_len "projects.${slug}.jobs")"
-  [ "${n:-0}" -gt 0 ] 2>/dev/null || return 0
-  i=0
-  while [ "$i" -lt "$n" ]; do
-    if [ "$(_get "projects.${slug}.jobs[${i}].exclusive")" = "true" ]; then
-      id="$(_get "projects.${slug}.jobs[${i}].id")"
-      integ="$(_get "projects.${slug}.jobs[${i}].integration")"
-      action="$(_get "projects.${slug}.jobs[${i}].action")"
-      if [ "$(_job_source "$integ")" = "$src" ] \
-         && case " $JOBS_SUPPORTED " in *" ${integ}:${action} "*) true ;; *) false ;; esac \
-         && [ ! -e "${EA_AGENT_DIR}/state/jobs/${slug}.${id}.paused" ]; then
-        printf '%s' "$id"; return 0
-      fi
-    fi
-    i=$((i+1))
-  done
-}
 
 # _emit_jobs <slug> — shape only; semantic validation lives in lib-jobs.sh.
 # Keyed by index, not id: a duplicate or malformed id must still reach the validator to be reported.
@@ -179,7 +135,6 @@ _emit_jobs() {
     printf 'projects.%s.job.%s.action=%s\n'      "$slug" "$i" "$action"
     printf 'projects.%s.job.%s.every=%s\n'       "$slug" "$i" "$(_get "${p}.every")"
     printf 'projects.%s.job.%s.hours=%s\n'       "$slug" "$i" "$(_get "${p}.hours")"
-    printf 'projects.%s.job.%s.exclusive=%s\n'   "$slug" "$i" "$(_get "${p}.exclusive")"
     printf 'projects.%s.job.%s.budget_usd=%s\n'  "$slug" "$i" "$(_get "${p}.budget_usd")"
     printf 'projects.%s.job.%s.pause_after_failures=%s\n' "$slug" "$i" "$(_get "${p}.guards.pause_after_failures")"
     printf 'projects.%s.job.%s.max_in_flight=%s\n' "$slug" "$i" "$(_get "${p}.guards.max_in_flight")"
@@ -297,7 +252,6 @@ _dump_uncached() {
   # Which sources are collected by a deterministic script instead of by the model. Absent or empty
   # => today's prompt-driven path, unchanged. Deny-by-default, matching the posture of
   # agent.autonomy.auto_execute and projects.<slug>.exec.allowed_commands.
-  _emit_list agent.poll.scripted_sources agent.poll.scripted_sources
 
   # --- per project ---------------------------------------------------------------------------
   while IFS= read -r slug; do
@@ -313,7 +267,7 @@ _dump_uncached() {
     _emit_list "projects.${slug}.github.ignore_labels"  "projects.${slug}.github.ignore_labels"
     _emit_list "projects.${slug}.github.issues.labels"  "projects.${slug}.github.issues.labels"
 
-    # Effective Slack workspace: project overrides agent (poll-slack step 1).
+    # Effective Slack workspace: project overrides agent.
     v="$(_get "projects.${slug}.slack.workspace")"
     [ -n "$v" ] || v="$(_get agent.slack.workspace)"
     printf 'projects.%s.slack.workspace=%s\n' "$slug" "$v"
@@ -325,7 +279,7 @@ _dump_uncached() {
     printf 'projects.%s.qa.document_parent=%s\n' "$slug" "$(_get "projects.${slug}.qa.document_parent")"
 
     # --- Jira sources, with the backward-compat normalization applied ONCE -------------------
-    # poll-jira step 3 states this rule in prose: `jira.sources` (array) is used as-is, and the
+    # `jira.sources` (array) is used as-is, and the
     # legacy `jira.project` (string) becomes a single catch-all source with no filters. Resolving
     # it here means the collector never sees the legacy shape, so it cannot handle it differently
     # from the way add-ticket or a model-driven poll would.
@@ -381,13 +335,12 @@ _dump_uncached() {
 
 # cmd_dump — the dump, cached in state/config-dump.cache. Building it costs one awk lookup per key
 # (~1s on a small config, several on a large one) and every job tick and handler loads it. The key
-# covers every input: the config text, the code that renders it, which jobs are paused
-# (_exclusive_owner) and EA_JOBS_IGNORE_EXCLUSIVE. An unwritable state dir just skips caching.
+# covers every input: the config text and the code that renders it. An unwritable state dir just
+# skips caching.
 cmd_dump() {
   local key cache="${EA_AGENT_DIR}/state/config-dump.cache" tmp
-  key="$( { cat "$EA_CONFIG_FILE" "${SCRIPT_DIR}/ea-config.sh" "${SCRIPT_DIR}/lib-yaml.sh" "${SCRIPT_DIR}/lib-paths.sh"
-            printf 'ignore-exclusive=%s\n' "${EA_JOBS_IGNORE_EXCLUSIVE:-}"
-            ls "${EA_AGENT_DIR}/state/jobs" 2>/dev/null | grep '\.paused$'; } 2>/dev/null | cksum)"
+  key="$(cat "$EA_CONFIG_FILE" "${SCRIPT_DIR}/ea-config.sh" "${SCRIPT_DIR}/lib-yaml.sh" "${SCRIPT_DIR}/lib-paths.sh" \
+          2>/dev/null | cksum)"
   if [ -f "$cache" ] && [ "$(head -1 "$cache" 2>/dev/null)" = "#key ${key}" ]; then
     tail -n +2 "$cache"; return 0
   fi

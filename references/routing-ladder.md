@@ -2,18 +2,18 @@
 
 Single source of truth for deciding **which engineer-agent project a ticket belongs to**.
 
-Read this file and follow it verbatim from:
-- `skills/poll-jira/SKILL.md` (Jira tickets)
-- `skills/poll-github-issues/SKILL.md` (GitHub issues)
+`scripts/lib-routing.sh` implements its deterministic tiers for the collectors
+(`scripts/poll-*.sh`). Read this file and follow it verbatim from:
+- `scripts/jobs-draft.sh` (Tier 3b only, for an item the collector left `_unrouted`)
 - `commands/add-ticket.md` (manual add, either tracker)
 
-Do not re-describe the ladder in those files — delegate to this one, so the three callers cannot
-drift apart.
+Do not re-describe the ladder in those places — delegate to this one, so the callers cannot drift
+apart.
 
 This is a plain reference document, not a skill. Callers reach it with `Read`. That is deliberate:
-`scripts/cron-poll.sh` allowlists `Read` but **not** `Skill` or `Agent`, so a skill-shaped or
-subagent-shaped ladder would be unreachable from the cron — which is the one path that has no human
-to fall back on.
+`scripts/jobs-draft.sh` allowlists `Read` but **not** `Skill` or `Agent`, so a skill-shaped or
+subagent-shaped ladder would be unreachable from the scheduled drafting run — which is the one path
+that has no human to fall back on.
 
 ## Inputs
 

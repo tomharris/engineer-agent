@@ -164,12 +164,12 @@ awk '/^[^[:space:]#]/ { inp = ($0 ~ /^projects:/) }
      inp && /^      [[:space:]]*exclusive:/ { next }
      { print }' "$NEW" > "$NEW.tmp" && mv "$NEW.tmp" "$NEW"
 
-# The candidate must read back as exactly the old jobs plus the new ones, none exclusive.
+# The candidate must read back as exactly the old jobs plus the new ones.
 if ! cmp -s "$CFG" "$NEW"; then
   mkdir -p "$TMPD/verify/state"; cp "$NEW" "$TMPD/verify/engineer.yaml"
   got="$(EA_JOBS_CFG="$(EA_AGENT_DIR="$TMPD/verify" "${PLUGIN_ROOT}/scripts/ea-config.sh" dump 2>/dev/null)" \
-         jobs_enumerate | awk -F'|' '{print $1 "|" $3 "|" $4 "|" $10}' | LC_ALL=C sort)"
-  want="$(printf '%s\n%s\n' "$OLD_JOBS" "$NEW_JOBS" | grep . | sed 's/$/|/' | LC_ALL=C sort)"
+         jobs_enumerate | awk -F'|' '{print $1 "|" $3 "|" $4}' | LC_ALL=C sort)"
+  want="$(printf '%s\n%s\n' "$OLD_JOBS" "$NEW_JOBS" | grep . | LC_ALL=C sort)"
   if [ "$got" != "$want" ]; then
     echo "migrate-poll-to-jobs: the rewritten engineer.yaml does not read back as expected; nothing written" >&2
     diff <(printf '%s\n' "$want") <(printf '%s\n' "$got") >&2

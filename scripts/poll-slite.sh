@@ -1,14 +1,13 @@
 #!/bin/bash
 # poll-slite.sh — deterministic collector for Slite docs tagged for review.
 #
-# Replaces the mechanical half of skills/poll-slite/SKILL.md: the per-label search, the recency
+# Collects for `slite` / `watch` jobs: the per-label search, the recency
 # filter, reconciliation, routing, queue-file writing, and state. It does NOT draft — it writes
 # doc-review items to queue/incoming/ and emits a manifest naming what still needs a model.
 #
 # WHY REST AND NOT MCP: same reason as poll-jira.sh — mcp__slite__* is unreachable from bash, which
 # is why config/engineer.example.yaml used to say Slite "always stays model-driven". curl + the
-# Slite REST API instead, with jq a HARD dependency here and a SOFT one for the poll (no jq =>
-# exit 3 and Slite is left to the model, exactly as before).
+# Slite REST API instead, with jq a HARD dependency (no jq => exit 3, collector unavailable).
 #
 # ONE COLLECTION PASS, NOT ONE PER PROJECT. The skill iterates over projects and queues a matching
 # doc for each one, which in a real config is a live bug rather than a hypothetical: all six
@@ -61,7 +60,7 @@ while [ $# -gt 0 ]; do
 done
 
 # Resume sweep scope: a --project run re-emits only its own source and types, so concurrent jobs
-# never claim the same stranded file. The global poll (no --project) keeps the unscoped sweep.
+# never claim the same stranded file. Without --project the sweep is unscoped.
 RESUME_ARGS=()
 if [ -n "$ONLY_PROJECT" ]; then
   RESUME_ARGS=(--project "$ONLY_PROJECT" --source slite --type doc-review)
@@ -76,8 +75,8 @@ WRITTEN="$TMPD/written"; : > "$WRITTEN"
 log()  { printf '%s\n' "$*" >&2; }
 emit() { [ -n "$MANIFEST" ] && printf '%s\n' "$*" >> "$MANIFEST"; return 0; }
 
-command -v curl >/dev/null 2>&1 || { log "poll-slite: curl not found; leaving Slite to the model"; exit 3; }
-command -v jq   >/dev/null 2>&1 || { log "poll-slite: jq not found; leaving Slite to the model"; exit 3; }
+command -v curl >/dev/null 2>&1 || { log "poll-slite: curl not found; skipping"; exit 3; }
+command -v jq   >/dev/null 2>&1 || { log "poll-slite: jq not found; skipping"; exit 3; }
 
 EA_CFG="$("${SCRIPT_DIR}/ea-config.sh" dump)"; export EA_CFG
 cfg()  { printf '%s\n' "$EA_CFG" | awk -F= -v k="$1" '$1==k {sub(/^[^=]*=/,""); print; exit}'; }
@@ -95,7 +94,7 @@ if rt_judge_enabled; then
 fi
 
 if ! slite_init "$(cfg agent.slite.api_base)" "$(cfg agent.slite.api_key_env)" "$(cfg agent.slite.api_key_file)"; then
-  log "poll-slite: ${SLITE_ERR}; leaving Slite to the model"
+  log "poll-slite: ${SLITE_ERR}; skipping"
   exit 3
 fi
 [ "$CHECK" -eq 1 ] && exit 0   # --check: every precondition above passed; no network, no state
@@ -128,7 +127,7 @@ slite_labels() {
          | .[] // empty' "$1" 2>/dev/null | sed -E '/^[[:space:]]*$/d'
 }
 
-state_load
+state_load || exit 2   # no state file: a usage error, never a run against shared state
 
 # --- Phase 1: the deduplicated label set ------------------------------------------------------
 # Keyed by LABEL, not by project: several projects legitimately watch the same label, and each
@@ -160,7 +159,7 @@ while IFS= read -r label; do
     ERRORS=$((ERRORS+1)); continue
   fi
   if ! slite_shape_ok "$TMPD/search.json"; then
-    log "poll-slite: unrecognised search response shape; leaving Slite to the model"
+    log "poll-slite: unrecognised search response shape; skipping"
     exit 3
   fi
 

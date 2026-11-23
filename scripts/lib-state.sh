@@ -1,37 +1,41 @@
 #!/bin/bash
-# lib-state.sh — read/modify/write state/last-poll.yaml (the dedup cutoffs and seen-id sets).
+# lib-state.sh — read/modify/write a collector's state file (dedup cutoffs and seen-id sets).
 #
-# WHY A ROUND-TRIP RATHER THAN AN IN-PLACE EDIT: the state file holds sections this refactor does
-# NOT own. Jira and Slite polling stay model-driven, so jira_projects.* and projects.<slug>.slite.*
-# keep being written by a model, and the scripted GitHub collectors must leave them byte-equivalent.
-# Parsing the whole document to a flat form, changing only the addressed keys, and re-emitting
-# guarantees that: an untouched key round-trips because it is copied, not because a targeted awk
-# happened not to match it.
+# WHY A ROUND-TRIP RATHER THAN AN IN-PLACE EDIT: parsing the whole document to a flat form,
+# changing only the addressed keys, and re-emitting guarantees that a key this run did not touch
+# round-trips because it is copied, not because a targeted awk happened not to match it.
 #
 # PATHS ARE PIPE-SEPARATED, not dot-separated, because a key here can legitimately contain a dot —
 # github_repos holds "owner/repo" and a repo may be named "foo.js". A dotted path would silently
 # address the wrong node for exactly those repos.
 #
-# WHAT IS LOST IN THE ROUND-TRIP: comments and key order. state/last-poll.yaml is machine-written
+# WHAT IS LOST IN THE ROUND-TRIP: comments and key order. The state file is machine-written
 # and machine-read and has never carried comments; the file is re-emitted in sorted order, which is
 # stable across runs (so a diff shows only real changes) even though it may differ once from the
 # model-written original.
 #
 # LIVENESS AND DEDUP STAY SEPARATE. This file is a semantic dedup cutoff, NOT a health signal.
-# cron-poll.sh learned that the hard way: it used to fingerprint this file and warn when the hash
-# was unchanged, which false-warned on every quiet Slack poll and could be defeated by a model
-# fabricating a timestamp. Liveness belongs in the receipt; do not overload these values with it.
+# The old global poll learned that the hard way: it fingerprinted its state file and warned when
+# the hash was unchanged, which false-warned on every quiet Slack poll and could be defeated by a
+# model fabricating a timestamp. Liveness belongs in the receipt; do not overload these values.
 #
-# EA_POLL_STATE_FILE overrides the default path. Scheduled jobs set it so each job keeps its own
-# cutoffs instead of racing the global poll's read-modify-write of last-poll.yaml.
+# THERE IS NO DEFAULT FILE. Each watch job owns state/jobs/<key>.state.yaml (job-watch.sh sets
+# EA_POLL_STATE_FILE); a shared default would let two jobs race one read-modify-write.
 #
 # Requires lib-yaml.sh.
 
 EA_STATE=""
 
+# _state_file [file] — the explicit file, else EA_POLL_STATE_FILE; fails when neither is set.
+_state_file() {
+  local f="${1:-${EA_POLL_STATE_FILE:-}}"
+  [ -n "$f" ] || { echo "lib-state: no state file (pass one or set EA_POLL_STATE_FILE)" >&2; return 1; }
+  printf '%s' "$f"
+}
+
 # state_load [file] — parse the state file into the flat form held in $EA_STATE.
 state_load() {
-  local f="${1:-${EA_POLL_STATE_FILE:-${EA_AGENT_DIR}/state/last-poll.yaml}}"
+  local f; f="$(_state_file "${1:-}")" || return 1
   EA_STATE="$(YAML_SEP='|' yaml_dump "$f")"
 }
 
@@ -68,7 +72,7 @@ ${path}[]=${item}"
 
 # state_save [file] — re-emit the flat form as nested YAML.
 state_save() {
-  local f="${1:-${EA_POLL_STATE_FILE:-${EA_AGENT_DIR}/state/last-poll.yaml}}" tmp
+  local f tmp; f="$(_state_file "${1:-}")" || return 1
   tmp="$(mktemp)"
   printf '%s\n' "$EA_STATE" \
     | sed -E '/^[[:space:]]*$/d' \

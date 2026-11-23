@@ -133,14 +133,14 @@ Output: `type` (`ticket` | `ticket-investigation`), `ticket_kind_method`, and
 
 ### 6. Write Queue Item
 
-Compute the current timestamp `YYYYMMDD-HHmmss` (local time, same as polling skills). Write a new file in `~/.local/share/engineer-agent/queue/incoming/` with frontmatter and `## Context` matching the polling skill output exactly, so downstream skills see no difference between a manually-added and a polled item.
+Compute the current timestamp `YYYYMMDD-HHmmss` (local time, same as the collectors). Write a new file in `~/.local/share/engineer-agent/queue/incoming/` with frontmatter and `## Context` matching what the scripted collectors write (`scripts/lib-queue-write.sh`), so downstream skills see no difference between a manually-added and a polled item.
 
 #### Jira ticket
 
 **Filename:** `{YYYYMMDD-HHmmss}-{type}-{ticket_key}.md` (so an investigation is
 `…-ticket-investigation-ENG-789.md`)
 
-**Content:** Use the "Queue Item Format" block from `skills/poll-jira/SKILL.md`:
+**Content:**
 
 ```yaml
 ---
@@ -192,7 +192,7 @@ Do NOT include `matched_projects` — that field is only for `_unrouted` items.
 
 **Filename:** `{YYYYMMDD-HHmmss}-{type}-gh-{number}.md`
 
-**Content:** Use the "Queue Item Format" block from `skills/poll-github-issues/SKILL.md`:
+**Content:**
 
 ```yaml
 ---
@@ -238,12 +238,11 @@ ticket_kind_rationale: "{one line}"   # only when ticket_kind_method is "title-k
 
 If `--no-draft` was passed, skip this step entirely (the file stays in `incoming/` with `status: incoming`).
 
-Otherwise, follow the draft-generation step from the matching poll skill, and pick the template
-matching the item's `type` — the **Implementation Plan** block for `ticket`, the **Investigation
-Plan** block for `ticket-investigation`. Never emit the implementation template for an
-investigation: its "opens a draft PR" line is what the human reads at the gate.
-- Jira: `skills/poll-jira/SKILL.md` Step 6
-- GitHub: `skills/poll-github-issues/SKILL.md` Step 6 (for `ticket` only, derive a branch slug from the title: lowercase, replace non-alphanumeric with `-`, truncate to 40 chars, strip trailing hyphens — skip it for an investigation, which has no branch)
+Otherwise, follow the "Tickets" section of `${CLAUDE_PLUGIN_ROOT}/references/drafting.md`, and
+pick the template matching the item's `type` — the **Implementation Plan** block for `ticket`, the
+**Investigation Plan** block for `ticket-investigation`. Never emit the implementation template for
+an investigation: its "opens a draft PR" line is what the human reads at the gate. For a GitHub
+`ticket` only, derive the branch slug as that section describes.
 
 Append a `## Draft Response` section with the implementation plan, then move the file from `incoming/` to `drafts/` and update `status: drafted` in the frontmatter.
 

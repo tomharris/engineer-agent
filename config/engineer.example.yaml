@@ -88,44 +88,9 @@ agent:
                                 # Find it via claude.ai → Connectors, or Claude Code's /mcp.
                                 # Verify with: scripts/slack-mcp.sh auth
 
-  # Which sources are collected by a DETERMINISTIC SCRIPT instead of by the model.
-  #
-  # A poll normally starts a model session that reads ~87KB of skill instructions and every raw API
-  # response, to do work that is almost entirely string comparison and file writing. Listing a
-  # source here hands that job to scripts/poll-<source>.sh, which fetches, filters, deduplicates,
-  # routes, classifies and writes the queue file itself. The model is then invoked ONLY to draft
-  # responses — and when a poll finds nothing new AND every configured source is scripted, it is
-  # not invoked at all. That is the common case: most polls find nothing.
-  #
-  # Supported: "github-issues", "github" (PR review), "jira", "slite" and "slack".
-  #
-  # The two GitHub sources shell out to the already-authenticated `gh` CLI and need no extra setup.
-  # Jira and Slite have no CLI, so their collectors call the REST APIs directly and require BOTH
-  # `agent.jira.*` / `agent.slite.*` below AND an API credential (see those blocks). Missing any of
-  # that — or a missing `jq` / `curl` — is a CLEAN SKIP: the collector exits and the model polls
-  # that source exactly as it always has. You cannot break polling by listing a source here.
-  #
-  # ⚠ "slack" IS DOUBLE OPT-IN, and it is the only one. Every other source is filtered by a field
-  # comparison (a status, an assignee, a tag); Slack's filter is a judgment — "is this actually a
-  # question directed at me?" — which is why it was the last source still forcing a model session on
-  # every quiet poll. Listing it here is NOT enough: it also needs an `agent.typesafe` API key
-  # (below), because the judgment is made by a System One model that returns probabilities rather
-  # than prose. Without that key the collector exits cleanly and Slack stays model-driven.
-  # Read the note on the `typesafe` block before enabling it: this is the one poll-path integration
-  # that sends your content to a third party.
-  #
-  # The skip is ALL-OR-NOTHING per run: if any configured source is not scripted, the model still
-  # runs. So on a typical config you need every source you actually use listed here before a quiet
-  # poll can skip the model entirely.
-  #
-  # DENY-BY-DEFAULT: omit this block (or leave the list empty) and polling behaves exactly as it
-  # always has. Override at runtime with EA_POLL_SCRIPTED_SOURCES (space- or comma-separated).
-  poll:
-    scripted_sources: []          # e.g. ["github-issues", "github", "jira", "slite"]
-
-  # Jira REST access — ONLY used by the scripted collector (agent.poll.scripted_sources: ["jira"]).
+  # Jira REST access — ONLY used by the Jira collector (`jira` / `watch` jobs, jira-claim).
   # Everything else in the plugin reaches Jira through mcp__atlassian__*, which needs none of this.
-  # Omit the whole block and Jira polling stays model-driven, exactly as before.
+  # Without it a jira watch job is reported unavailable (`/engineer-agent jobs`).
   #
   # ⚠ NEVER put the API token in this file. This document gets pasted into issues when asking for
   # help, and ea-config.sh's normalized dump is designed to be safe to log. The keys below name
@@ -134,11 +99,11 @@ agent:
   #
   #     scripts/setup-credentials.sh jira        # prompts, stores in the login keychain
   #
-  # because cron/launchd hand the poll a MINIMAL environment. An `export EA_JIRA_API_TOKEN=...` in
-  # your shell profile works in every terminal you test from and is ABSENT in the supervised poll —
-  # so the env route resolves by hand and silently yields nothing every 15 minutes forever. (Same
-  # class of bug as the missing $USER that once broke every cron poll; see CLAUDE.md.) The poll
-  # already runs as a gui-session LaunchAgent, so it can read the login keychain.
+  # because cron/launchd hand scheduled jobs a MINIMAL environment. An `export EA_JIRA_API_TOKEN=...`
+  # in your shell profile works in every terminal you test from and is ABSENT in the supervised
+  # run — so the env route resolves by hand and silently yields nothing forever. (Same class of bug
+  # as the missing $USER that once broke every cron poll; see CLAUDE.md.) The jobs dispatcher runs
+  # as a gui-session LaunchAgent, so it can read the login keychain.
   #
   # Mint a token at https://id.atlassian.com/manage-profile/security/api-tokens
   jira:
@@ -149,20 +114,20 @@ agent:
     # api_base: "/rest/api/2"         # v2 deliberately: v3 returns descriptions as ADF JSON
     # story_points_field: "customfield_10016"  # per-instance; required by jobs rules using max_story_points
 
-  # Slite REST access — ONLY used by the scripted collector (scripted_sources: ["slite"]).
+  # Slite REST access — ONLY used by the Slite collector (`slite` / `watch` jobs).
   # Same credential rules as Jira above. Key: https://app.slite.com → Settings → API.
   slite:
     api_key_env: ""                   # optional: name of an env var holding the key
     api_key_file: ""                  # optional: path to a 0600 file containing it
     # api_base: "https://api.slite.com/v1"
 
-  # TypeSafe — ONLY used by the scripted Slack collector (scripted_sources: ["slack"]).
-  # Omit the whole block and Slack polling stays model-driven, exactly as before.
+  # TypeSafe — used by the Slack collector (`slack` / `watch` jobs) and the opt-in judgments below.
+  # Without it a slack watch job is reported unavailable.
   #
   # WHAT IT DOES. Slack is the one source whose "is this work?" test cannot be a field comparison.
   # A keyword match alone is mostly false positives — "deploy" appears in every deploy announcement
-  # — so skills/poll-slack/SKILL.md asks the model to "use judgment", and that one sentence is why
-  # Slack kept every poll paying for a model session. TypeSafe's System One model answers four
+  # — so a model once had to "use judgment" on every candidate, and that one sentence is why Slack
+  # kept every poll paying for a model session. TypeSafe's System One model answers four
   # narrow yes/no questions about each candidate message and returns a PROBABILITY for each:
   #
   #     is_question · directed_at_user · already_answered · needs_engineer
@@ -174,8 +139,8 @@ agent:
   #
   # ⚠ THIS IS THE ONE POLL-PATH INTEGRATION THAT SENDS YOUR CONTENT SOMEWHERE NEW. Slack message
   # and thread text goes to api.typesafe.ai. `gh`, Jira and Slite all talk to systems that already
-  # hold the data being sent; this does not. That is the entire reason it is a separate opt-in and
-  # not implied by listing "slack" above — decide it deliberately.
+  # hold the data being sent; this does not. Configuring a slack watch job is that opt-in — decide
+  # it deliberately.
   #
   # Same credential rules as Jira/Slite: the keys below name WHERE the secret is, never what it is.
   #     scripts/setup-credentials.sh typesafe     # prompts, stores in the login keychain

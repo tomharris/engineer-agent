@@ -23,8 +23,8 @@
 #            then report on whatever is left. Without it the check never writes to the queue.
 #   --keys   machine-readable: print one "type<TAB>source_id" line per UNRESOLVED duplicate group
 #            (after healing and baseline suppression) instead of the prose report. This is what
-#            cron-poll.sh diffs against its last push, so a standing duplicate is announced once
-#            rather than every 15 minutes.
+#            queue-hygiene.sh diffs against its last push, so a standing duplicate is announced
+#            once rather than every run.
 # Exit: 0 = invariant holds (or empty queue), 1 = duplicates found, 2 = usage/queue-missing error.
 #
 # HEALING: a duplicate used to be a pure alarm — it stayed red, and re-pushed an ntfy warning on
@@ -352,9 +352,9 @@ if [ "$suppressed" -gt 0 ]; then
 fi
 
 # --keys: the machine-readable answer, emitted AFTER healing and baseline suppression so it names
-# exactly what a human still has to resolve — nothing more. cron-poll.sh diffs this list against
-# the one it last pushed, which is what turns a standing duplicate into a single notification
-# instead of one every 15 minutes.
+# exactly what a human still has to resolve — nothing more. queue-hygiene.sh diffs this list
+# against the one it last pushed, which is what turns a standing duplicate into a single
+# notification instead of one every run.
 if [ "$KEYS" -eq 1 ]; then
   [ -n "$dup_keys" ] && printf '%s\n' "$dup_keys"
   [ -n "$dup_fam_keys" ] && printf '%s\n' "$dup_fam_keys"

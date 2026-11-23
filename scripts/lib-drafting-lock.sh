@@ -1,5 +1,5 @@
 #!/bin/bash
-# lib-drafting-lock.sh — the one lock every drafting run (global poll, each job's jobs-draft.sh)
+# lib-drafting-lock.sh — the one lock every drafting run (each job's jobs-draft.sh, queue hygiene)
 # takes, so no two models edit the same queue file. Watch jobs dispatch concurrently, so acquiring
 # must be atomic: the PID is written to a temp file and hard-linked into place (`ln` fails if the
 # lock exists), so a reader never sees an empty lock.

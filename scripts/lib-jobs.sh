@@ -56,7 +56,7 @@ _jcfgl() { printf '%s\n' "$EA_JOBS_CFG" | awk -v p="$1[]=" 'index($0,p)==1 {prin
 
 # jobs_enumerate — one '|'-separated row per configured job (not tab: `read` collapses empty
 # tab-separated fields, shifting every column after an unset `hours`):
-#   slug idx id integration action every hours days watch exclusive supported budget_usd pause_after
+#   slug idx id integration action every hours days watch supported budget_usd pause_after
 jobs_enumerate() {
   jobs_cfg_load
   local slug n i p
@@ -67,10 +67,10 @@ jobs_enumerate() {
     i=0
     while [ "$i" -lt "$n" ]; do
       p="projects.${slug}.job.${i}"
-      printf '%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s\n' "$slug" "$i" \
+      printf '%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s\n' "$slug" "$i" \
         "$(_jcfg "${p}.id")" "$(_jcfg "${p}.integration")" "$(_jcfg "${p}.action")" \
         "$(_jcfg "${p}.every")" "$(_jcfg "${p}.hours")" "$(_jcfgl "${p}.days")" \
-        "$(_jcfgl "${p}.watch")" "$(_jcfg "${p}.exclusive")" "$(_jcfg "${p}.supported")" \
+        "$(_jcfgl "${p}.watch")" "$(_jcfg "${p}.supported")" \
         "$(_jcfg "${p}.budget_usd")" "$(_jcfg "${p}.pause_after_failures")"
       i=$((i+1))
     done
@@ -96,7 +96,7 @@ jobs_watch_preflight() {
   c="$(jobs_watch_collector "$1")"; [ -n "$c" ] || return 0
   out="$(bash "${_jobs_script_dir}/${c}" --check 2>&1 >/dev/null)"; rc=$?
   [ "$rc" -eq 0 ] && return 0
-  printf '%s\n' "$out" | tail -1 | sed -E 's/^poll-[a-z-]+: //; s/; (leaving .* to the model|skipping)$//'
+  printf '%s\n' "$out" | tail -1 | sed -E 's/^poll-[a-z-]+: //; s/; skipping$//'
   return 3
 }
 
@@ -116,15 +116,14 @@ jobs_unrouted_owner() {
 }
 
 # jobs_validate_watch_source <slug> <integration> — the collector would skip an unconfigured source
-# and report ok forever, so reject the job with ea-config's skip reason instead. A source "owned"
-# by an exclusive job is configured; ownership only hides it from the global poll.
+# and report ok forever, so reject the job with ea-config's skip reason instead.
 jobs_validate_watch_source() {
   local st src
   jobs_cfg_load
   case "$2" in github-issues) src=github_issues ;; *) src="$2" ;; esac
   st="$(_jcfg "projects.$1.source.${src}")"
   case "$st" in
-    configured|"skipped:owned by scheduled job "*) return 0 ;;
+    configured) return 0 ;;
     skipped:*) echo "$2:watch: ${st#skipped:}"; return 1 ;;
     *) echo "$2:watch: source state unknown"; return 1 ;;
   esac
@@ -133,8 +132,8 @@ jobs_validate_watch_source() {
 # jobs_validate <row> — prints a reason and returns 1 if the job must not run; silent 0 if valid.
 # Needs the full enumeration to detect duplicate ids, so pass it as $2.
 jobs_validate() {
-  local row="$1" all="$2" slug idx id integ action every hours days watch excl sup budget pause secs d w
-  IFS='|' read -r slug idx id integ action every hours days watch excl sup budget pause <<< "$row"
+  local row="$1" all="$2" slug idx id integ action every hours days watch sup budget pause secs d w
+  IFS='|' read -r slug idx id integ action every hours days watch sup budget pause <<< "$row"
   [[ "$id" =~ ^[a-z0-9-]+$ ]] || { echo "id '${id}' must match ^[a-z0-9-]+\$"; return 1; }
   [ "$(printf '%s\n' "$all" | awk -F'|' -v s="$slug" -v i="$id" '$1==s && $3==i' | wc -l | tr -d ' ')" -eq 1 ] \
     || { echo "duplicate job id '${id}' in project ${slug}"; return 1; }
