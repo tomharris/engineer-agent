@@ -300,6 +300,11 @@ a guarantee about the interface, not about truth — validate the thresholds on 
   detached `run_job` subshell that died silently, so launchd ticks (which exec the shebang's
   `/bin/bash`) never started a job while manual `bash jobs-tick.sh` (Homebrew bash 5) worked. Use
   `$(self_pid)` from `lib-paths.sh`; tests exec the script by its shebang to catch this.
+- **Bash 3.2 misparses a `case` pattern inside `$(...)`.** `"$(case $s in ok|partial) …;; esac)"`
+  is a syntax error that yields garbage, not an empty string. Run the `case` outside the
+  substitution.
+- **BSD awk rejects a newline in a `-v` value** (`awk: newline in string`). Pass multi-line input
+  through the environment: `V="$x" awk '… ENVIRON["V"] …'`.
 - **Prepending fallback dirs to PATH shadows a caller's stubs.** The dispatcher scripts append
   `~/.local/bin`, `/opt/homebrew/bin` etc.; the installers set the real order.
 - **A bare statement before `else` is not portable awk.** `if (c) x = 1` on its own line followed by
