@@ -428,7 +428,7 @@ qa_stage() {
   fi
   if qa_script_on; then
     local_curl_args "$url" "$(_arc "$srv.insecure")"; pin="${LCA[*]-}"
-    script_rule="'## QA Script' — one \`\`\`bash block: a self-contained bash script a reviewer can run on their own, which bash also runs now against the branch served at ${url}. It exercises every acceptance criterion the running app can reach, including behavior the diff changes behind an endpoint it does not touch (for example a request that saves, validates or publishes what the change now checks) and flows that need several requests in order, passing values from one response to the next. Send every request with curl${pin:+ ${pin}} to \"\${QA_BASE_URL:-${url}}\"; when a check needs a signed-in caller, the script signs in itself (read the worktree for how the local server's seed login works); set up any state it needs itself; use only bash, curl, jq and the tooling the local server is built with; write only under \$TMPDIR. Print 'PASS: <check>' or 'FAIL: <check> (expected <x>, got <y>)' per check and exit non-zero when any check fails. No web address other than that default may appear in it. Acceptance criteria the script covers are not manual items; "
+    script_rule="'## QA Script' — one \`\`\`bash block: a self-contained bash script a reviewer can run on their own, which bash also runs now against the branch served at ${url}. It exercises every acceptance criterion the running app can reach, including behavior the diff changes behind an endpoint it does not touch (for example a request that saves, validates or publishes what the change now checks) and flows that need several requests in order, passing values from one response to the next. Send every request with curl${pin:+ ${pin}} to \"\${QA_BASE_URL:-${url}}\", written exactly so (no other spelling of that address); when a check needs a signed-in caller, the script signs in itself (read the worktree for how the local server's seed login works); set up any state it needs itself; use only bash, curl, jq and the tooling the local server is built with; write only under \$TMPDIR. Print 'PASS: <check>' or 'FAIL: <check> (expected <x>, got <y>)' per check and exit non-zero when any check fails. No other web address may appear in it, or it is refused. Acceptance criteria the script covers are not manual items; "
   fi
   local prompt="Write a QA plan for the change on this branch. The ticket, with its acceptance criteria, is $(ticket_source); the change is the diff in ${D}/qa/change.diff, and the current directory is the branch. \
 Write the plan to ${plan} (a new file; it is the only file you may write) with exactly these sections: \
@@ -487,7 +487,8 @@ qa_script_on() { [ "$(_arc "$P.qa.script.enabled")" = true ] && [ -n "$(qa_serve
 
 # qa_script_extract <plan> <served-url> — the first ```bash block under "## QA Script" (a "## " line
 # inside the block does not end it) to $D/qa/qa-script.sh. The script is published, so one over
-# 64 KiB, or naming any web address but the served URL as a whole origin, is refused and removed. Sets QA_SCRIPT_TEXT to the checked text: the script runs as
+# 64 KiB, or holding any web address but the served URL as the default in ${QA_BASE_URL:-<url>}, is
+# refused and removed. Sets QA_SCRIPT_TEXT to the checked text: the script runs as
 # you and could rewrite any file, so only this in-memory copy is run and published. Sets QA_SCRIPT
 # and QA_SCRIPT_STOP when there is nothing to run.
 qa_script_extract() {
@@ -503,14 +504,11 @@ qa_script_extract() {
   if [ "$(wc -c < "$f")" -gt 65536 ]; then
     rm -f "$f"; QA_SCRIPT="QA script: refused — over 64 KiB"; QA_SCRIPT_STOP=refused; return
   fi
-  # The served URL counts only as a whole origin: followed by "/", a quote, whitespace, "}" or the
-  # line end. Any other occurrence (":18443.evil.example", "...@host") keeps its scheme and is refused.
-  if awk -v u="$2" '{ out = ""; s = $0
-         while ((i = index(s, u)) > 0) {
-           c = substr(s, i + length(u), 1)
-           out = out substr(s, 1, i - 1) ((c == "" || c ~ /[\/"'"'"'[:space:]}]/) ? "" : "x://")
-           s = substr(s, i + length(u))
-         }
+  # The served URL may appear only as the default in ${QA_BASE_URL:-<url>}; any other address,
+  # including the served URL written any other way, is refused. This keeps links out of what is
+  # published; where the script connects at run time is not limited (see scheduled-jobs.md).
+  if awk -v u="\${QA_BASE_URL:-$2}" '{ out = ""; s = $0
+         while ((i = index(s, u)) > 0) { out = out substr(s, 1, i - 1); s = substr(s, i + length(u)) }
          print out s }' "$f" | grep -qiE '[a-z][a-z0-9+.-]*://|www\.'; then
     rm -f "$f"; QA_SCRIPT="QA script: refused — it names a web address other than the served app"; QA_SCRIPT_STOP=refused; return
   fi

