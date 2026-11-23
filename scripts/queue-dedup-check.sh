@@ -96,7 +96,7 @@ collect_rows() {
       [ -n "$sid" ] || continue        # no source_id: not a trackable item, nothing to dedup on
       typ="$(fm "$f" type)"
       [ -n "$typ" ] || typ="(untyped)"
-      if counts_toward_invariant "$dir"; then live=1; else live=0; fi
+      if counts_toward_invariant "$dir" "$typ"; then live=1; else live=0; fi
       fam="$(type_family "$typ")"
       rows="${rows}${typ}	${sid}	${dir}/${base}	${dir}	${live}	${fam}
 "
@@ -396,7 +396,9 @@ report_group() {
       [ "$rtyp" = "$typ" ] || continue
     fi
     matched=$((matched + 1))
-    if [ "$rlive" != "1" ]; then
+    if [ "$rlive" != "1" ] && [ "$rdir" = "completed" ]; then
+      say "    - ${rpath}   (completed qa re-run — not counted)"
+    elif [ "$rlive" != "1" ]; then
       say "    - ${rpath}   (rejected — not counted)"
     elif is_terminal_dir "$rdir"; then
       say "    - ${rpath}   <- already terminal (${rdir})"

@@ -284,13 +284,11 @@ fi
 teardown
 
 # ---------------------------------------------------------------------------
-# But two COMPLETED copies is a real violation: the work was queued and acted on twice. This is the
-# shape found in the live queue (BUGS-35224 completed three times), and it is the strongest evidence
-# the duplicate bug is long-standing rather than incidental.
+# But two COMPLETED copies is a real violation: the work was queued and acted on twice.
 echo "two completed copies — work actually done twice"
 setup
-item completed 20260429-120000-qa-test-plan-BUGS-35224.md BUGS-35224 completed payroll-gateway qa-test-plan
-item completed 20260608-100226-qa-test-plan-BUGS-35224.md BUGS-35224 completed payroll-gateway qa-test-plan
+item completed 20260429-120000-ticket-WIRE-3001.md WIRE-3001 completed
+item completed 20260608-100226-ticket-WIRE-3001.md WIRE-3001 completed
 bash "$CHECK" >/dev/null 2>&1; rc=$?
 if [ "$rc" -eq 1 ]; then
   ok "duplicate completed items are still a violation"
@@ -300,6 +298,27 @@ fi
 teardown
 
 # ---------------------------------------------------------------------------
+# qa-test-plan is interactive-only (/engineer-agent qa); no poller writes it, so a completed copy
+# beside another is a deliberate re-run, not a re-queue.
+echo "qa-test-plan re-runs"
+setup
+item completed 20261119-144254-qa-test-plan-AIA-733.md AIA-733 completed payroll-gateway qa-test-plan
+item completed 20261120-115530-qa-test-plan-AIA-733.md AIA-733 completed payroll-gateway qa-test-plan
+out="$(bash "$CHECK" 2>&1)"; rc=$?
+eq "two completed qa-test-plans are not a duplicate" "0" "$rc"
+item incoming 20261121-090000-qa-test-plan-AIA-733.md AIA-733 incoming payroll-gateway qa-test-plan
+bash "$CHECK" >/dev/null 2>&1; rc=$?
+eq "a live qa-test-plan beside completed re-runs is not a duplicate" "0" "$rc"
+item drafts 20261121-100000-qa-test-plan-AIA-733.md AIA-733 drafted payroll-gateway qa-test-plan
+out="$(bash "$CHECK" 2>&1)"; rc=$?
+eq "two live qa-test-plans are still a duplicate" "1" "$rc"
+if printf '%s' "$out" | grep -q "completed/20261119-144254-qa-test-plan-AIA-733.md   (completed qa re-run — not counted)"; then
+  ok "completed qa re-runs are listed as not counted"
+else
+  bad "completed qa copies should be labelled as uncounted re-runs: $out"
+fi
+teardown
+
 # Historical duplicates cannot be cleaned without falsifying the record: if a QA plan really was
 # completed three times, all three completions are true. Without a baseline the check would be red
 # forever on immutable history — the dead-check failure again. So known-historical pairs are
@@ -307,9 +326,9 @@ teardown
 echo "baseline suppression"
 setup
 mkdir -p "$EA_AGENT_DIR/state"
-item completed 20260429-120000-qa-test-plan-BUGS-35224.md BUGS-35224 completed payroll-gateway qa-test-plan
-item completed 20260608-100226-qa-test-plan-BUGS-35224.md BUGS-35224 completed payroll-gateway qa-test-plan
-printf 'qa-test-plan\tBUGS-35224\n' > "$EA_AGENT_DIR/state/queue-dedup-baseline.tsv"
+item completed 20260429-120000-ticket-WIRE-3001.md WIRE-3001 completed
+item completed 20260608-100226-ticket-WIRE-3001.md WIRE-3001 completed
+printf 'ticket\tWIRE-3001\n' > "$EA_AGENT_DIR/state/queue-dedup-baseline.tsv"
 out="$(bash "$CHECK" 2>&1)"; rc=$?
 if [ "$rc" -eq 0 ]; then
   ok "a baselined pair does not fail the check"
@@ -338,10 +357,10 @@ teardown
 echo "--update-baseline"
 setup
 mkdir -p "$EA_AGENT_DIR/state"
-item completed 20260429-120000-qa-test-plan-BUGS-35224.md BUGS-35224 completed payroll-gateway qa-test-plan
-item completed 20260608-100226-qa-test-plan-BUGS-35224.md BUGS-35224 completed payroll-gateway qa-test-plan
+item completed 20260429-120000-ticket-WIRE-3001.md WIRE-3001 completed
+item completed 20260608-100226-ticket-WIRE-3001.md WIRE-3001 completed
 bash "$CHECK" --update-baseline >/dev/null 2>&1
-if grep -q "BUGS-35224" "$EA_AGENT_DIR/state/queue-dedup-baseline.tsv" 2>/dev/null; then
+if grep -q "WIRE-3001" "$EA_AGENT_DIR/state/queue-dedup-baseline.tsv" 2>/dev/null; then
   ok "--update-baseline records the current violations"
 else
   bad "--update-baseline did not write the baseline file"
