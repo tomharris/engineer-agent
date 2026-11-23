@@ -258,6 +258,20 @@ echo keep > "$TMP/outside.txt"; ln -s "$TMP/outside.txt" "$TMP/wt/app/ENG-7-qa.s
 qa && bad "symlinked target accepted" || ok "existing or symlinked target refuses"
 eq "file behind the symlink untouched" keep "$(cat "$TMP/outside.txt")"
 rm -f "$TMP/wt/app/ENG-7-qa.sh"
+RUNNER="$TMP/qa-runner.sh"
+printf '#!/bin/bash\necho "$PWD $*" > %s/runner.args\nexec bash "$1"\n' "$TMP/qw" > "$RUNNER"; chmod +x "$RUNNER"
+qa_run() { crqa_qa "$TMP/wt" "$TMP/qw" "$1" 60 1.00 "$RUNNER"; }
+qa_setup 0; printf '#!/bin/bash\necho "$PWD $*" > %s/runner.args\nexec bash "$1"\n' "$TMP/qw" > "$RUNNER"
+fx runspec '{"runs":[{"script":"ENG-7-qa.sh","dir":"app","argv":["docker","compose","exec","-T","php","php","/var/www/ENG-7-qa.sh"]}],"nonce":"NONCE"}'; fx verdict "$VERDICT_PASS"
+qa_run "$(printf 'bash\n%s\n' "$RUNNER")" && ok "runner runs the script whatever argv the plan wrote" || bad "runner QA failed: $(cat "$TMP/qw/qa.err")"
+eq "runner called with only the script, in the planned dir" "$(cd "$TMP/wt/app" && pwd -P) ENG-7-qa.sh" "$(cat "$TMP/qw/runner.args" 2>/dev/null)"
+eq "runner result recorded" "ENG-7-qa.sh${TAB}0" "$(cat "$TMP/qw/results.tsv")"
+qa_setup 0; rm -f "$TMP/qw/runner.args"; fx runspec '{"runs":[{"script":"ENG-7-qa.sh","dir":"app","argv":["bash","ENG-7-qa.sh"]}],"nonce":"NONCE"}'
+qa_run "$ALLOWED" && bad "runner outside the allowlist ran" || ok "runner must be in exec.allowed_commands"
+[ -e "$TMP/qw/runner.args" ] && bad "unlisted runner executed" || ok "unlisted runner not executed"
+qa_setup 0; fx runspec '{"runs":[{"script":"ENG-7-qa.sh","dir":"../..","argv":["bash","ENG-7-qa.sh"]}],"nonce":"NONCE"}'
+qa_run "$(printf 'bash\n%s\n' "$RUNNER")" && bad "runner dir escape accepted" || ok "runner still refuses a dir outside the worktree"
+
 qa_setup 0; fx runspec '{"runs":[],"nonce":"NONCE"}'
 qa && bad "unplanned script accepted" || ok "a downloaded script with no run fails"
 

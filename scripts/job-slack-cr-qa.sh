@@ -47,6 +47,7 @@ TRANSITION="$(_arc "$P.transition")"
 SEC_CMD="$(_arc "$P.security.command")"; SEC_CMD="${SEC_CMD/#\~/$HOME}"
 SEC_TO="$(jobs_duration_seconds "$(_arc "$P.security.timeout")")"; SEC_TO="${SEC_TO:-1800}"
 QA_TO="$(jobs_duration_seconds "$(_arc "$P.qa.timeout")")"; QA_TO="${QA_TO:-1800}"
+QA_RUNNER="$(_arc "$P.qa.script_runner")"; QA_RUNNER="${QA_RUNNER/#\~/$HOME}"
 TRUSTED="$(_arcl "$P.trusted_authors")"
 LEDGER="$(job_path "$JOB" requests.tsv)"
 PROJECT_PATH="$(yaml_project_scalar "$SLUG" path)"; PROJECT_PATH="${PROJECT_PATH/#\~/$HOME}"
@@ -208,7 +209,8 @@ if [ "$NO_QA" = 1 ]; then
   post_verdict "$TMPD/c.md"
   finish review-stopped 0
 fi
-QA_OK=1; crqa_qa "$WT" "$W" "$ALLOWED" "$QA_TO" "$BUDGET" || QA_OK=0
+[ -s "$W/scripts.tsv" ] && prepare_run_worktree "$SLUG" "$WT"
+QA_OK=1; crqa_qa "$WT" "$W" "$ALLOWED" "$QA_TO" "$BUDGET" "$QA_RUNNER" || QA_OK=0
 if [ "$(jq length "$W/blocking.json")" -gt 0 ]; then
   if [ "$QA_OK" = 1 ]; then crqa_qa_comment "$W" pass "$PR_URL" "$TMPD/q.md"; else crqa_qa_comment "$W" fail "$PR_URL" "$TMPD/q.md"; fi
   jira_comment "$TMPD/q.md"
