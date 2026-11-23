@@ -907,7 +907,8 @@ re-checked against every fetched ticket, the first rule with an eligible ticket 
 already in the queue (including completed or rejected) is never picked. See the commented
 `jira-autopilot` example in `config/engineer.example.yaml` for every predicate.
 
-`slack` / `cr-qa` reviews and QAs other people's PRs on request. It watches `channel` for a
+`slack` / `cr-qa` reviews and QAs other people's PRs on request. It watches `channel` (one channel ID, or a list of
+them; each run takes the oldest eligible request across all of them and replies in its channel) for a
 message starting with `CR/QA` (configurable) from a `trusted_slack_users` id that links one PR in the
 project's `github.repos` and one Jira ticket, claims it with 👀, then:
 
@@ -1023,7 +1024,16 @@ or via Approve), `scripts/pr-pipeline.sh` runs detached:
    adds unit tests: the run may also write test files under `ea_qa/` in its worktree, and bash runs
    `<command> ea_qa` there (timeout `qa.unit.timeout`, default 10m) with an env holding only `PATH`,
    `HOME`, `USER`, `LANG` and `TMPDIR`. This executes model-written code, so it is opt-in; a failure
-   stops like a failed check. `qa.server` takes the same `setup`, `serve`,
+   stops like a failed check. `qa.script.enabled: true` (needs a server) adds a QA script: the plan
+   also holds a self-contained bash script that exercises every acceptance criterion the running app
+   reaches, including behavior behind endpoints the diff does not change and multi-request flows
+   (create, then publish, then read back). Bash runs it from the worktree while the branch is served
+   (timeout `qa.script.timeout`, default 10m), with the same scrubbed env plus `QA_BASE_URL`, after
+   the auth headers are deleted; the script signs in itself. A script over 64 KiB or naming any web
+   address but the served URL, written as the default in `${QA_BASE_URL:-<url>}`, is refused. The script is published verbatim in the Slite note and,
+   for Jira and only when it passed, attached to the ticket as `qa-<KEY>.sh` (where `cr-qa` picks up QA scripts); its
+   output stays in `state/pr-pipeline/<item>/qa/script.out`. A failed or refused script stops like a
+   failed check. This also executes model-written code, so it is opt-in. `qa.server` takes the same `setup`, `serve`,
    `url`, `ready_timeout` keys plus `setup_timeout` and `insecure`; its `url` host is pinned to
    127.0.0.1. `qa.auth.<name>: <adapter>` lets a check carry `"auth": "<name>"`: bash runs
    `<adapter> <base-url>`, which prints `Name: value` header lines, and sends them from a private

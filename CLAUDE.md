@@ -80,7 +80,9 @@ docs/architecture/          detailed design rationale (read before changing that
   pass only by side effect (branch moved; nonce-bearing verdict or plan). QA never re-fetches the
   ticket; its HTTP tests are data, not shell, run only against a 127.0.0.1-pinned server; auth is a
   config name whose headers bash gets from an adapter and passes as `-H @file`; model-written code
-  runs only with opt-in `qa.unit` (`ea_qa/` in the QA worktree, bash-run, `env -i`); model text
+  runs only with opt-in `qa.unit` (`ea_qa/` in the QA worktree, bash-run, `env -i`) or `qa.script`
+  (bash-run against the served branch, `env -i`, auth headers deleted first, published verbatim only
+  after bash refuses any web address but the served URL); model text
   leaves only via `_neutral`.
 
 ## Conventions

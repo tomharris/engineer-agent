@@ -115,7 +115,7 @@ The `qa` subsection drives QA test plans: `base_url`, `test_command` (runs gener
 
 ### `slack` / `cr-qa` job keys
 
-`channel` (required), `trusted_slack_users` (required, Slack user ids allowed to request),
+`channel` (required; one channel ID or a list, e.g. `[C0123456789, C0987654321]`), `trusted_slack_users` (required, Slack user ids allowed to request),
 `trusted_authors` (required, Jira account ids whose ticket text, comments and attachments count),
 `transition` (required, target status on approve), `trigger_prefix` (default `CR/QA`),
 `reactions: {claim, approve}` (defaults `eyes`, `approve`), `security: {command, timeout}`

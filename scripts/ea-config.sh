@@ -153,6 +153,7 @@ _emit_jobs() {
       *)                        printf 'projects.%s.job.%s.supported=0\n' "$slug" "$i" ;;
     esac
     _emit_list "projects.${slug}.job.${i}.days"  "${p}.days"
+    _emit_list "projects.${slug}.job.${i}.channel" "${p}.channel"
     _emit_list "projects.${slug}.job.${i}.watch" "${p}.watch"
     _emit_list "projects.${slug}.job.${i}.trusted_authors" "${p}.trusted_authors"
     _emit_list "projects.${slug}.job.${i}.trusted_slack_users" "${p}.trusted_slack_users"

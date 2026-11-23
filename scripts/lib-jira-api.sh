@@ -58,6 +58,17 @@ jira_add_comment() {
   [ "$JIRA_HTTP" = 201 ]
 }
 
+# jira_add_attachment <key> <file> <name> — uploads <file> as <name> (multipart; the credential still
+# goes on stdin). rc 0 on 200; JIRA_HTTP holds the status.
+jira_add_attachment() {
+  JIRA_HTTP="$(printf 'user = "%s:%s"\n' "$JIRA_EMAIL" "$JIRA_TOKEN" \
+    | curl -sS --config - -o "$TMPD/attachment.json" -w '%{http_code}' -X POST \
+           -H 'X-Atlassian-Token: no-check' -H 'Accept: application/json' --max-time 60 \
+           -F "file=@$2;filename=$3;type=text/plain" \
+           "https://${JIRA_SITE}${JIRA_API_BASE}/issue/$1/attachments" 2>"$TMPD/curlerr")"
+  [ "${JIRA_HTTP:-000}" = 200 ]
+}
+
 # jira_get_issue <key> <out> — the fields the cr-qa job reads, with the changelog for the
 # authorship check. rc 0 on 200; JIRA_HTTP holds the status.
 jira_get_issue() {
