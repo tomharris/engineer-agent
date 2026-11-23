@@ -184,12 +184,31 @@ $v" '{type: "result", result: $r}' ;;
     [ "${QA:-}" = auth ] && checks="${checks}"',{"name":"signed in","method":"GET","path":"/me","auth":"session","expect_status":200}'\
 ',{"name":"keyed","method":"GET","path":"/api/me","auth":"api_key","expect_status":200}'\
 ',{"name":"unknown auth","method":"GET","path":"/me","auth":"root","expect_status":200}'
+    [ "${QA:-}" = session ] && checks="${checks}"',{"name":"signed in","method":"GET","path":"/me","auth":"session","expect_status":200}'
     [ "${QA:-}" = evil ] && checks="${checks}"',{"name":"offsite","method":"GET","path":"http://evil.example/"}'\
 ',{"name":"flag","method":"GET -K /tmp/x","path":"/a"},{"name":"file body","method":"POST","path":"/form","body":"@/etc/passwd","expect_status":200}'\
 ',{"name":"traverse","method":"GET","path":"/../../etc"}'
     {
       printf '## Summary\n%s\n\n## Scripted Tests\n```json\n[%s]\n```\n' "$summary" "$checks"
       [ "${QA:-}" = evil ] && printf '```bash\ntouch "$ST/pwned"\n```\n'
+      # QA_SCRIPT: pass | fail | url | none. ST is baked in: the script's env is scrubbed.
+      if [ -n "${QA_SCRIPT:-}" ] && printf '%s' "$*" | grep -qF "'## QA Script'"; then
+        printf '\n## QA Script\n'
+        [ "$QA_SCRIPT" = none ] || {
+          printf '```bash\nST=%q\n' "$ST"
+          printf 'printf "%%s|%%s\\n" "$PWD" "$QA_BASE_URL" > "$ST/script.call"; env > "$ST/script.env"\n'
+          printf 'h="$(cat "$ST/hdr.path" 2>/dev/null)"; [ -n "$h" ] && [ -e "$h" ] && echo live > "$ST/script.hdr"\n'
+          printf 'pgrep -f "sleep 31[0-9]" >/dev/null && echo up > "$ST/script.srv"\n'
+          printf '## a comment that looks like a heading\n'
+          printf 'echo \047a ````fenced```` word\047\n'
+          case "$QA_SCRIPT" in
+            pass) printf 'echo "PASS: publish refuses a bad reminder"\necho "  PASS: delay is stamped"\n' ;;
+            fail) printf 'echo "PASS: publish refuses a bad reminder"\necho "FAIL: delay is stamped (expected delay, got action)"\nexit 1\n' ;;
+            url)  printf 'curl -s https://evil.example/x\necho "PASS: x"\n' ;;
+          esac
+          printf '```\n'
+        }
+      fi
       printf '\n## Manual Checklist\n- [ ] check colors\n- [ ] check hover\n\n'
       [ "${QA:-}" = extra ] && printf 'stray line LEAKED2\n\n## Notes\nLEAKED-SECRET\n\n'
       case "${QA:-ok}" in
@@ -754,6 +773,70 @@ grep -qx "PASS: signed in" "$PD/qa/tests.out" && ok "the signed-in check used th
 [ -e "$ST/unit.srv" ] && bad "the server was up during the unit run" || ok "the server is stopped before the unit run"
 grep -q "^TMPDIR=${TMPDIR:-/tmp}/*$" "$ST/unit.env" && bad "unit run shares the pipeline TMPDIR" || ok "unit run gets a private TMPDIR"
 
+echo "== QA script"
+QA_SCRIPT_SRV="qa: { document: true, server: { serve: \"exec sleep 314\", url: \"https://app.test:18443\", insecure: true }, auth: { session: \"$TMP/bin/qa-unit-login\" }, script: { enabled: true } }"
+attached() { awk '/^POST https:\/\/example\.atlassian\.net\/rest\/api\/2\/issue\/ENG-7\/attachments/ {n++} END {print n+0}' "$ST/curl.log" 2>/dev/null || echo 0; }
+note_md() { jq -r .markdown "$ST/slite-note.json" 2>/dev/null; }
+
+qa_jira "{ mark_ready: true, ci: { fix_attempts: 0 }, $QA_SCRIPT_SRV }"
+eq "passing QA script: exits 0, PR ready" "0|1" "$(QA=session QA_SCRIPT=pass run)|$(readied)"
+qa_args="$(grep 'Write a QA plan' "$CLAUDE_ARGS")"
+printf '%s' "$qa_args" | grep -qF "'## QA Script'" && ok "the QA prompt asks for a QA script" || bad "prompt: $qa_args"
+printf '%s' "$qa_args" | grep -qF 'curl --resolve app.test:18443:127.0.0.1 -k to "${QA_BASE_URL:-https://app.test:18443}"' \
+  && ok "the prompt pins the served host and defaults QA_BASE_URL" || bad "prompt: $qa_args"
+printf '%s' "$qa_args" | grep -qF 'behind an endpoint it does not touch' && ok "the prompt covers behavior behind unchanged endpoints" || bad "prompt: $qa_args"
+case "$(cat "$ST/script.call" 2>/dev/null)" in
+  "$(cd "$EA_AGENT_DIR" && pwd -P)"/worktrees/*-pr-*"|https://app.test:18443") ok "the script runs in the branch worktree with QA_BASE_URL" ;;
+  *) bad "script call: $(cat "$ST/script.call" 2>/dev/null)" ;;
+esac
+grep -qx "PASS: signed in" "$PD/qa/tests.out" && ok "the signed-in check ran first" || bad "tests.out: $(cat "$PD/qa/tests.out")"
+[ -e "$ST/script.srv" ] && ok "the server is up while the script runs" || bad "the server was down during the script"
+[ -e "$ST/script.hdr" ] && bad "auth headers were live during the script" || ok "auth headers are gone before the script"
+{ [ ! -s "$ST/script.env" ] || grep -qE "^(T_JIRA|T_SLITE)=" "$ST/script.env"; } && bad "a credential env var reached the script" || ok "the script gets no credential env"
+grep -q "^TMPDIR=${TMPDIR:-/tmp}/*$" "$ST/script.env" && bad "the script shares the pipeline TMPDIR" || ok "the script gets a private TMPDIR"
+grep -qF 'QA script: 2 passed, 0 failed' "$ST/pr-comment.md" && ok "the comment counts the script's checks" || bad "comment: $(cat "$ST/pr-comment.md")"
+note_md | grep -qx '`````bash' && ok "the note fences the script past its longest backtick run" || bad "note: $(note_md)"
+note_md | grep -qx '## a comment that looks like a heading' && ok "a heading-like line inside the script is kept" || bad "note: $(note_md)"
+note_md | grep -qF 'QA_BASE_URL=<served url> bash qa-ENG-7.sh' && ok "the note says how to run the script" || bad "note: $(note_md)"
+eq "the script is attached to the ticket" 1 "$(attached)"
+grep -F '/issue/ENG-7/attachments' "$ST/curl.argv" | grep -qF ';filename=qa-ENG-7.sh;type=text/plain' \
+  && ok "the attachment is named qa-<key>.sh" || bad "argv: $(grep attachments "$ST/curl.argv")"
+grep -F '/issue/ENG-7/attachments' "$ST/curl.argv" | grep -qF -- 'X-Atlassian-Token: no-check' && ok "the upload sends the XSRF header" || bad "no XSRF header"
+
+qa_jira "{ mark_ready: true, ci: { fix_attempts: 0 }, $QA_SCRIPT_SRV }"
+eq "a failing QA script stops" 1 "$(QA_SCRIPT=fail run)"
+eq "failed-script reason" "stopped	QA: QA script failed — plan: https://example.slite.com/app/docs/n1" "$(cat "$PD/result")"
+grep -qF 'QA script: 1 passed, 1 failed (exit 1)' "$ST/pr-comment.md" && ok "the comment reports the failing script" || bad "comment: $(cat "$ST/pr-comment.md")"
+eq "failed script: documented, attached, PR draft" "1|1|0" "$(commented)|$(attached)|$(readied)"
+grep -qF 'got action' "$ST/pr-comment.md" && bad "raw script output was published" || ok "raw script output stays local"
+grep -qF 'FAIL: delay is stamped' "$PD/qa/script.out" && ok "raw script output is kept locally" || bad "script.out: $(cat "$PD/qa/script.out")"
+
+qa_jira "{ mark_ready: true, ci: { fix_attempts: 0 }, $QA_SCRIPT_SRV }"
+eq "a script naming another address stops" 1 "$(QA_SCRIPT=url run)"
+eq "refused-script reason" "stopped	QA: QA script refused — plan: https://example.slite.com/app/docs/n1" "$(cat "$PD/result")"
+[ -e "$ST/script.call" ] && bad "a refused script ran" || ok "a refused script never runs"
+note_md | grep -q 'evil.example' && bad "a refused script was published" || ok "a refused script is not published"
+eq "a refused script is not attached" 0 "$(attached)"
+grep -qF 'QA script: refused — it names a web address other than the served app' "$ST/pr-comment.md" \
+  && ok "the comment says why the script was refused" || bad "comment: $(cat "$ST/pr-comment.md")"
+
+qa_jira "{ mark_ready: true, ci: { fix_attempts: 0 }, $QA_SCRIPT_SRV }"
+eq "no script block: not gated" "0|1" "$(QA_SCRIPT=none run)|$(readied)"
+grep -qF 'QA script: not executed — the plan wrote none' "$ST/pr-comment.md" && ok "the comment says no script was written" || bad "comment: $(cat "$ST/pr-comment.md")"
+eq "no script, nothing attached" 0 "$(attached)"
+
+qa_jira "{ mark_ready: true, ci: { fix_attempts: 0 }, $QA_SCRIPT_SRV }"
+eq "a script with no JSON checks: exits 0" 0 "$(QA=nochecks QA_SCRIPT=pass run)"
+[ -e "$ST/script.srv" ] && ok "a script alone still gets the served branch" || bad "no server for a script-only plan"
+grep -qF 'Automated: not executed — no scripted tests' "$ST/pr-comment.md" && grep -qF 'QA script: 2 passed, 0 failed' "$ST/pr-comment.md" \
+  && ok "comment reports both kinds" || bad "comment: $(cat "$ST/pr-comment.md")"
+
+qa_jira "{ mark_ready: true, ci: { fix_attempts: 0 }, $QA_SRV }"
+QA_SCRIPT=pass run >/dev/null
+grep 'Write a QA plan' "$CLAUDE_ARGS" | grep -qF "'## QA Script'" && bad "QA script asked for without qa.script" || ok "without qa.script, no script is asked for"
+[ -e "$ST/script.call" ] && bad "a script ran without qa.script" || ok "without qa.script, no script runs"
+eq "without qa.script, nothing attached" 0 "$(attached)"
+
 echo "== transition + announce"
 JIRA_AGENT="$JIRA_AGENT
   slack:
@@ -1121,6 +1204,16 @@ write_config '[]' '{ qa: { unit: { command: "make test", dir: x } } }'
 eq "an unknown qa.unit key is refused" "after_pr.qa.unit: unknown key 'dir' (allowed: command timeout)" "$(valid)"
 write_config '[]' '{ qa: { unit: { command: "uv run pytest -q", timeout: 10m } } }'
 eq "a full qa.unit block is valid" "" "$(valid)"
+write_config '[]' '{ qa: { server: { serve: "x", url: "http://localhost:1" }, script: { enabled: maybe } } }'
+eq "a non-boolean qa.script.enabled is refused" "after_pr.qa.script.enabled 'maybe' must be true or false" "$(valid)"
+write_config '[]' '{ qa: { script: { enabled: true } } }'
+eq "qa.script without a server is refused" "after_pr.qa.script needs a server (after_pr.qa.server or after_pr.browser)" "$(valid)"
+write_config '[]' '{ qa: { server: { serve: "x", url: "http://localhost:1" }, script: { enabled: true, timeout: soon } } }'
+eq "a bad qa.script.timeout is refused" "after_pr.qa.script.timeout 'soon' must look like 30m or 2h" "$(valid)"
+write_config '[]' '{ qa: { server: { serve: "x", url: "http://localhost:1" }, script: { enabled: true, command: x } } }'
+eq "an unknown qa.script key is refused" "after_pr.qa.script: unknown key 'command' (allowed: enabled timeout)" "$(valid)"
+write_config '[]' '{ qa: { server: { serve: "x", url: "http://localhost:1" }, script: { enabled: true, timeout: 15m } } }'
+eq "a full qa.script block is valid" "" "$(valid)"
 PROJ_EXTRA='    qa: { document_to: slite, document_parent: "P1" }' JOB_INTEG=jira write_config '[]' \
   '{ security: { command: "~/bin/review", fix_attempts: 1, timeout: 30m }, qa: { document: true }, transition: "Code Review", announce: { channel: C1 } }'
 eq "the full handoff block is valid on a jira job" "" "$(valid)"

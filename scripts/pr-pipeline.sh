@@ -401,11 +401,13 @@ qa_auth_headers() {
 # qa_stage — one confined run writes the plan from the trust-checked queue item and the diff (it
 # never re-fetches the ticket and gets no tracker, gh or network verb). Success = the plan has its
 # three sections and ends with this run's nonce. With a server (qa_server_prefix), bash serves the
-# branch and runs the scripted block against it; with qa.unit, bash runs the test files the run
-# wrote under $QA_UNIT_DIR. Sets QA_PASS, QA_FAIL, QA_AUTO, QA_MANUAL, QA_UNIT, QA_UNIT_STOP.
+# branch and runs the scripted block against it; with qa.script, bash also runs the plan's QA script
+# against it (qa_script); with qa.unit, bash runs the test files the run wrote under $QA_UNIT_DIR.
+# Sets QA_PASS, QA_FAIL, QA_AUTO, QA_MANUAL, QA_UNIT, QA_UNIT_STOP, QA_SCRIPT, QA_SCRIPT_STOP.
 QA_UNIT_DIR=ea_qa
 qa_stage() {
-  local plan="$D/qa/plan.md" nonce url last srv n auth_names auth_rule="" unit_cmd unit_rule=""
+  local plan="$D/qa/plan.md" nonce url="" last srv n auth_names auth_rule="" unit_cmd unit_rule="" script_rule="" pin=""
+  local run_checks=0
   rm -rf "$D/qa"; mkdir -p "$D/qa"
   branch_worktree || stop "QA: could not create a worktree on ${BRANCH}"
   nonce="$(od -An -tx1 -N8 /dev/urandom | tr -d ' \n')"
@@ -415,6 +417,7 @@ qa_stage() {
     || { cleanup; stop "QA: could not diff the branch against origin/${BASE}"; }
   local tools=( "Read(/${WT}/**)" "Read(/$(ticket_source))" "Read(/${D}/qa/change.diff)" "Edit(/${plan})" )
   srv="$(qa_server_prefix)"
+  [ -z "$srv" ] || { url="$(_arc "$srv.url")"; url="${url%/}"; }
   auth_names="$(_ar_children "$P.qa.auth" | paste -sd, - | sed 's/,/, /g')"
   [ -z "$auth_names" ] || auth_rule=" A check that needs a signed-in caller adds \"auth\" set to one of: ${auth_names}; omit it for an anonymous request."
   unit_cmd="$(_arc "$P.qa.unit.command")"
@@ -423,11 +426,15 @@ qa_stage() {
     tools+=( "Edit(/${WT}/${QA_UNIT_DIR}/**)" )
     unit_rule="Behavior no HTTP check reaches (library, model, service or CLI code) gets unit tests, never a manual item: write them as test files under ${WT}/${QA_UNIT_DIR}/ (the only other place you may write) in the project's test framework, covering each such acceptance criterion with success and failure cases and exact expected values; bash runs \`${unit_cmd} ${QA_UNIT_DIR}\` from the branch root. "
   fi
+  if qa_script_on; then
+    local_curl_args "$url" "$(_arc "$srv.insecure")"; pin="${LCA[*]-}"
+    script_rule="'## QA Script' — one \`\`\`bash block: a self-contained bash script a reviewer can run on their own, which bash also runs now against the branch served at ${url}. It exercises every acceptance criterion the running app can reach, including behavior the diff changes behind an endpoint it does not touch (for example a request that saves, validates or publishes what the change now checks) and flows that need several requests in order, passing values from one response to the next. Send every request with curl${pin:+ ${pin}} to \"\${QA_BASE_URL:-${url}}\"; when a check needs a signed-in caller, the script signs in itself (read the worktree for how the local server's seed login works); set up any state it needs itself; use only bash, curl, jq and the tooling the local server is built with; write only under \$TMPDIR. Print 'PASS: <check>' or 'FAIL: <check> (expected <x>, got <y>)' per check and exit non-zero when any check fails. No web address other than that default may appear in it. Acceptance criteria the script covers are not manual items; "
+  fi
   local prompt="Write a QA plan for the change on this branch. The ticket, with its acceptance criteria, is $(ticket_source); the change is the diff in ${D}/qa/change.diff, and the current directory is the branch. \
 Write the plan to ${plan} (a new file; it is the only file you may write) with exactly these sections: \
 '## Summary' — 2 to 5 sentences: what changed and how each acceptance criterion is covered, no links; \
 '## Scripted Tests' — one \`\`\`json block: an array of at most 50 HTTP checks against the running app, each {\"name\", \"method\" (GET, POST, PUT, PATCH, DELETE or HEAD), \"path\" (starting with /), optional \"body\" (JSON), \"expect_status\", optional \"expect_contains\"}.${auth_rule} Cover every endpoint the diff adds or changes, success and failure paths; an empty array when the diff changes no endpoint; \
-'## Manual Checklist' — '- [ ] ' items only a person can judge. \
+${script_rule}'## Manual Checklist' — '- [ ] ' items only a person can judge. \
 ${unit_rule}End the file with the line 'QA-NONCE: ${nonce}'. ${NO_MEMORY_RULE} Be concise."
   log "QA run on ${sha:0:7} (budget ${QA_BUDGET_USD})"
   ( cd "$WT" && "$CLAUDE_BIN" -p --plugin-dir "$PLUGIN_ROOT" --model sonnet --permission-mode default \
@@ -438,7 +445,7 @@ ${unit_rule}End the file with the line 'QA-NONCE: ${nonce}'. ${NO_MEMORY_RULE} B
     cleanup; stop "QA run produced no plan"
   fi
   QA_MANUAL="$(_section "$plan" "Manual Checklist" | grep -c '^- \[ \]')"
-  QA_PASS=0 QA_FAIL=0 QA_UNIT="" QA_UNIT_STOP=""
+  QA_PASS=0 QA_FAIL=0 QA_UNIT="" QA_UNIT_STOP="" QA_SCRIPT="" QA_SCRIPT_STOP=""
   _section "$plan" "Scripted Tests" | awk '/^```/ { if (f) exit; f = 1; next } f' > "$D/qa/checks.json"
   jq -e 'type == "array"' "$D/qa/checks.json" >/dev/null 2>&1 || : > "$D/qa/checks.json"
   n="$(jq length "$D/qa/checks.json" 2>/dev/null)"
@@ -448,20 +455,76 @@ ${unit_rule}End the file with the line 'QA-NONCE: ${nonce}'. ${NO_MEMORY_RULE} B
     QA_AUTO="Automated: not executed — no scripted tests"
   elif [ -z "$srv" ]; then
     QA_AUTO="Automated: not executed — no local server (set after_pr.qa.server)"
-  elif serve_branch "$srv"; then
-    url="$(_arc "$srv.url")"; url="${url%/}"
-    qa_auth_headers "$url"
-    qa_checks "$D/qa/checks.json" "$url" > "$D/qa/tests.out"
-    QA_PASS="$(grep -c '^PASS: ' "$D/qa/tests.out")"; QA_FAIL="$(grep -c '^FAIL: ' "$D/qa/tests.out")"
-    QA_AUTO="Automated: ${QA_PASS} passed, ${QA_FAIL} failed"
   else
-    QA_AUTO="Automated: not executed — ${SERVE_ERR}"
+    run_checks=1
+  fi
+  qa_script_on && qa_script_extract "$plan" "$url"
+  if [ "$run_checks" = 1 ] || [ -s "$D/qa/qa-script.sh" ]; then
+    if serve_branch "$srv"; then
+      if [ "$run_checks" = 1 ]; then
+        qa_auth_headers "$url"
+        qa_checks "$D/qa/checks.json" "$url" > "$D/qa/tests.out"
+        QA_PASS="$(grep -c '^PASS: ' "$D/qa/tests.out")"; QA_FAIL="$(grep -c '^FAIL: ' "$D/qa/tests.out")"
+        QA_AUTO="Automated: ${QA_PASS} passed, ${QA_FAIL} failed"
+      fi
+      # Model-written code must not read the auth headers.
+      [ -z "$QA_AUTH_DIR" ] || { rm -rf "$QA_AUTH_DIR"; QA_AUTH_DIR=""; }
+      [ ! -s "$D/qa/qa-script.sh" ] || qa_script "$url"
+    else
+      [ "$run_checks" = 0 ] || QA_AUTO="Automated: not executed — ${SERVE_ERR}"
+      [ ! -s "$D/qa/qa-script.sh" ] || QA_SCRIPT="QA script: not executed — ${SERVE_ERR}"
+    fi
   fi
   # Model-written tests must not read the auth headers or reach the served app.
   [ -z "$QA_AUTH_DIR" ] || { rm -rf "$QA_AUTH_DIR"; QA_AUTH_DIR=""; }
   [ -z "$SRV" ] || { jobs_kill_tree "$SRV"; wait "$SRV" 2>/dev/null; SRV=""; }
   [ -z "$unit_cmd" ] || qa_unit "$unit_cmd"
   cleanup
+}
+
+# qa_script_on — qa.script is enabled and there is a server for the script to run against.
+qa_script_on() { [ "$(_arc "$P.qa.script.enabled")" = true ] && [ -n "$(qa_server_prefix)" ]; }
+
+# qa_script_extract <plan> <served-url> — the first ```bash block under "## QA Script" (a "## " line
+# inside the block does not end it) to $D/qa/qa-script.sh. The script is published, so one over
+# 64 KiB, or naming any web address but the served URL, is refused and removed. Sets QA_SCRIPT and
+# QA_SCRIPT_STOP when there is nothing to run.
+qa_script_extract() {
+  local f="$D/qa/qa-script.sh"
+  awk '$0 == "## QA Script" {h=1; next}
+       h && !f && /^## / {exit}
+       h && !f && /^```/ {f=1; next}
+       f && /^```[[:space:]]*$/ {exit}
+       f' "$1" > "$f"
+  if ! grep -q '[^[:space:]]' "$f" 2>/dev/null; then
+    rm -f "$f"; QA_SCRIPT="QA script: not executed — the plan wrote none"; return
+  fi
+  if [ "$(wc -c < "$f")" -gt 65536 ]; then
+    rm -f "$f"; QA_SCRIPT="QA script: refused — over 64 KiB"; QA_SCRIPT_STOP=refused; return
+  fi
+  if awk -v u="$2" '{ while ((i = index($0, u)) > 0) $0 = substr($0, 1, i - 1) substr($0, i + length(u)); print }' "$f" \
+       | grep -qiE '[a-z][a-z0-9+.-]*://|www\.'; then
+    rm -f "$f"; QA_SCRIPT="QA script: refused — it names a web address other than the served app"; QA_SCRIPT_STOP=refused
+  fi
+}
+
+# qa_script <served-url> — bash runs the plan's QA script from the worktree root, with an env that
+# holds no credentials (as qa_unit) plus QA_BASE_URL. Model-written code, opt-in (see
+# scheduled-jobs.md). Its output stays in $D/qa/script.out; only the counts are published.
+qa_script() {
+  local secs tmp rc=0 pass fail
+  secs="$(jobs_duration_seconds "$(_arc "$P.qa.script.timeout")")"; secs="${secs:-600}"
+  tmp="$(mktemp -d)" || { QA_SCRIPT="QA script: not executed — no temp dir"; QA_SCRIPT_STOP=refused; return; }
+  ( cd "$WT" && with_timeout "$secs" env -i PATH="$PATH" HOME="$HOME" USER="$USER" LANG="${LANG:-C.UTF-8}" \
+      TMPDIR="$tmp" QA_BASE_URL="$1" bash "$D/qa/qa-script.sh" ) </dev/null > "$D/qa/script.out" 2>&1 || rc=$?
+  rm -rf "$tmp"
+  pass="$(grep -c '^ *PASS: ' "$D/qa/script.out")"; fail="$(grep -c '^ *FAIL: ' "$D/qa/script.out")"
+  case "$rc" in
+    0)   if [ "$fail" = 0 ]; then QA_SCRIPT="QA script: ${pass} passed, 0 failed"
+         else QA_SCRIPT="QA script: ${pass} passed, ${fail} failed (exit 0)"; QA_SCRIPT_STOP=failed; fi ;;
+    124) QA_SCRIPT="QA script: failed (timed out after ${secs}s; ${pass} passed, ${fail} failed)"; QA_SCRIPT_STOP=failed ;;
+    *)   QA_SCRIPT="QA script: ${pass} passed, ${fail} failed (exit ${rc})"; QA_SCRIPT_STOP=failed ;;
+  esac
 }
 
 # qa_unit <command> — bash runs `<command> $QA_UNIT_DIR` in the worktree on the files the QA run
@@ -551,6 +614,18 @@ qa_note_md() {
   [ -s "$D/qa/tests.out" ] && { printf '\n```\n'; _neutral < "$D/qa/tests.out"; printf '```\n'; }
   # Only the status: raw output of model-written code stays in $D/qa/unit.out.
   [ -z "$QA_UNIT" ] || printf '\n%s\n' "$QA_UNIT"
+  if [ -n "$QA_SCRIPT" ]; then
+    printf '\n### QA Script\n\n%s\n' "$QA_SCRIPT"
+    # Verbatim, inside a fence longer than any backtick run in it; qa_script_extract has already
+    # refused a script naming another web address.
+    if [ -s "$D/qa/qa-script.sh" ]; then
+      local fence
+      fence="$(awk '{ s = $0; while (match(s, /`+/)) { if (RLENGTH > m) m = RLENGTH; s = substr(s, RSTART + RLENGTH) } } END { n = (m >= 3 ? m + 1 : 3); while (n-- > 0) printf "`" }' "$D/qa/qa-script.sh")"
+      printf '\nRun from a checkout of %s with the branch served: `QA_BASE_URL=<served url> bash %s`\n\n%sbash\n' \
+        "$BRANCH" "$(qa_script_name)" "$fence"
+      cat "$D/qa/qa-script.sh"; printf '%s\n' "$fence"
+    fi
+  fi
   printf '\n## Manual Checklist (skipped, unattended)\n\n'
   _section "$plan" "Manual Checklist" | sed -n 's/^- \[ \] //p' | _neutral | head -n 50 | sed 's/^/- [ ] /'
 }
@@ -575,6 +650,7 @@ qa_publish() {
     _section "$plan" "Summary" | _neutral | head -c 2000
     printf '\n\n%s\n' "$QA_AUTO"
     [ -z "$QA_UNIT" ] || printf '%s\n' "$QA_UNIT"
+    [ -z "$QA_SCRIPT" ] || printf '%s\n' "$QA_SCRIPT"
     printf 'Manual checks: %s skipped (unattended)\n' "$QA_MANUAL"
     skipped="$(jq length "$D/security/skipped.json" 2>/dev/null)"
     [ -z "$skipped" ] || [ "$skipped" = 0 ] || printf 'Security: %s pre-existing finding(s) skipped\n' "$skipped"
@@ -591,11 +667,20 @@ qa_publish() {
   if [ "$TRACKER" = jira ]; then
     ar_jira_init || stop "QA: ${AR_ERR}"
     TMPD="$D/qa"; jira_add_comment "$KEY" "$c" || stop "QA: Jira comment failed (HTTP ${JIRA_HTTP})"
+    # The script that ran goes on the ticket, where cr-qa takes QA scripts from.
+    if [ -s "$D/qa/qa-script.sh" ] && [ -f "$D/qa/script.out" ] && [[ "$KEY" =~ ^[A-Z][A-Z0-9_]*-[0-9]+$ ]]; then
+      jira_add_attachment "$KEY" "$D/qa/qa-script.sh" "$(qa_script_name)" \
+        || stop "QA: Jira attachment failed (HTTP ${JIRA_HTTP})"
+    fi
   fi
   log "QA published${NOTE_URL:+ (${NOTE_URL})}"
   [ "$QA_FAIL" = 0 ] || stop "QA: ${QA_FAIL} scripted test(s) failed — plan: ${NOTE_URL:-$plan}"
   [ -z "$QA_UNIT_STOP" ] || stop "QA: unit tests ${QA_UNIT_STOP} — plan: ${NOTE_URL:-$plan}"
+  [ -z "$QA_SCRIPT_STOP" ] || stop "QA: QA script ${QA_SCRIPT_STOP} — plan: ${NOTE_URL:-$plan}"
 }
+
+# qa_script_name — the file name the QA script is published under: qa-<ticket key>.sh.
+qa_script_name() { printf 'qa-%s.sh' "$(printf '%s' "$KEY" | tr -c 'A-Za-z0-9_-' '-')"; }
 
 # --- security (security.command adapter) -----------------------------------------------------------
 

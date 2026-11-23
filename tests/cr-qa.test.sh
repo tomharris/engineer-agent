@@ -282,10 +282,12 @@ mkdir -p "$TMP/e2e/bin"
 H="$TMP/e2e"
 cat > "$H/bin/slack" <<'SH'
 #!/bin/bash
+# A channel's messages come from msgs.<channel>.json when present, else msgs.json; CFAIL can't be read.
+m="$E2E/msgs.json"; [ -f "$E2E/msgs.$2.json" ] && m="$E2E/msgs.$2.json"
 case "$1" in
-  read)  cat "$E2E/msgs.json" ;;
-  thread) if [ -f "$E2E/thread.json" ]; then cat "$E2E/thread.json"; else jq --arg t "$3" '[.[] | select(.ts == $t)][:1]' "$E2E/msgs.json"; fi ;;
-  react) echo "$4" >> "$E2E/reactions"; exit "${SLACK_REACT_RC:-0}" ;;
+  read)  echo "$2" >> "$E2E/reads"; [ "$2" != CFAIL ] || exit 1; cat "$m" ;;
+  thread) if [ -f "$E2E/thread.json" ]; then cat "$E2E/thread.json"; else jq --arg t "$3" '[.[] | select(.ts == $t)][:1]' "$m"; fi ;;
+  react) echo "$4" >> "$E2E/reactions"; echo "$2" >> "$E2E/react-channels"; exit "${SLACK_REACT_RC:-0}" ;;
   send)  [ "$4" = --thread ] && printf '%s %s\n%s\n--8<--\n' "$2" "$5" "$3" >> "$E2E/slack-replies"; exit "${SLACK_SEND_RC:-0}" ;;
   *) exit 64 ;;
 esac
@@ -346,7 +348,7 @@ projects:
         integration: slack
         action: cr-qa
         every: 5m
-        channel: C0123456789
+        channel: ${CRQA_CHANNEL:-C0123456789}
         trusted_slack_users: [U0TRUSTED]
         trusted_authors: ["acc-tom"]
         transition: "Ready for Upload"
@@ -362,7 +364,7 @@ e2e_issue() {  # e2e_issue <description editor>
     changelog: {total: 1, histories: [{author: {accountId: $e}, items: [{fieldId: "description"}]}]}}' > "$H/issue.json"
 }
 e2e_reset() {  # e2e_reset <code findings json> <script exit> [verdict result]
-  rm -f "$H"/thread.json "$H"/views "$H"/reactions "$H"/gh.calls "$H"/pr-comments "$H"/jira-comments "$H"/transitions "$H"/errs "$H"/items "$H"/slack-replies
+  rm -f "$H"/msgs.*.json "$H"/reads "$H"/react-channels "$H"/thread.json "$H"/views "$H"/reactions "$H"/gh.calls "$H"/pr-comments "$H"/jira-comments "$H"/transitions "$H"/errs "$H"/items "$H"/slack-replies
   : > "$CLAUDE_CALLS"; unset EA_JOBS_CFG SLACK_REACT_RC SLACK_SEND_RC
   rm -rf "$EA_AGENT_DIR/state/jobs"
   msg 1700000001.000000 U0TRUSTED "CR/QA request for: <https://github.com/acme/web/pull/7|pr> - <https://acme.atlassian.net/browse/ENG-7|ENG-7>" '[]' | jq -s . > "$H/msgs.json"
@@ -544,6 +546,40 @@ unset PR_TITLE PR_BRANCH
 e2e_reset "$CLEAN" 0; export SLACK_REACT_RC=1
 run_job; eq "claim failure exits 1" 1 "$?"
 eq "claim failure: ledger error, no model run" "error|0" "$(outcome)|$(grep -c . "$CLAUDE_CALLS")"
+unset SLACK_REACT_RC
+
+echo "== cr-qa: several channels"
+two_channels() {  # requests at ts $1 in C0AAA and $2 in C0BBB (either may be empty)
+  local ch ts
+  for ch in C0AAA C0BBB; do
+    if [ "$ch" = C0AAA ]; then ts="$1"; else ts="$2"; fi
+    if [ -n "$ts" ]; then
+      msg "$ts" U0TRUSTED "CR/QA request for: <https://github.com/acme/web/pull/7|pr> - <https://acme.atlassian.net/browse/ENG-7|ENG-7>" '[]' | jq -s . > "$H/msgs.$ch.json"
+    else echo '[]' > "$H/msgs.$ch.json"; fi
+  done
+}
+e2e_reset "$CLEAN" 0; CRQA_CHANNEL='[C0AAA, C0BBB]' e2e_config; two_channels 1700000009.000000 1700000002.000000
+run_job; eq "list of channels: exits 0" 0 "$?"
+eq "every channel is read" "C0AAA,C0BBB" "$(paste -sd, - < "$H/reads" 2>/dev/null)"
+eq "the oldest request across channels is claimed and approved in its own channel" "C0BBB,C0BBB" "$(paste -sd, - < "$H/react-channels" 2>/dev/null)"
+eq "the verdict replies in that request's channel and thread" "C0BBB 1700000002.000000" "$(sed -n 1p "$H/slack-replies" 2>/dev/null)"
+eq "ledger keyed by the picked request" "1700000002.000000" "$(cut -f1 "$LEDGER_E" 2>/dev/null)"
+
+e2e_reset "$CLEAN" 0; CRQA_CHANNEL='[C0AAA, C0BBB]' e2e_config; two_channels "" 1700000002.000000
+run_job; eq "a request only in the second channel is found" "C0BBB 1700000002.000000" "$(sed -n 1p "$H/slack-replies" 2>/dev/null)"
+
+e2e_reset "$CLEAN" 0; CRQA_CHANNEL='[CFAIL, C0BBB]' e2e_config; two_channels "" 1700000002.000000
+run_job; eq "an unreadable channel is skipped" 0 "$?"
+has "the unreadable channel is reported" "Slack read of CFAIL failed" "$(cat "$H/errs" 2>/dev/null)"
+eq "the readable channel's request still runs" "C0BBB 1700000002.000000" "$(sed -n 1p "$H/slack-replies" 2>/dev/null)"
+
+e2e_reset "$CLEAN" 0; CRQA_CHANNEL='[CFAIL]' e2e_config
+run_job; eq "no readable channel exits 3" 3 "$?"
+
+e2e_reset "$CLEAN" 0; CRQA_CHANNEL='
+          - C0AAA
+          - C0BBB' e2e_config; two_channels 1700000001.000000 ""
+run_job; eq "a block list of channels works" "C0AAA 1700000001.000000" "$(sed -n 1p "$H/slack-replies" 2>/dev/null)"
 
 echo "Passed: $PASS  Failed: $FAIL"
 [ "$FAIL" -eq 0 ]

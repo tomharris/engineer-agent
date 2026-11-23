@@ -339,6 +339,19 @@ security → CI → browser → QA → ready → transition → announce. Things
   `serve`/`setup`, which already execute the branch's model-written code; the QA run's inputs (its
   worktree, the trust-checked ticket text, the diff) are no wider than the implementation's.
   Only its status line is published; the raw output stays in `state/pr-pipeline/<item>/qa/unit.out`.
+- **`qa.script` is a second opt-in for model-written code: a QA script a reviewer can run.** JSON
+  checks are single requests, so a change that only alters what an existing endpoint accepts (a
+  validator behind publish, say) or needs a flow (create, then publish, then read back) left the
+  scripted section empty and every criterion manual (AIA-730). With `qa.script.enabled: true` the
+  plan adds a `## QA Script` bash block; bash extracts it (the first fence under that heading, so a
+  `## ` comment inside does not end it), refuses one over 64 KiB or naming any web address but the
+  served URL (it is published), and runs it from the worktree while the branch is served, under
+  `with_timeout` with the `qa_unit` env plus `QA_BASE_URL`. The auth headers file is deleted first:
+  the script signs in on its own, which keeps it runnable by a reviewer who has no adapter. Residual,
+  accepted: as `qa.unit`, plus the served app is reachable. The script is published verbatim in the
+  Slite note inside a fence longer than any backtick run in it, and attached to the Jira ticket as
+  `qa-<KEY>.sh`, the form `cr-qa` takes QA scripts in; only pass/fail counts reach the comments,
+  and the output stays in `state/pr-pipeline/<item>/qa/script.out`. A re-run attaches another copy.
 - **QA checks have their own server, and auth is a name, not a credential.** `qa.server` serves the
   branch for the checks without turning on the Chrome browser test (it falls back to `browser`).
   Its `url` may name any host, because bash pins that host to 127.0.0.1 with `--resolve`; `insecure`
@@ -403,7 +416,10 @@ you from its first implementation.
 ## `slack` / `cr-qa` (`job-slack-cr-qa.sh`, `lib-cr-qa.sh`)
 
 Reviews and QAs other people's PRs on request. Spec:
-`docs/superpowers/specs/2026-11-11-cr-qa-job-design.md`. A message in `channel` is a request when
+`docs/superpowers/specs/2026-11-11-cr-qa-job-design.md`. A message in `channel` (one ID or a list;
+every listed channel is read, the oldest eligible request across them is taken, and every reaction
+and reply goes to that request's channel; an unreadable channel is reported and skipped, and the run
+fails only when none could be read) is a request when
 it starts with `trigger_prefix` (default `CR/QA`), has no `reactions.claim` emoji (default `eyes`),
 was posted by a `trusted_slack_users` id, holds exactly one PR URL and at most one Jira browse URL, the
 PR is in one of the project's `github.repos`, and its ts is not in the job's ledger. One request per

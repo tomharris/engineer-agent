@@ -392,6 +392,14 @@ eq "relative security.command" "cr-qa security.command 'bin/review.sh' must be a
   "$(reset_state; crqa_config '' ; sed -i.bak 's#~/bin/review.sh#bin/review.sh#' "$CFG"; tick; cat "$STATE/web.crqa.invalid")"
 has "unknown reactions key" "reactions" "$(inv '^\$NONE' '        reactions: { claim: eyes, aprove: approve }')"
 eq "invalid job did not run" 0 "$(calls web.crqa)"
+crqa_channel() { reset_state; crqa_config '^        channel: C0123456789$' "$1"; tick; cat "$STATE/web.crqa.invalid" 2>/dev/null; }
+eq "a list of channels is valid" "" "$(crqa_channel '        channel: [C0123456789, C0987654321]')"
+eq "a block list of channels is valid" "" "$(crqa_channel '        channel:
+          - C0123456789
+          - C0987654321')"
+eq "an empty channel list is refused" "cr-qa needs channel" "$(crqa_channel '        channel: []')"
+eq "a channel that is not an ID is refused" "cr-qa channel must be a Slack channel ID or a list of them" \
+  "$(crqa_channel '        channel: [C0123456789, "#podracers"]')"
 
 # --------------------------------------------------------------------------------------------
 echo "== 10c. <integration>/watch: validation, dispatch, collector mapping =="

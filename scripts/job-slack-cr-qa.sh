@@ -40,7 +40,6 @@ jobs_cfg_load
 IFS='|' read -r SLUG IDX _ <<< "$(jobs_enumerate | awk -F'|' -v k="$JOB" '($1 "." $3) == k { print; exit }')"
 [ -n "${SLUG:-}" ] || { echo "no such job: $JOB" >&2; exit 2; }
 P="projects.${SLUG}.job.${IDX}"
-CHANNEL="$(_arc "$P.channel")"
 PREFIX="$(_arc "$P.trigger_prefix")"; PREFIX="${PREFIX:-CR/QA}"
 CLAIM="$(_arc "$P.reactions.claim")"; CLAIM="${CLAIM:-eyes}"
 APPROVE="$(_arc "$P.reactions.approve")"; APPROVE="${APPROVE:-approve}"
@@ -76,14 +75,26 @@ cleanup() {
 }
 trap cleanup EXIT
 jobs_kill_tree_children() { local c; for c in $(pgrep -P $$ 2>/dev/null); do jobs_kill_tree "$c"; done; }
-with_timeout "$GH_TIMEOUT" "$SLACK_BIN" read "$CHANNEL" 100 --json ${SLACK_WS[@]+"${SLACK_WS[@]}"} > "$TMPD/msgs.json" 2>>"$LOG_FILE" \
-  || { err "Slack read of ${CHANNEL} failed"; exit 3; }
-jq -e 'type == "array" and all(has("reactions"))' "$TMPD/msgs.json" >/dev/null 2>&1 \
-  || { err "the Slack backend returned no reactions; cr-qa needs them to skip claimed requests"; exit 3; }
-pick="$(crqa_pick "$TMPD/msgs.json" "$PREFIX" "$CLAIM" "$(_arcl "$P.trusted_slack_users")" "$(gr_project_repos "$SLUG")" "$LEDGER")" \
-  || { log "nothing eligible"; exit 0; }
+# One request per run: the oldest eligible one across the job's channels. A channel that can't be
+# read is reported and skipped; the run fails only when none could be read.
+CHANNEL="" pick="" read_ok=0
+while IFS= read -r ch; do
+  [ -n "$ch" ] || continue
+  if ! with_timeout "$GH_TIMEOUT" "$SLACK_BIN" read "$ch" 100 --json ${SLACK_WS[@]+"${SLACK_WS[@]}"} > "$TMPD/msgs.json" 2>>"$LOG_FILE"; then
+    err "Slack read of ${ch} failed"; continue
+  fi
+  jq -e 'type == "array" and all(has("reactions"))' "$TMPD/msgs.json" >/dev/null 2>&1 \
+    || { err "the Slack backend returned no reactions; cr-qa needs them to skip claimed requests"; exit 3; }
+  read_ok=1
+  p="$(crqa_pick "$TMPD/msgs.json" "$PREFIX" "$CLAIM" "$(_arcl "$P.trusted_slack_users")" "$(gr_project_repos "$SLUG")" "$LEDGER")" || continue
+  if [ -z "$pick" ] || awk -v a="${p%%	*}" -v b="${pick%%	*}" 'BEGIN { exit !(a + 0 < b + 0) }'; then
+    pick="$p"; CHANNEL="$ch"
+  fi
+done <<< "$(crqa_channels "$P")"
+[ "$read_ok" = 1 ] || exit 3
+[ -n "$pick" ] || { log "nothing eligible"; exit 0; }
 IFS="	" read -r TS PR_URL REPO PR KEY _ <<< "$pick"
-log "picked ${PR_URL} (${KEY}) from ${TS}"
+log "picked ${PR_URL} (${KEY}) from ${TS} in ${CHANNEL}"
 mkdir -p "$JOBS_STATE_DIR"
 
 # The channel read is parsed from a text blob, where a message body can imitate another message's

@@ -385,7 +385,7 @@ projects:
     #     integration: slack
     #     action: cr-qa
     #     every: 5m
-    #     channel: C0123456789
+    #     channel: C0123456789          # or a list: [C0123456789, C0987654321]
     #     trusted_slack_users: [U0123ABCD]
     #     trusted_authors: ["5b10ac8d82e05b22cc7d4ef5"]   # Jira account ids
     #     transition: "Ready for Upload"
@@ -503,6 +503,9 @@ projects:
     #         unit:                      # optional; the QA run writes unit tests under ea_qa/ and
     #           command: "uv run pytest -q"  #   bash runs `<command> ea_qa` in the branch worktree
     #           timeout: 10m             #   (default 10m); a failure stops like a failed check
+    #         script:                    # optional, needs a server; the plan adds a bash QA script
+    #           enabled: true            #   bash runs against the served branch; published in the
+    #           timeout: 10m             #   Slite note and attached to the Jira ticket as qa-<KEY>.sh
     #       transition: "Code Review"    # Jira jobs; tier "jira-transition"; after the PR is ready
     #       announce:                    # tier "slack-post": "CR+QA: <PR urls> <ticket url>"
     #         channel: C12345678         #   must be one of projects.<slug>.slack.channels
