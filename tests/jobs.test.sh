@@ -1,6 +1,6 @@
 #!/bin/bash
 # Tests for scheduled jobs: scripts/lib-jobs.sh, jobs-tick.sh, jobs-draft.sh, jobs-ctl.sh,
-# job-watch.sh, and the `exclusive` skip in ea-config.sh.
+# and job-watch.sh.
 #
 # The clock is frozen with EA_NOW and TZ=UTC. The Slack collector is replaced by a stub handler
 # (EA_JOB_HANDLER_WATCH) for dispatcher mechanics; section 9 drives the REAL collector
@@ -110,34 +110,14 @@ YAML
 }
 
 # --------------------------------------------------------------------------------------------
-echo "== 1. exclusive: the global poll skips a source only an able, unpaused job owns =="
+echo "== 1. a leftover exclusive: key is inert =="
 base_config "        exclusive: true"
-eq "exclusive job owns the source" "skipped:owned by scheduled job watch" \
+eq "the source stays configured" "configured" \
   "$(bash "$REPO_ROOT/scripts/ea-config.sh" sources alpha | awk -F'\t' '$1=="slack"{print $2}')"
-eq "the job's own run still sees it configured" "configured" \
-  "$(EA_JOBS_IGNORE_EXCLUSIVE=1 bash "$REPO_ROOT/scripts/ea-config.sh" sources alpha | awk -F'\t' '$1=="slack"{print $2}')"
-mkdir -p "$STATE"; touch "$STATE/alpha.watch.paused"
-eq "a paused job does not own it (no silent outage)" "configured" \
-  "$(bash "$REPO_ROOT/scripts/ea-config.sh" sources alpha | awk -F'\t' '$1=="slack"{print $2}')"
-rm -f "$STATE/alpha.watch.paused"
-base_config
-eq "without exclusive the source stays with the poll" "configured" \
-  "$(bash "$REPO_ROOT/scripts/ea-config.sh" sources alpha | awk -F'\t' '$1=="slack"{print $2}')"
-cat > "$CFG" <<'YAML'
-projects:
-  alpha:
-    path: "/tmp/alpha"
-    jira:
-      project: "ENG"
-    jobs:
-      - id: auto
-        integration: jira
-        action: triage
-        every: 30m
-        exclusive: true
-YAML
-eq "an unsupported job cannot claim exclusivity" "configured" \
-  "$(bash "$REPO_ROOT/scripts/ea-config.sh" sources alpha | awk -F'\t' '$1=="jira"{print $2}')"
+eq "the job stays valid" "" \
+  "$( . "$REPO_ROOT/scripts/lib-paths.sh"; . "$REPO_ROOT/scripts/lib-jobs.sh"; rows="$(jobs_enumerate)"; jobs_validate "$(head -1 <<< "$rows")" "$rows")"
+eq "enumeration carries no exclusive column" "alpha|0|watch|slack|watch|5m|||channels|1||" \
+  "$( . "$REPO_ROOT/scripts/lib-paths.sh"; . "$REPO_ROOT/scripts/lib-jobs.sh"; jobs_enumerate)"
 
 # --------------------------------------------------------------------------------------------
 echo "== 2. validation =="
@@ -145,7 +125,7 @@ v() {  # v <every> <hours> <days> <watch> [id] [integ:action] [pause]
   local pair="${6:-slack:watch}"
   local integ="${pair%%:*}" action="${pair#*:}"
   local sup=0; [ "${integ}:${action}" = "slack:watch" ] && sup=1
-  local row="alpha|0|${5:-watch}|${integ}|${action}|$1|$2|$3|$4||${sup}||${7:-}"
+  local row="alpha|0|${5:-watch}|${integ}|${action}|$1|$2|$3|$4|${sup}||${7:-}"
   ( . "$REPO_ROOT/scripts/lib-paths.sh"; . "$REPO_ROOT/scripts/lib-jobs.sh"; jobs_validate "$row" "$row" )
 }
 eq "valid job" "" "$(v 5m 9-17 mon,fri channels)"
@@ -294,6 +274,18 @@ eq "drafting done when the file reached drafts/" done "$(rfield alpha.watch draf
 eq "status ok" ok "$(rfield alpha.watch status)"
 [ -f "$EA_AGENT_DIR/queue/drafts/20261109-100000-slack-question-a.md" ] && ok "item is in drafts/" || bad "item not in drafts/"
 has "drafting prompt forbids polling" "Do NOT poll any source" "$(cat "$TMP/claude.calls")"
+has "drafting prompt names the manifest" "/manifest.tsv — one tab-separated row per item" "$(cat "$TMP/claude.calls")"
+has "drafting prompt points at the per-type drafting spec" "${REPO_ROOT}/references/drafting.md says for its type" "$(cat "$TMP/claude.calls")"
+[ -f "$REPO_ROOT/references/drafting.md" ] && ok "the drafting spec exists" || bad "references/drafting.md missing"
+
+reset_state; base_config
+tick
+eq "nothing collected: ok" ok "$(rfield alpha.watch status)"
+eq "nothing collected: items 0" 0 "$(rfield alpha.watch items)"
+[ -e "$TMP/claude.calls" ] && bad "a run with nothing to draft started the model" || ok "nothing to draft: no model run"
+reset_state; base_config
+echo "20261109-100000-slack-question-a.md" > "$TMP/h.alpha.watch.items"
+CLAUDE_MODE=move tick
 has "drafting run uses the poll allowlist" "Bash(gh pr view:*)" "$(cat "$TMP/claude.calls")"
 case "$(cat "$TMP/claude.calls")" in *"slack-mcp.sh send"*|*"spy send"*) bad "send verb leaked into the allowlist" ;; *) ok "no Slack send verb" ;; esac
 
@@ -400,12 +392,6 @@ eq "relative security.command" "cr-qa security.command 'bin/review.sh' must be a
   "$(reset_state; crqa_config '' ; sed -i.bak 's#~/bin/review.sh#bin/review.sh#' "$CFG"; tick; cat "$STATE/web.crqa.invalid")"
 has "unknown reactions key" "reactions" "$(inv '^\$NONE' '        reactions: { claim: eyes, aprove: approve }')"
 eq "invalid job did not run" 0 "$(calls web.crqa)"
-reset_state; crqa_config '' '        exclusive: true'
-eq "exclusive cr-qa owns the project's Slack source" "skipped:owned by scheduled job crqa" \
-  "$(bash "$REPO_ROOT/scripts/ea-config.sh" sources web | awk -F'\t' '$1=="slack"{print $2}')"
-mkdir -p "$STATE"; touch "$STATE/web.crqa.paused"
-eq "paused cr-qa gives the source back" "configured" \
-  "$(bash "$REPO_ROOT/scripts/ea-config.sh" sources web | awk -F'\t' '$1=="slack"{print $2}')"
 
 # --------------------------------------------------------------------------------------------
 echo "== 10c. <integration>/watch: validation, dispatch, collector mapping =="
@@ -437,7 +423,6 @@ eq "jira:watch needs the jira source configured" "jira:watch: tracker is github-
 eq "slite:watch needs a slite section" "slite:watch: no slite section configured" "$(winv slite)"
 eq "slite:watch with doc_labels is valid" "" "$(winv slite '    slite:
       doc_labels: [needs-review]')"
-eq "an exclusive watch job is not blocked by owning its own source" "" "$(winv github '' '        exclusive: true')"
 reset_state; watch_config github
 tick
 eq "github:watch dispatches to the watch handler" 1 "$(calls alpha.w)"
@@ -492,7 +477,7 @@ else
   echo "  SKIP: jq not installed"
 fi
 eq "--check made no gh or curl call" "" "$(cat "$NET_CALLS")"
-[ -e "$EA_AGENT_DIR/state/last-poll.yaml" ] && bad "--check wrote poll state" || ok "--check wrote no poll state"
+eq "--check wrote no state file" "" "$(find "$EA_AGENT_DIR/state" -name '*state.yaml' 2>/dev/null)"
 rm -f "$TMP/bin/gh" "$TMP/bin/curl"
 
 echo "== 10c3. jobs list shows why a watch job's collector cannot run =="
@@ -591,13 +576,12 @@ projects:
       repos: [api]
       review_requested_for: tom
 YAML
-echo "global" > "$EA_AGENT_DIR/state/last-poll.yaml"
 CLAUDE_MODE=move tick
 has "queried the job's repo" "--repo acme/web" "$(cat "$GH_ARGV")"
 case "$(cat "$GH_ARGV")" in *"acme/api"*) bad "queried another project's repo" ;; *) ok "did not query beta's repo" ;; esac
 eq "one pr-review drafted" "pr-review" "$(awk '/^type:/{print $2; exit}' "$EA_AGENT_DIR"/queue/drafts/*.md 2>/dev/null)"
 has "seen PR recorded in the job's own state file" "acme/web#7" "$(cat "$STATE/alpha.prs.state.yaml" 2>/dev/null)"
-eq "global last-poll.yaml untouched" "global" "$(cat "$EA_AGENT_DIR/state/last-poll.yaml")"
+eq "no state written outside state/jobs/" "" "$(find "$EA_AGENT_DIR/state" -name '*.yaml' ! -path '*/jobs/*')"
 eq "receipt ok" ok "$(rfield alpha.prs status)"
 rm -f "$TMP/bin/gh"
 
@@ -643,7 +627,6 @@ projects:
         integration: slack
         action: watch
         every: 5m
-        exclusive: true
   beta:
     path: "/tmp/beta"
     tracker: "none"
@@ -651,14 +634,12 @@ projects:
       channels: ["C2"]
       keywords: ["deploy"]
 YAML
-  echo "global" > "$EA_AGENT_DIR/state/last-poll.yaml.marker"
-  cp "$EA_AGENT_DIR/state/last-poll.yaml.marker" "$EA_AGENT_DIR/state/last-poll.yaml"
   CLAUDE_MODE=move tick
   has "read the job's channel" "read C1" "$(cat "$SPY_ARGV")"
   case "$(cat "$SPY_ARGV")" in *"read C2"*) bad "read another project's channel" ;; *) ok "did not read beta's channel" ;; esac
   eq "one item drafted" 1 "$(ls "$EA_AGENT_DIR/queue/drafts" | wc -l | tr -d ' ')"
   has "cutoff written to the job's own state file" "last_checked_ts" "$(cat "$STATE/alpha.watch.state.yaml" 2>/dev/null)"
-  eq "global last-poll.yaml untouched" "global" "$(cat "$EA_AGENT_DIR/state/last-poll.yaml")"
+  eq "no state written outside state/jobs/" "" "$(find "$EA_AGENT_DIR/state" -name '*.yaml' ! -path '*/jobs/*')"
   eq "receipt ok" ok "$(rfield alpha.watch status)"
 else
   echo "  SKIP: jq not installed"

@@ -1,8 +1,7 @@
 #!/bin/bash
 # Tests for scripts/poll-jira.sh — the deterministic Jira collector.
 #
-# `curl` is stubbed on PATH (following tests/cron-poll-scripted.test.sh, which stubs gh/claude the
-# same way) so no network is touched and every response shape is chosen by the test.
+# `curl` is stubbed on PATH so no network is touched and every response shape is chosen by the test.
 #
 # What is pinned here, and why each one matters:
 #
@@ -20,8 +19,8 @@
 #      must stay code work — decided by structure, not by a title keyword.
 #   5. TERMINAL STATE IS ABSORBING. engineer-agent posting its own findings as a Jira comment bumps
 #      `updated`, so a completed ticket that re-appears in the window must never be re-queued.
-#   6. DEGRADATION IS CLEAN. No credential / no jq / a failed query all exit 3, which cron-poll.sh
-#      reads as "leave this source to the model" — never a half-collected source.
+#   6. DEGRADATION IS CLEAN. No credential / no jq / a failed query all exit 3 ("collector
+#      unavailable" / a failed job run) — never a half-collected source.
 #
 # Run: bash tests/poll-jira.test.sh
 set -uo pipefail
@@ -35,10 +34,11 @@ ok()  { echo "  ok: $1"; PASS=$((PASS+1)); }
 bad() { echo "  FAIL: $1"; FAIL=$((FAIL+1)); }
 eq()  { if [ "$2" = "$3" ]; then ok "$1"; else bad "$1 — want [$2] got [$3]"; fi; }
 
-command -v jq >/dev/null 2>&1 || { echo "SKIP: jq not installed (poll-jira.sh degrades to the model without it)"; exit 0; }
+command -v jq >/dev/null 2>&1 || { echo "SKIP: jq not installed (poll-jira.sh is unavailable without it)"; exit 0; }
 
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 export EA_AGENT_DIR="$TMP/agent"
+export EA_POLL_STATE_FILE="$EA_AGENT_DIR/state/poll.state.yaml"
 mkdir -p "$EA_AGENT_DIR"/queue/{incoming,drafts,completed,rejected} "$EA_AGENT_DIR/state" "$TMP/bin"
 export PATH="$TMP/bin:$PATH"
 
@@ -160,7 +160,7 @@ issue() {
 set_issues() { jq -nc --argjson a "$1" '{issues:$a}' > "$SEARCH_JSON"; }
 
 reset() {
-  rm -f "$EA_AGENT_DIR"/queue/*/*.md "$EA_AGENT_DIR/state/last-poll.yaml" \
+  rm -f "$EA_AGENT_DIR"/queue/*/*.md "$EA_POLL_STATE_FILE" \
         "$CURL_ARGV" "$CURL_STDIN" "$CURL_BODY" "$TMP/manifest"
   : > "$TMP/manifest"
   echo 200 > "$TZ_CODE"; echo 200 > "$SEARCH_CODE"
@@ -171,11 +171,11 @@ reset() {
 run() { EA_TEST_JIRA_TOKEN="tok" bash "$POLL" --manifest "$TMP/manifest" "$@" 2>"$TMP/err"; }
 item() { ls "$EA_AGENT_DIR/queue/incoming/"*"$1"* 2>/dev/null | head -1; }
 
-echo "== degradation: no credential leaves the source to the model =="
+echo "== degradation: no credential => collector unavailable =="
 write_config; reset
 set_issues "[$(issue ENG-1 'A ticket' Story)]"
 EA_TEST_JIRA_TOKEN="" bash "$POLL" --manifest "$TMP/manifest" >/dev/null 2>&1
-eq "exit 3 (cron-poll reads this as: leave it to the model)" "3" "$?"
+eq "exit 3 (collector unavailable)" "3" "$?"
 if [ -z "$(ls -A "$EA_AGENT_DIR/queue/incoming" 2>/dev/null)" ]; then ok "no items written"; else bad "must not write items without a credential"; fi
 
 echo "== the credential never appears in argv =="
@@ -188,7 +188,7 @@ if grep -q 'tok' "$CURL_STDIN"; then ok "credential passed on stdin"; else bad "
 echo "== JQL: the account offset is applied to the watermark =="
 write_config; reset
 mkdir -p "$EA_AGENT_DIR/state"
-cat > "$EA_AGENT_DIR/state/last-poll.yaml" <<'YAML'
+cat > "$EA_POLL_STATE_FILE" <<'YAML'
 jira_projects:
   ENG:
     last_checked: "2026-08-20T14:03:03Z"
@@ -276,7 +276,7 @@ set_issues "[$(issue ENG-40 'Manually added' Story)]"
 for where in "drafts draft" "incoming"; do
   rm -f "$EA_AGENT_DIR"/queue/*/*.md "$TMP/job.state.yaml"; : > "$TMP/manifest"
   manual $where
-  EA_POLL_STATE_FILE="$TMP/job.state.yaml" EA_JOBS_IGNORE_EXCLUSIVE=1 run --project alpha >/dev/null
+  EA_POLL_STATE_FILE="$TMP/job.state.yaml" run --project alpha >/dev/null
   eq "manual item in ${where%% *}/: no second file" 1 "$(ls "$EA_AGENT_DIR"/queue/*/*ENG-40* | wc -l | tr -d ' ')"
   eq "manual item in ${where%% *}/: no draft row" 0 "$(grep -c '^draft	' "$TMP/manifest")"
 done
@@ -313,14 +313,14 @@ if grep -q '^ticket_kind_method:' "$I"; then bad "unrouted item must not carry a
 echo "== state =="
 write_config; reset
 run >/dev/null
-if grep -q 'ENG' "$EA_AGENT_DIR/state/last-poll.yaml" 2>/dev/null; then ok "per-key cutoff advances on a zero-ticket poll"; else bad "cutoff must advance even when nothing was found"; fi
+if grep -q 'ENG' "$EA_POLL_STATE_FILE" 2>/dev/null; then ok "per-key cutoff advances on a zero-ticket poll"; else bad "cutoff must advance even when nothing was found"; fi
 
 write_config; reset
 echo 500 > "$SEARCH_CODE"
 run >/dev/null
 rc=$?
 eq "a failed query exits 3" "3" "$rc"
-if grep -q 'last_checked' "$EA_AGENT_DIR/state/last-poll.yaml" 2>/dev/null; then
+if grep -q 'last_checked' "$EA_POLL_STATE_FILE" 2>/dev/null; then
   bad "cutoff must NOT advance after a failed query (it would drop that window forever)"
 else ok "cutoff left unchanged after a failed query"; fi
 

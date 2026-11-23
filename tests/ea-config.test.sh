@@ -7,13 +7,9 @@
 #   - tracker inference          (poll-github-issues step 3, poll-jira step 3)
 #   - investigation REPLACE-not-merge, where [] DISABLES a tier and absent keeps the shipped
 #     default                    (references/ticket-kind.md)
-#   - effective Slack workspace, project overriding agent   (poll-slack step 1)
-#   - the per-source configured/skipped decision that fills the receipt's `skipped:` bucket,
-#     which "MUST NOT affect status"                        (cron-poll.sh prompt)
-#
-# The last one matters most: cron-poll.sh's prompt asks the MODEL to sort every source into one of
-# three buckets. Getting that wrong turns a normal quiet poll into a `status: error` page, or worse
-# hides a real failure inside `skipped:`. It is pure bookkeeping over config.
+#   - effective Slack workspace, project overriding agent
+#   - the per-source configured/skipped decision that decides which collectors run, which watch
+#     jobs are valid, and which sources `status` reports as UNCOVERED
 #
 # Run: bash tests/ea-config.test.sh
 set -uo pipefail
@@ -179,7 +175,6 @@ projects:
         integration: slack
         action: watch
         every: 5m
-        exclusive: true
 YAML
 dump() { EA_AGENT_DIR="$C" bash "$EA" dump; }
 first="$(dump)"
@@ -192,11 +187,6 @@ n="$(grep -c . "$TMP/awk.count")"
 [ "$n" -le 5 ] && ok "a repeated dump reuses the cache (${n} awk runs)" || bad "a repeated dump re-ran ${n} awk lookups"
 sed -i.bak 's/aaaa/bbbb/' "$C/engineer.yaml"
 eq "a same-size config edit is picked up" "bbbb" "$(dump | awk -F= '$1=="agent.branch_prefix"{print $2}')"
-before="$(dump | grep -c 'skipped:owned by scheduled job watch')"
-touch "$C/state/jobs/web.watch.paused"
-eq "pausing the exclusive job is picked up" "$((before > 0 ? 0 : 1))|$before" "$(dump | grep -c 'skipped:owned by scheduled job watch')|$before"
-rm -f "$C/state/jobs/web.watch.paused"
-eq "EA_JOBS_IGNORE_EXCLUSIVE is part of the key" 0 "$(EA_JOBS_IGNORE_EXCLUSIVE=1 EA_AGENT_DIR="$C" bash "$EA" dump | grep -c 'skipped:owned by scheduled job watch')"
 chmod 500 "$C/state"; rm -rf "$C/state/config-dump.cache" 2>/dev/null
 eq "an unwritable state dir still dumps" "bbbb" "$(dump 2>/dev/null | awk -F= '$1=="agent.branch_prefix"{print $2}')"
 chmod 700 "$C/state"

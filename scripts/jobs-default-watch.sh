@@ -45,7 +45,7 @@ id_taken() {
 
 for src in github github_issues jira slack slite; do
   case "$(_jcfg "projects.${SLUG}.source.${src}")" in
-    configured|"skipped:owned by scheduled job "*) ;;
+    configured) ;;
     *) continue ;;
   esac
   integ="$src"; [ "$src" = github_issues ] && integ=github-issues

@@ -8,8 +8,8 @@
 # than one model's prose verdict is that the composition can be tested without a model.
 #
 # What is pinned, and why each one is a thing that could silently break:
-#   • DOUBLE OPT-IN. No TypeSafe key => exit 3 and nothing written. This is the user-facing promise
-#     that enabling `slack` in scripted_sources cannot, by itself, start sending Slack text anywhere.
+#   • OPT-IN EGRESS. No TypeSafe key => exit 3 and nothing written: configuring a slack watch job
+#     cannot, by itself, start sending Slack text anywhere.
 #   • The API key never appears in argv (this runs unattended every 15 minutes; `ps` is public).
 #   • Threshold composition, in both directions, one question at a time.
 #   • A failed judgment does NOT become a silent "no", and does NOT advance the cutoff past the
@@ -30,10 +30,11 @@ ok()  { echo "  ok: $1"; PASS=$((PASS+1)); }
 bad() { echo "  FAIL: $1"; FAIL=$((FAIL+1)); }
 eq()  { if [ "$2" = "$3" ]; then ok "$1"; else bad "$1 — want [$2] got [$3]"; fi; }
 
-command -v jq >/dev/null 2>&1 || { echo "SKIP: jq not installed (poll-slack.sh degrades to the model without it)"; exit 0; }
+command -v jq >/dev/null 2>&1 || { echo "SKIP: jq not installed (poll-slack.sh is unavailable without it)"; exit 0; }
 
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 export EA_AGENT_DIR="$TMP/agent"
+export EA_POLL_STATE_FILE="$EA_AGENT_DIR/state/poll.state.yaml"
 mkdir -p "$EA_AGENT_DIR"/queue/{incoming,drafts,completed,rejected} "$EA_AGENT_DIR/state" "$TMP/bin"
 export PATH="$TMP/bin:$PATH"
 
@@ -139,7 +140,7 @@ YAML
 }
 
 reset() {
-  rm -f "$EA_AGENT_DIR"/queue/*/*.md "$EA_AGENT_DIR/state/last-poll.yaml" \
+  rm -f "$EA_AGENT_DIR"/queue/*/*.md "$EA_POLL_STATE_FILE" \
         "$SPY_ARGV" "$CURL_ARGV" "$CURL_STDIN" "$CURL_BODY"
   : > "$TMP/manifest"; echo 0 > "$SPY_EXIT"; echo 200 > "$TS_CODE"
   echo '[]' > "$THREAD_JSON"
@@ -155,7 +156,7 @@ Q='[{"ts":"1700000100.000100","user_id":"U1","user_name":"Ann","reply_count":0,"
 echo "== double opt-in: the TypeSafe key is a hard gate =="
 write_config; reset; msgs "$Q"
 EA_TEST_TS_KEY="" bash "$POLL" --manifest "$TMP/manifest" >/dev/null 2>&1
-eq "no TypeSafe key => exit 3 (Slack stays model-driven)" "3" "$?"
+eq "no TypeSafe key => exit 3 (collector unavailable)" "3" "$?"
 eq "nothing written without a key" "0" "$(nitems)"
 if [ -s "$SPY_ARGV" ]; then bad "Slack must not be read at all when the judgment is unavailable"; else ok "no Slack read attempted"; fi
 
@@ -232,11 +233,10 @@ echo "== a failed judgment is not a silent no =="
 write_config; reset; msgs "$Q"
 echo 500 > "$TS_CODE"
 run >/dev/null; rc=$?
-eq "API failure => exit 3 (hand Slack back to the model)" "3" "$rc"
+eq "API failure => exit 3 (the run fails)" "3" "$rc"
 eq "nothing queued on a failed judgment" "0" "$(nitems)"
-# The cutoff must NOT move: exit 3 hands Slack to the model, and an advanced cutoff would hide the
-# message from that fallback too — a transient error would silently eat everything around it.
-if [ -f "$EA_AGENT_DIR/state/last-poll.yaml" ] && grep -q last_checked_ts "$EA_AGENT_DIR/state/last-poll.yaml"; then
+# The cutoff must NOT move: an advanced cutoff would hide the message from the next run's retry — a transient error would silently eat everything around it.
+if [ -f "$EA_POLL_STATE_FILE" ] && grep -q last_checked_ts "$EA_POLL_STATE_FILE"; then
   bad "cutoff advanced on an errored run"
 else ok "cutoff left alone on an errored run"; fi
 
@@ -320,7 +320,7 @@ echo "== terminal state is absorbing =="
 write_config; reset; msgs "$Q"
 run >/dev/null
 f="$(item)"; mv "$f" "$EA_AGENT_DIR/queue/completed/"
-rm -f "$EA_AGENT_DIR/state/last-poll.yaml"
+rm -f "$EA_POLL_STATE_FILE"
 run >/dev/null
 eq "a completed message is not re-queued" "0" "$(nitems)"
 
@@ -328,7 +328,7 @@ echo "== zero-message poll leaves the cutoff alone =="
 write_config; reset; msgs '[]'
 run >/dev/null; rc=$?
 eq "exit 0 on a quiet channel" "0" "$rc"
-if [ -f "$EA_AGENT_DIR/state/last-poll.yaml" ] && grep -q last_checked_ts "$EA_AGENT_DIR/state/last-poll.yaml"; then
+if [ -f "$EA_POLL_STATE_FILE" ] && grep -q last_checked_ts "$EA_POLL_STATE_FILE"; then
   bad "cutoff must not advance when no message was read (it is a message ts, not a clock)"
 else ok "cutoff unchanged"; fi
 
@@ -336,8 +336,8 @@ echo "== the cutoff advances past judged-irrelevant messages =="
 write_config; reset; msgs "$Q"; answers 0.05 0.05 0.02 0.05
 run >/dev/null
 eq "cutoff advances past a rejected message" "1700000100.000100" \
-   "$(sed -n 's/.*last_checked_ts: //p' "$EA_AGENT_DIR/state/last-poll.yaml" | tr -d '"')"
-# Deliberately NOT reset() — that deletes last-poll.yaml, and the cutoff written above is the whole
+   "$(sed -n 's/.*last_checked_ts: //p' "$EA_POLL_STATE_FILE" | tr -d '"')"
+# Deliberately NOT reset() — that deletes the state file, and the cutoff written above is the whole
 # subject of this assertion. Clear only the request log.
 : > "$CURL_ARGV"
 run >/dev/null
@@ -348,7 +348,7 @@ write_config; reset; msgs "$Q"
 echo 75 > "$SPY_EXIT"
 run >/dev/null; rc=$?
 eq "exit 0 on an expired Slack token" "0" "$rc"
-if [ -f "$EA_AGENT_DIR/state/last-poll.yaml" ] && grep -q last_checked_ts "$EA_AGENT_DIR/state/last-poll.yaml"; then
+if [ -f "$EA_POLL_STATE_FILE" ] && grep -q last_checked_ts "$EA_POLL_STATE_FILE"; then
   bad "cutoff must not advance when no channel was read"
 else ok "cutoff unchanged on a token skip"; fi
 

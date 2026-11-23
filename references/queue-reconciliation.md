@@ -3,20 +3,16 @@
 Single source of truth for deciding **whether a polled item enters the queue, updates an item
 already there, or is skipped**.
 
-Read this file and follow it verbatim from:
-- `skills/poll-jira/SKILL.md`
-- `skills/poll-github-issues/SKILL.md`
-- `skills/poll-github/SKILL.md`
-- `skills/poll-slack/SKILL.md`
-- `skills/poll-slite/SKILL.md`
+`scripts/lib-queue.sh` (`queue_lookup` / `queue_disposition`) implements it for every collector
+(`scripts/poll-*.sh`). Read this file and follow it verbatim from:
 - `commands/add-ticket.md` (manual add — the one caller allowed to override, see "Manual add")
 
-Do not re-describe these rules in those files — delegate to this one, so the callers cannot drift
+Do not re-describe these rules elsewhere — delegate to this one, so the callers cannot drift
 apart. This is a plain reference document, not a skill: callers reach it with `Read`, because
-`scripts/cron-poll.sh` allowlists `Read` but not `Skill` or `Agent`.
+`scripts/jobs-draft.sh` allowlists `Read` but not `Skill` or `Agent`.
 
 `scripts/queue-dedup-check.sh` is the executable check on the invariant below. `tests/queue-dedup.test.sh`
-covers it. Run with `--heal` (as `cron-poll.sh` does) it also *resolves* the duplicates that need no
+covers it. Run with `--heal` (as `queue-hygiene.sh` does) it also *resolves* the duplicates that need no
 human judgement — see "Auto-healing" at the end of this file.
 
 ## The invariant
@@ -116,7 +112,7 @@ rather than duplicating.
 
 ## Relationship to `seen_*` state
 
-`state/last-poll.yaml`'s `seen_tickets` / `seen_issues` / `seen_prs` / `seen_docs` lists remain a
+A job state file's `seen_tickets` / `seen_issues` / `seen_prs` / `seen_docs` lists remain a
 **cheap pre-filter** — they let a poll skip work without reading queue files. They are not the
 invariant, and they are not authoritative:
 
@@ -173,9 +169,9 @@ ignores, so the group is genuinely resolved rather than suppressed.
 - **A group with two or more substantive copies.** A draft is human-owned — someone may be
   mid-review or may have hand-edited it — and nothing on disk says which of two drafts to keep.
 
-What remains after healing is exactly the set that needs a person, and `cron-poll.sh` pushes about
-each `(type, source_id)` **once**: `--keys` prints the post-heal, post-baseline list, and the poll
-diffs it against `state/queue-dedup-notified.tsv`. That ledger is rewritten to whatever is
+What remains after healing is exactly the set that needs a person, and `queue-hygiene.sh` pushes
+about each `(type, source_id)` **once**: `--keys` prints the post-heal, post-baseline list, and
+hygiene diffs it against `state/queue-dedup-notified.tsv`. That ledger is rewritten to whatever is
 unresolved *now*, so a duplicate that is resolved and later recurs is announced again rather than
 swallowed by a stale entry. Pushed once, visible always: `/engineer-agent status` reports the
 standing count so silence never means the duplicate went away.

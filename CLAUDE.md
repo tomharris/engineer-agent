@@ -14,7 +14,7 @@ This repo IS the plugin. Dev: `claude --plugin-dir /path/to/engineer-agent`.
 commands/                   slash commands
 skills/                     skills by task type
 references/                 shared specs skills Read at runtime (routing-ladder.md, ticket-kind.md,
-                            queue-reconciliation.md, epistemics.md, writing-style.md);
+                            queue-reconciliation.md, drafting.md, epistemics.md, writing-style.md);
                             scripts/lib-routing.sh and lib-ticket-kind.sh implement their
                             deterministic tiers
 hooks/hooks.json            turn-completion push hooks
@@ -56,7 +56,7 @@ docs/architecture/          detailed design rationale (read before changing that
   in `drafts/` (or it is invisible).
 - **Routing/kind outputs are config-derived**; untrusted text is only ever the left side of a
   comparison. Judgment tiers (TypeSafe or model) can only narrow a config-derived candidate set.
-- **TypeSafe egress is per-feature, deny-by-default** (`slack` scripted source,
+- **TypeSafe egress is per-feature, deny-by-default** (a `slack` / `watch` job,
   `typesafe.ticket_kind.enabled`, `typesafe.routing.enabled`). A failed judgment abstains/falls back
   to the model; it never becomes a silent "no".
 - **Credentials never in `engineer.yaml`**: config names where the secret is; `lib-secret.sh`

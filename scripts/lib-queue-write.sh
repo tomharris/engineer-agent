@@ -2,9 +2,9 @@
 # lib-queue-write.sh — construct queue items. Single source of truth for the filename shape, the
 # frontmatter, the `## Context` body, and the branch-slug transform.
 #
-# WHY CENTRALIZE: five poll skills each restate the filename convention and the frontmatter field
-# list in prose, and they have already drifted (poll-jira derives a branch as
-# "{branch_prefix}/{ticket_key}" while poll-github-issues uses
+# WHY CENTRALIZE: five poll skills each restated the filename convention and the frontmatter field
+# list in prose, and they had already drifted (poll-jira derived a branch as
+# "{branch_prefix}/{ticket_key}" while poll-github-issues used
 # "{branch_prefix}/issue-{n}-{slug}"). A queue item with a malformed field is not a loud failure —
 # review-queue renders a blank column, or the ntfy listener's item-id regex quietly refuses it.
 #
@@ -50,7 +50,7 @@ queue_filename() {
 }
 
 # branch_slug <title> — lowercase, non-alphanumeric to hyphen, collapse, truncate 40, strip
-# trailing hyphen. (poll-github-issues step 6.3)
+# trailing hyphen. (references/drafting.md)
 branch_slug() {
   printf '%s' "${1:-}" \
     | tr '[:upper:]' '[:lower:]' \
@@ -63,7 +63,7 @@ branch_slug() {
 # extract_acceptance_criteria <body-file> — pull an "Acceptance Criteria" section, else any
 # checkbox list, else a stated absence.
 #
-# Deliberately conservative. The poll skills ask the model to "extract from body if present,
+# Deliberately conservative. The old poll skills asked the model to "extract from body if present,
 # otherwise note 'No explicit acceptance criteria'" — a structured heading or a `- [ ]` list is
 # mechanically extractable and needs no model; anything less structured is left to the drafting
 # phase rather than guessed at here.
@@ -235,7 +235,7 @@ write_ticket_item() {
 # for an _unrouted one, which left review-queue asking a human to assign a project with nothing to
 # choose from.
 #
-# Deliberately does NOT fetch the diff. skills/poll-github/SKILL.md has the poll run `gh pr view`
+# Deliberately does NOT fetch the diff. the old poll-github skill had the poll run `gh pr view`
 # and `gh pr diff` and generate a full structured review INLINE, which is the single most expensive
 # thing a poll does. Here the collector only establishes that a PR needs review and records the
 # metadata; the diff is read once, later, by the drafting phase that actually needs it.
@@ -305,7 +305,7 @@ write_pr_item() {
 
 # write_doc_item — write a doc-review queue item for a Slite note.
 #
-# Shape comes from skills/poll-slite/SKILL.md step 3b. Note `source_id` is "slite:{doc_id}", NOT the
+# Shape comes from the old poll-slite skill. Note `source_id` is "slite:{doc_id}", NOT the
 # bare id: CLAUDE.md gives that prefixed form as the one the spec -> design-doc -> ticket-plan
 # prior-artifact lookups chain on, so an unprefixed id would break those joins while still looking
 # perfectly valid in the queue.
@@ -392,7 +392,7 @@ write_doc_item() {
 
 # write_slack_item — write a slack-question queue item.
 #
-# Shape comes from skills/poll-slack/SKILL.md step 3c, plus three fields that only exist because
+# Shape comes from the old poll-slack skill, plus three fields that only exist because
 # the relevance decision is now made by a model with a number attached rather than inline in a
 # drafting session: relevance_method, relevance_scores and relevance_rationale. They are recorded
 # for the SAME reason routing_rationale is — this is a judgment tier reading untrusted prose, so

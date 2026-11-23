@@ -4,7 +4,7 @@
 #
 # WHY THIS EXISTS AT ALL. Every other source in this plugin became scriptable because its "is this
 # work?" test is mechanical: a Jira status, a GitHub assignee, a Slite tag. Slack's is not —
-# skills/poll-slack/SKILL.md §3b is literally "use judgment to determine if it's actually a question
+# the old poll-slack skill literally said "use judgment to determine if it's actually a question
 # directed at the user", and that single sentence is the only reason Slack had no scripted collector
 # and kept every poll paying for a model session. A System One model answers exactly that shape of
 # question (a probability, not prose) for no reasoning tokens, which is what lets poll-slack.sh join
@@ -26,17 +26,16 @@
 # ⚠ EGRESS, STATED PLAINLY — this is the one thing in the poll path that sends your content to a
 # third party. Slack message text and thread context leave the machine and go to api.typesafe.ai.
 # Nothing else in Phase A does that (gh, Jira and Slite talk to systems that already hold the data).
-# That is precisely why the Slack collector is DOUBLE opt-in: `slack` must be listed in
-# agent.poll.scripted_sources AND an agent.typesafe credential must resolve. Absent either, the
-# collector exits 3 and Slack stays model-driven exactly as before.
+# That is precisely why the Slack collector needs a deliberate opt-in: a slack watch job must be
+# configured AND an agent.typesafe credential must resolve. Without the credential the collector
+# exits 3 and the job is reported unavailable.
 #
 # CREDENTIAL: same rules as Jira/Slite, same library. The config names WHERE the key is, never what
 # it is — see the SECURITY note at the top of lib-secret.sh, and prefer the Keychain on macOS
-# because launchd hands the poll a minimal environment.
+# because launchd hands scheduled jobs a minimal environment.
 #
-# DEPENDENCIES: curl and jq, both HARD here and SOFT for the poll. A missing one is not an error,
-# it is "leave this source to the model" — the same graceful degradation poll-jira.sh and
-# poll-slite.sh already give. jq is required because a request body containing arbitrary Slack text
+# DEPENDENCIES: curl and jq, both HARD. A missing one is not an error but "collector unavailable"
+# (exit 3), the same as poll-jira.sh and poll-slite.sh. jq is required because a request body containing arbitrary Slack text
 # must be built by a real JSON encoder; hand-rolled quoting is how you ship a collector that dies on
 # the first message containing a quote character.
 #
@@ -59,8 +58,8 @@ ts_key() {
                     "$(ea_secret_service typesafe)" ""
 }
 
-# ts_available — rc 0 when a request could actually be made. Callers exit 3 on failure so the
-# source falls back to the model rather than failing the poll.
+# ts_available — rc 0 when a request could actually be made. Callers exit 3 on failure, which a
+# watch job reports as "collector unavailable".
 ts_available() {
   command -v curl >/dev/null 2>&1 || return 1
   command -v jq   >/dev/null 2>&1 || return 1

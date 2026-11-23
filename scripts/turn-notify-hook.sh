@@ -27,9 +27,9 @@
 #     when EA_TURN_NOTIFY_DEBUG=1.
 #
 #  2. NO NEW HARD DEPENDENCY, AND A FREE NEGATIVE PATH.
-#     cron-poll.sh makes "deliberately NOT jq" an explicit policy (only the separately-installed
-#     approval-listener.sh may require it), and a plugin-wide hook is even more dependency-
-#     sensitive than the cron. Every field needed to DECIDE WHETHER TO PUSH is escape-free by
+#     "Deliberately NOT jq" is plugin policy (only the separately-installed approval-listener.sh
+#     may require it), and a plugin-wide hook is even more dependency-sensitive than the
+#     scheduled runs. Every field needed to DECIDE WHETHER TO PUSH is escape-free by
 #     construction (uuid / enum / skill slug / anchored raw-JSON prefix) and is read with sed.
 #     jq is used for exactly one thing -- extracting the free-text last_assistant_message for the
 #     excerpt -- so no jq means a label-only push, never a broken hook.

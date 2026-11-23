@@ -1,11 +1,10 @@
 #!/bin/bash
 # job-watch.sh — collector for an `<integration>` / `watch` scheduled job.
 #
-# Runs one project's Phase A collector (scripts/poll-<source>.sh --project) with the same routing,
-# classification and reconciliation as the global poll, but its OWN state file. The separate state
-# file is what makes running alongside the global poll safe: both do a read-modify-write of their
-# state, and sharing last-poll.yaml would lose updates. Anything both paths find is deduplicated by
-# the queue's (type, source_id) reconciliation.
+# Runs one project's Phase A collector (scripts/poll-<source>.sh --project) with its OWN state file
+# (state/jobs/<key>.state.yaml): each job does a read-modify-write of its cutoffs, and a shared file
+# would lose updates. Anything two jobs both find is deduplicated by the queue's (type, source_id)
+# reconciliation.
 #
 # slack also takes the job's `watch` sources (default: channels) and `thread_ttl`.
 #
@@ -54,7 +53,6 @@ fi
 [ "$(jobs_unrouted_owner "$INTEG")" = "$JOB" ] && EXTRA+=(--resume-unrouted)
 
 EA_POLL_STATE_FILE="${EA_AGENT_DIR}/state/jobs/${JOB}.state.yaml" \
-EA_JOBS_IGNORE_EXCLUSIVE=1 \
 EA_PHASE_A_ERRORS="$ERRORS" \
   bash "${SCRIPT_DIR}/${COLLECTOR}" --project "$PROJECT" --manifest "$MANIFEST" ${RUN_TS:+--run-ts "$RUN_TS"} \
     ${EXTRA[@]+"${EXTRA[@]}"}

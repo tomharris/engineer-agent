@@ -3,7 +3,7 @@
 #
 # `curl` is stubbed on PATH so no network is touched and every response shape is chosen here.
 #
-# The headline case is ROUTING. skills/poll-slite/SKILL.md iterates per project and queues a
+# The headline case is ROUTING. The old poll-slite skill iterated per project and queued a
 # matching doc for each, which in a real config is a live bug and not a hypothetical: all six
 # projects set doc_labels: ["needs-review"], so every review doc matches every project and the
 # global source_id dedup silently awards it to whichever project the loop reached first. This
@@ -12,7 +12,7 @@
 #
 # The other properties pinned: terminal state is absorbing (posting review comments UPDATES the
 # doc, so without this the doc just reviewed reappears every poll), the recency cutoff, and clean
-# degradation to the model on a missing key or an unrecognised response shape.
+# degradation (exit 3, collector unavailable) on a missing key or an unrecognised response shape.
 #
 # Run: bash tests/poll-slite.test.sh
 set -uo pipefail
@@ -26,10 +26,11 @@ ok()  { echo "  ok: $1"; PASS=$((PASS+1)); }
 bad() { echo "  FAIL: $1"; FAIL=$((FAIL+1)); }
 eq()  { if [ "$2" = "$3" ]; then ok "$1"; else bad "$1 — want [$2] got [$3]"; fi; }
 
-command -v jq >/dev/null 2>&1 || { echo "SKIP: jq not installed (poll-slite.sh degrades to the model without it)"; exit 0; }
+command -v jq >/dev/null 2>&1 || { echo "SKIP: jq not installed (poll-slite.sh is unavailable without it)"; exit 0; }
 
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 export EA_AGENT_DIR="$TMP/agent"
+export EA_POLL_STATE_FILE="$EA_AGENT_DIR/state/poll.state.yaml"
 mkdir -p "$EA_AGENT_DIR"/queue/{incoming,drafts,completed,rejected} "$EA_AGENT_DIR/state" "$TMP/bin" "$TMP/notes"
 export PATH="$TMP/bin:$PATH"
 
@@ -116,7 +117,7 @@ note() {
 set_hits() { jq -nc --argjson a "$1" '{hits:$a}' > "$SEARCH_JSON"; }
 
 reset() {
-  rm -f "$EA_AGENT_DIR"/queue/*/*.md "$EA_AGENT_DIR/state/last-poll.yaml" "$CURL_ARGV" "$CURL_STDIN" "$NOTES_DIR"/*.json
+  rm -f "$EA_AGENT_DIR"/queue/*/*.md "$EA_POLL_STATE_FILE" "$CURL_ARGV" "$CURL_STDIN" "$NOTES_DIR"/*.json
   : > "$TMP/manifest"; echo 200 > "$SEARCH_CODE"; set_hits '[]'
 }
 run()  { EA_TEST_SLITE_KEY="key" bash "$POLL" --manifest "$TMP/manifest" "$@" 2>"$TMP/err"; }
@@ -126,7 +127,7 @@ echo "== degradation =="
 write_config; reset
 set_hits '[{"id":"n1"}]'; note n1 "A design doc"
 EA_TEST_SLITE_KEY="" bash "$POLL" --manifest "$TMP/manifest" >/dev/null 2>&1
-eq "no key => exit 3 (leave it to the model)" "3" "$?"
+eq "no key => exit 3 (collector unavailable)" "3" "$?"
 if [ -z "$(ls -A "$EA_AGENT_DIR/queue/incoming" 2>/dev/null)" ]; then ok "no items written"; else bad "must not write without a key"; fi
 
 write_config; reset
@@ -259,7 +260,7 @@ if grep -q 'Skipped (terminal): slite:n12' "$TMP/out"; then ok "skip is reported
 echo "== recency cutoff =="
 write_config; reset
 set_hits '[{"id":"n13"}]'; note n13 "Old doc" 'null' "2026-08-01T00:00:00Z"
-cat > "$EA_AGENT_DIR/state/last-poll.yaml" <<'YAML'
+cat > "$EA_POLL_STATE_FILE" <<'YAML'
 projects:
   alpha:
     slite:
@@ -267,7 +268,7 @@ projects:
 YAML
 run >/dev/null
 if [ -z "$(ls -A "$EA_AGENT_DIR/queue/incoming" 2>/dev/null)" ]; then ok "a doc older than the cutoff is skipped"; else bad "recency filter did not apply"; fi
-if grep -q '2026' "$EA_AGENT_DIR/state/last-poll.yaml"; then ok "cutoff advances on a zero-doc poll"; else bad "cutoff must advance even when nothing was found"; fi
+if grep -q '2026' "$EA_POLL_STATE_FILE"; then ok "cutoff advances on a zero-doc poll"; else bad "cutoff must advance even when nothing was found"; fi
 
 echo "== resume sweep =="
 write_config; reset

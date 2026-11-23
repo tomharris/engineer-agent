@@ -1,7 +1,7 @@
 #!/bin/bash
 # poll-jira.sh — deterministic collector for Jira tickets.
 #
-# Replaces the mechanical half of skills/poll-jira/SKILL.md: the multi-source normalization, the
+# Collects for `jira` / `watch` jobs: the multi-source normalization, the
 # deduplicated per-key JQL query, the timezone conversion, reconciliation, routing (tiers 0-3a),
 # kind classification (tier 1, which is TERMINAL for Jira), queue-file writing, and state. It does
 # NOT draft — it writes items to queue/incoming/ and emits a manifest naming what still needs a
@@ -16,9 +16,8 @@
 #     reconstructing prose from that JSON in bash would be a parser of its own — with the failure
 #     mode being a queue item whose ### Description is empty or mangled, which a human then approves
 #     work from. v2 returns description as text. Both are supported on Jira Cloud.
-#   • jq is a HARD dependency here and a SOFT one for the poll: no jq means exit 3, and cron-poll.sh
-#     leaves Jira to the model exactly as before. CLAUDE.md sets "the cron path is jq-free" as
-#     policy for the collectors that can honour it (the GitHub ones use `gh --jq`, gh's embedded
+#   • jq is a HARD dependency here: no jq means exit 3, and the job reports the collector as
+#     unavailable. CLAUDE.md sets "jq-free" as policy for the collectors that can honour it (the GitHub ones use `gh --jq`, gh's embedded
 #     engine); there is no equivalent here, so the dependency is gated rather than assumed.
 #   • The credential is resolved by lib-secret.sh and NEVER read from engineer.yaml. It is passed to
 #     curl via `--config -` (stdin) rather than `-u`, so it never appears in the process list.
@@ -68,7 +67,7 @@ while [ $# -gt 0 ]; do
 done
 
 # Resume sweep scope: a --project run re-emits only its own source and types, so concurrent jobs
-# never claim the same stranded file. The global poll (no --project) keeps the unscoped sweep.
+# never claim the same stranded file. Without --project the sweep is unscoped.
 RESUME_ARGS=()
 if [ -n "$ONLY_PROJECT" ]; then
   RESUME_ARGS=(--project "$ONLY_PROJECT" --source jira --type ticket --type ticket-investigation)
@@ -85,12 +84,10 @@ emit() { [ -n "$MANIFEST" ] && printf '%s\n' "$*" >> "$MANIFEST"; return 0; }
 b64d() { base64 -d 2>/dev/null || base64 -D 2>/dev/null; }
 
 # --- Preconditions. Every one of these is a CLEAN SKIP (exit 3), never an error ---------------
-# cron-poll.sh treats a non-zero collector as "leave this source to the model", which is the
-# correct fallback for an install that has not set up REST access: behaviour is exactly what it was
-# before this script existed. Exiting non-zero on a missing optional dependency would instead turn
-# an unconfigured source into a failed poll.
-command -v curl >/dev/null 2>&1 || { log "poll-jira: curl not found; leaving Jira to the model"; exit 3; }
-command -v jq   >/dev/null 2>&1 || { log "poll-jira: jq not found; leaving Jira to the model"; exit 3; }
+# `--check` (jobs_watch_preflight) reports these as "collector unavailable" before a job runs, so a
+# watch job on an install without REST access says why instead of failing every run.
+command -v curl >/dev/null 2>&1 || { log "poll-jira: curl not found; skipping"; exit 3; }
+command -v jq   >/dev/null 2>&1 || { log "poll-jira: jq not found; skipping"; exit 3; }
 
 EA_CFG="$("${SCRIPT_DIR}/ea-config.sh" dump)"; export EA_CFG
 cfg()  { printf '%s\n' "$EA_CFG" | awk -F= -v k="$1" '$1==k {sub(/^[^=]*=/,""); print; exit}'; }
@@ -110,14 +107,14 @@ fi
 JIRA_SITE="$(cfg agent.jira.site)"
 JIRA_EMAIL="$(cfg agent.jira.email)"
 JIRA_API_BASE="$(cfg agent.jira.api_base)"; JIRA_API_BASE="${JIRA_API_BASE:-/rest/api/2}"
-[ -n "$JIRA_SITE" ]  || { log "poll-jira: agent.jira.site is not set; leaving Jira to the model"; exit 3; }
-[ -n "$JIRA_EMAIL" ] || { log "poll-jira: agent.jira.email is not set; leaving Jira to the model"; exit 3; }
+[ -n "$JIRA_SITE" ]  || { log "poll-jira: agent.jira.site is not set; skipping"; exit 3; }
+[ -n "$JIRA_EMAIL" ] || { log "poll-jira: agent.jira.email is not set; skipping"; exit 3; }
 JIRA_SITE="${JIRA_SITE#https://}"; JIRA_SITE="${JIRA_SITE#http://}"; JIRA_SITE="${JIRA_SITE%/}"
 
 JIRA_TOKEN="$(ea_secret_resolve "$(cfg agent.jira.api_token_env)" "$(cfg agent.jira.api_token_file)" \
                                 "$(ea_secret_service jira)" "$JIRA_EMAIL")"
 if [ -z "$JIRA_TOKEN" ]; then
-  log "poll-jira: no Jira API token available (checked env/file/keychain); leaving Jira to the model"
+  log "poll-jira: no Jira API token available (checked env/file/keychain); skipping"
   exit 3
 fi
 [ "$CHECK" -eq 1 ] && exit 0   # --check: every precondition above passed; no network, no state
@@ -128,7 +125,7 @@ fi
 
 JIRA_FIELDS='["summary","description","issuetype","components","labels","status","priority","updated"]'
 
-state_load
+state_load || exit 2   # no state file: a usage error, never a run against shared state
 
 # --- Phase 1: the deduplicated per-KEY query map ----------------------------------------------
 # Keyed by Jira project key, NOT by engineer-agent project. In a real config six projects watch the
@@ -188,7 +185,7 @@ if [ -n "$ASSIGNEE_LIST" ]; then
   else
     # A failed bootstrap must NOT silently fall back to +00:00 on an account that is not UTC — that
     # is the exact silent-empty-window bug. Refuse the run and let the model poll Jira instead.
-    log "poll-jira: timezone bootstrap failed (HTTP ${code}); leaving Jira to the model"
+    log "poll-jira: timezone bootstrap failed (HTTP ${code}); skipping"
     log "poll-jira: $(head -c 300 "$TMPD/tz.json" 2>/dev/null)"
     exit 3
   fi
@@ -379,7 +376,7 @@ while IFS= read -r jkey; do
       fi
     fi
 
-    # --- priority mapping (poll-jira step 5d) --------------------------------------------
+    # --- priority mapping --------------------------------------------
     case "$(printf '%s' "$jprio" | tr '[:upper:]' '[:lower:]')" in
       highest|high) prio="urgent" ;;
       low|lowest)   prio="low" ;;
@@ -462,7 +459,6 @@ printf 'Found %d Jira ticket(s). %d routed (of which %d investigations), %d unro
 if [ -n "$SKIPPED_IDS" ]; then
   printf 'Skipped (terminal): %s\n' "$SKIPPED_IDS"
 fi
-# A partial failure must not look like a clean run: cron-poll.sh keys "was this source scripted?"
-# off the exit status, so a key that errored has to leave Jira to the model this cycle.
+# A partial failure must not look like a clean run: a key that errored makes the job's run fail.
 [ "$ERRORS" -eq 0 ] || exit 3
 exit 0

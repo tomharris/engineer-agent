@@ -1,14 +1,13 @@
 #!/bin/bash
 # poll-github-prs.sh — deterministic collector for GitHub pull requests needing review.
 #
-# Replaces the mechanical half of skills/poll-github/SKILL.md: fetch, reviewer/label/size filters,
+# Collects for `github` / `watch` jobs: fetch, reviewer/label/size filters,
 # reconciliation, routing, queue-file writing, and state. It does NOT review — the item lands in
 # queue/incoming/ and the manifest names it for the drafting phase.
 #
-# THE BIG DIFFERENCE FROM THE SKILL: poll-github step 3c has the poll run `gh pr view` and
-# `gh pr diff` and generate a full structured review INLINE, for every PR, on every poll. That is
-# the single most expensive thing the poll does, and it is pure waste on a poll that finds a PR
-# already sitting in drafts/. Here the diff is never fetched during collection; it is read once, by
+# THE BIG DIFFERENCE FROM THE OLD MODEL POLL: it ran `gh pr view` and `gh pr diff` and generated a
+# full structured review INLINE, for every PR, on every poll, which is pure waste on a poll that
+# finds a PR already sitting in drafts/. Here the diff is never fetched during collection; it is read once, by
 # the drafting phase, only for PRs that actually need a new review.
 #
 # Like poll-github-issues.sh this uses `gh --jq` (gh's embedded jq engine) and adds no dependency.
@@ -57,7 +56,7 @@ while [ $# -gt 0 ]; do
 done
 
 # Resume sweep scope: a --project run re-emits only its own source and types, so concurrent jobs
-# never claim the same stranded file. The global poll (no --project) keeps the unscoped sweep.
+# never claim the same stranded file. Without --project the sweep is unscoped.
 RESUME_ARGS=()
 if [ -n "$ONLY_PROJECT" ]; then
   RESUME_ARGS=(--project "$ONLY_PROJECT" --source github --type pr-review)
@@ -114,7 +113,7 @@ if [ ! -s "$REPOS" ]; then
   exit 0
 fi
 
-state_load
+state_load || exit 2   # no state file: a usage error, never a run against shared state
 FOUND=0; ROUTED=0; UNROUTED=0; SKIPPED=0; UNCHANGED=0; TOOBIG=0; RESUMED=0
 SKIPPED_IDS=""
 

@@ -7,10 +7,8 @@
 #   - EXACT type matching. review-queue.md says "Match filters against the frontmatter type
 #     exactly, never as a prefix", because `--type ticket` must not sweep up ticket-plan,
 #     ticket-refinement or ticket-investigation.
-#   - The receipt reading rules: status ok + items_queued 0 is HEALTHY, and a non-empty `skipped:`
-#     list is NORMAL and must never be reported as a problem. Getting this wrong turns every quiet
-#     poll into a false alarm — the exact failure the sha256-fingerprint health check caused before
-#     2501ecf replaced it.
+#   - Discovery coverage: a configured source with no runnable watch job is UNCOVERED, and with no
+#     jobs at all status says nothing discovers new work.
 #
 # Run: bash tests/queue-ops.test.sh
 set -uo pipefail
@@ -118,45 +116,23 @@ eq "stranded"       "1" "$(jget stranded)"
 SOUT="$("$STATUS")"
 if printf '%s' "$SOUT" | grep -q 'WARNING: 1 item'; then ok "stranded item is surfaced as a warning"; else bad "stranded item must warn"; fi
 
-echo "== queue-status: receipt interpretation =="
-cat > "$EA_AGENT_DIR/state/last-poll-receipt.yaml" <<'EOF'
-run_id: "20260825T150000Z-1"
-finished_at: "2026-08-25T15:00:00Z"
-status: ok
-items_queued: 0
-sources_polled:
-  - alpha/github
-skipped:
-  - "alpha/jira: tracker is github-issues, no jira section"
-  - "alpha/slite: no slite section configured"
-errors: []
-EOF
-OUT="$("$STATUS")"
-if printf '%s' "$OUT" | grep -q 'status=ok, items_queued=0'; then ok "ok + 0 items reported plainly"; else bad "receipt line wrong"; fi
-if printf '%s' "$OUT" | grep -q '2 source(s) skipped'; then ok "skipped counted"; else bad "skipped count wrong"; fi
-# A quiet, fully-successful poll must produce NO problem line. This is the false-alarm failure mode.
-if printf '%s' "$OUT" | grep -q 'PROBLEM'; then bad "a healthy quiet poll must not report a PROBLEM"; else ok "healthy quiet poll is silent"; fi
-
+echo "== queue-status: no jobs, and a left-over global-poll receipt is ignored =="
 cat > "$EA_AGENT_DIR/state/last-poll-receipt.yaml" <<'EOF'
 run_id: "x"
 finished_at: "2026-08-25T15:00:00Z"
 status: partial
 items_queued: 0
-sources_polled: []
-skipped: []
 errors:
   - "alpha/github: gh auth failed"
 EOF
-OUT="$("$STATUS")"
-if printf '%s' "$OUT" | grep -q 'PROBLEM: 1 configured source'; then ok "errors surfaced"; else bad "errors must be surfaced"; fi
-if printf '%s' "$OUT" | grep -q 'gh auth failed'; then ok "error text inlined"; else bad "error text must be shown"; fi
-if printf '%s' "$OUT" | grep -q 'PROBLEM: poll status is partial'; then ok "partial status flagged"; else bad "partial must be flagged"; fi
-eq "json errors count" "1" "$("$STATUS" --json | sed -n 's/.*"errors":\([0-9]*\).*/\1/p')"
-
-echo "== queue-status: no receipt at all =="
-rm -f "$EA_AGENT_DIR/state/last-poll-receipt.yaml"
+printf 'projects:\n  alpha:\n    github:\n      last_checked: "2026-08-25T15:00:00Z"\n' > "$EA_AGENT_DIR/state/last-poll.yaml"
 SOUT="$("$STATUS")"
-if printf '%s' "$SOUT" | grep -q 'No receipt'; then ok "missing receipt reported"; else bad "missing receipt must be reported"; fi
+has_line() { printf '%s\n' "$SOUT" | grep -qxF -- "$1"; }
+if has_line "No scheduled jobs — nothing discovers new work. Add watch jobs: scripts/migrate-poll-to-jobs.sh"; then
+  ok "no jobs: says nothing discovers new work"; else bad "no-jobs line missing"; fi
+case "$SOUT" in *"gh auth failed"*|*"Global poll"*|*"receipt"*) bad "legacy poll files must be ignored" ;; *) ok "legacy poll files ignored" ;; esac
+case "$("$STATUS" --json)" in *'"receipt"'*) bad "json still carries the legacy receipt" ;; *) ok "json has no receipt object" ;; esac
+rm -f "$EA_AGENT_DIR/state/last-poll-receipt.yaml" "$EA_AGENT_DIR/state/last-poll.yaml"
 
 echo "== queue-status: discovery reads job state =="
 JA="$TMP/jobs-agent"; JS="$JA/state/jobs"
@@ -222,17 +198,11 @@ esac
 eq "unconfigured sources are not listed" "" "$(line 'beta / slack')"
 eq "job health aggregate" "Job health: 2 ok, 0 partial, 0 error, 1 paused, 0 invalid, 0 never run" "$(line 'Job health:' | sed 's/^ *//')"
 eq "paused job listed with its error" "alpha.sw paused: slack auth expired" "$(line 'alpha.sw paused:' | sed 's/^ *//')"
-case "$JOUT" in *"No receipt"*) bad "jobs configured: a missing global-poll receipt is not a problem" ;; *) ok "no legacy receipt section without a legacy receipt" ;; esac
+case "$JOUT" in *"No scheduled jobs"*) bad "jobs configured: no 'no jobs' line" ;; *) ok "jobs configured: no 'no jobs' line" ;; esac
 JJ="$(EA_AGENT_DIR="$JA" "$STATUS" --json)"
 eq "json job counts" '"jobs":{"ok":2,"partial":0,"error":0,"paused":1,"invalid":0,"never":0}' \
   "$(printf '%s' "$JJ" | grep -o '"jobs":{[^}]*}')"
 eq "json uncovered count" "2" "$(printf '%s' "$JJ" | sed -n 's/.*"uncovered":\([0-9]*\).*/\1/p')"
-
-printf 'projects:\n  alpha:\n    jira:\n      last_checked: "2026-11-09T06:00:00Z"\n' > "$JA/state/last-poll.yaml"
-case "$(EA_AGENT_DIR="$JA" "$STATUS")" in
-  *"Global poll (legacy)"*) ok "legacy last-poll.yaml labelled as the legacy global poll" ;;
-  *) bad "legacy section must be labelled" ;;
-esac
 
 echo
 echo "Passed: $PASS  Failed: $FAIL"

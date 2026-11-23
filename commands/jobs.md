@@ -7,8 +7,8 @@ allowed-tools: ["Bash", "Read"]
 # Engineer Agent: Scheduled Jobs
 
 Scheduled jobs are defined under `projects.<slug>.jobs` in `~/.local/share/engineer-agent/engineer.yaml`
-and dispatched every minute by `scripts/jobs-tick.sh` (installed with `scripts/install-jobs.sh`). They
-run alongside the global poll, not instead of it.
+and dispatched every minute by `scripts/jobs-tick.sh` (installed with `scripts/install-jobs.sh`).
+`watch` jobs are the only discovery path.
 
 If the config file is missing, tell the user to run `/engineer-agent setup` and stop.
 

@@ -133,8 +133,8 @@ followed by the script's output **verbatim** (it is already indented for that po
 hand-write or alter job entries. Then run `${CLAUDE_PLUGIN_ROOT}/scripts/jobs-ctl.sh list` and
 report any job it marks `invalid`.
 
-On no, say that `/engineer-agent status` will list its sources as UNCOVERED: only the legacy
-global poll (while installed) or a manual `/engineer-agent poll` will discover work for it.
+On no, say that `/engineer-agent status` will list its sources as UNCOVERED: nothing discovers
+work for it until it has watch jobs (re-run `scripts/jobs-default-watch.sh {slug}` later).
 
 ### 7. Print Summary
 
@@ -149,5 +149,5 @@ Project "{slug}" registered!
   Jobs:    {ids of the watch jobs added | none}
 
 {If jobs were added:} Run `/engineer-agent jobs` to see when each runs next.
-{Otherwise:} Run `/engineer-agent poll` to check this project's sources by hand.
+{Otherwise:} Nothing will discover work for this project until it has watch jobs.
 ```

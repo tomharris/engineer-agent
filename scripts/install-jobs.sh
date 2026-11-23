@@ -1,10 +1,8 @@
 #!/bin/bash
 # install-jobs.sh — install the scheduled-jobs dispatcher (scripts/jobs-tick.sh) to fire every 60s.
 #
-# Separate from install-cron.sh: jobs run ALONGSIDE the global poll, and each can be installed or
-# removed without touching the other. Same platform split and for the same reason (see
-# install-cron.sh): macOS uses a gui-session LaunchAgent so `claude` can read the login keychain;
-# Linux uses crontab.
+# macOS uses a gui-session LaunchAgent so `claude` can read the login keychain (a crontab job runs
+# outside the GUI session and fails with "Not logged in"); Linux uses crontab.
 #
 # The tick itself is cheap (a config read when nothing is due); per-job cadence comes from
 # projects.<slug>.jobs[].every, not from this schedule.

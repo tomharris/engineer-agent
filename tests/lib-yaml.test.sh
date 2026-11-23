@@ -139,7 +139,7 @@ if yaml_has_list projects.alpha.github.ignore_labels "$FIX"; then ok "empty flow
 
 echo "== block sequences of MAPPINGS (jira.sources) =="
 # Previously refused outright: such an item emitted "[]#map-unsupported" because nothing read
-# jira.sources while Jira polling was model-driven. scripts/poll-jira.sh reads it now.
+# jira.sources back when Jira polling was model-driven. scripts/poll-jira.sh reads it now.
 #
 # The property that matters is PAIRING. `sources` is a set whose elements each carry their own
 # filters, and an N:M routing config depends on those staying attached to the right project key —

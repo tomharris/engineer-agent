@@ -1,6 +1,6 @@
 #!/bin/bash
 # jobs-tick.sh — scheduled-job dispatcher. Run every 60s by the engineer-agent-jobs scheduler entry
-# (scripts/install-jobs.sh); runs alongside, and independently of, scripts/cron-poll.sh.
+# (scripts/install-jobs.sh).
 #
 # Each tick: enumerate projects.<slug>.jobs, and for each valid, unpaused job that is inside its
 # hours/days window and due (now >= last_run + every), launch it in the background. A tick with
@@ -157,11 +157,11 @@ ROWS="$(jobs_enumerate)"
 
 NOW="$(jobs_now)"
 PIDS=()
-while IFS='|' read -r slug idx id integ action every hours days watch excl sup budget pause; do
+while IFS='|' read -r slug idx id integ action every hours days watch sup budget pause; do
   [ -n "$slug" ] || continue
   key="$(job_key "$slug" "$id")"
   [ -z "$ONLY" ] || [ "$ONLY" = "$key" ] || continue
-  row="${slug}|${idx}|${id}|${integ}|${action}|${every}|${hours}|${days}|${watch}|${excl}|${sup}|${budget}|${pause}"
+  row="${slug}|${idx}|${id}|${integ}|${action}|${every}|${hours}|${days}|${watch}|${sup}|${budget}|${pause}"
   if reason="$(jobs_validate "$row" "$ROWS")"; then
     rm -f "$(job_path "$key" invalid)"
   else

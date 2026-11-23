@@ -282,19 +282,8 @@ cd /path/to/my-project
 /engineer-agent add-project
 ```
 
-### `/engineer-agent poll [source] [--project <slug>]`
-
-Fetch new work items from configured sources.
-
-```
-/engineer-agent poll                     # Poll all sources, all projects
-/engineer-agent poll github              # Poll GitHub PRs only, all projects
-/engineer-agent poll github-issues       # Poll GitHub Issues only, all projects
-/engineer-agent poll --project my-api    # Poll all sources, one project
-/engineer-agent poll slack --project my-api  # Poll Slack, one project
-```
-
-New items are detected, drafted, and placed in the review queue.
+Discovery is scheduled `watch` jobs (`/engineer-agent jobs`); there is no manual poll command. To
+check a project now, run one of its watch jobs: `/engineer-agent jobs run <project>.<id>`.
 
 ### `/engineer-agent add-ticket <ref> [--project <slug>] [--no-draft] [--investigate|--implement]`
 
@@ -579,15 +568,10 @@ duplicate you have not dealt with is never silently forgotten.
 
 ### Skills
 
-Skills are auto-invoked during polling and processing:
+Skills are auto-invoked while drafting and processing queue items:
 
 | Skill | Trigger | What it does |
 |-------|---------|-------------|
-| `poll-github` | `/engineer-agent poll` | Finds PRs requesting your review (all projects) |
-| `poll-slack` | `/engineer-agent poll` | Finds unanswered questions matching keywords (all projects) |
-| `poll-jira` | `/engineer-agent poll` | Finds assigned Jira tickets in target statuses (projects with tracker: jira) |
-| `poll-github-issues` | `/engineer-agent poll` | Finds assigned GitHub issues (projects with tracker: github-issues) |
-| `poll-slite` | `/engineer-agent poll` | Finds docs tagged for review (all projects) |
 | `review-pr` | New PR detected | Generates structured review with severity levels |
 | `answer-slack` | New question detected | Drafts answer with confidence level |
 | `implement-ticket` | Ticket approved | Implements Jira or GitHub Issue on feature branch, runs tests, self-reviews the diff before the draft PR |
@@ -1205,7 +1189,6 @@ Self-review found 2 Important issues; fixed both and re-ran tests. Opening draft
 commands/
   setup.md                     /engineer-agent setup command
   add-project.md               /engineer-agent add-project command
-  poll.md                      /engineer-agent poll command
   add-ticket.md                /engineer-agent add-ticket command
   review-queue.md              /engineer-agent review-queue command
   execute.md                   /engineer-agent execute command (headless approve/reject)
@@ -1218,7 +1201,6 @@ commands/
   audit-gaps.md                /engineer-agent audit-gaps command
   qa.md                        /engineer-agent qa command
 scripts/
-  cron-poll.sh                 Scheduled headless poll
   ea-config.sh                 Normalizes engineer.yaml to a flat, greppable view
   poll-github-issues.sh        Deterministic GitHub Issues collector
   poll-github-prs.sh           Deterministic GitHub PR collector
@@ -1233,11 +1215,6 @@ scripts/
 tests/
   run-all.sh                   Runs every test suite
 skills/
-  poll-github/SKILL.md         GitHub polling
-  poll-slack/SKILL.md          Slack polling
-  poll-jira/SKILL.md           Jira polling
-  poll-github-issues/SKILL.md  GitHub Issues polling
-  poll-slite/SKILL.md          Slite polling
   review-pr/SKILL.md           PR review generation
   answer-slack/SKILL.md        Slack answer drafting
   implement-ticket/SKILL.md    Ticket implementation
@@ -1253,16 +1230,15 @@ skills/
   generate-qa/SKILL.md         QA test plan generation
   execute-item/SKILL.md        Shared approve/reject action logic (terminal + remote)
 references/
-  routing-ladder.md            Shared ticket→project routing logic (poll-jira, poll-github-issues, add-ticket)
+  routing-ladder.md            Shared ticket→project routing logic (collectors, jobs-draft, add-ticket)
   ticket-kind.md               Shared code-work vs investigation logic (same callers + review-queue)
+  drafting.md                  How to draft each item type; ticket plan templates (jobs-draft, add-ticket)
   queue-reconciliation.md      Shared skip/update/create rule every poller follows
   epistemics.md                Confidence tiers for evidence-based answers (answer-slack, investigate-ticket)
   writing-style.md             Style rules for posted text (drafting skills, draft-lint.sh)
 hooks/
   hooks.json                   Claude Code hook registrations (turn-completion pushes)
 scripts/
-  cron-poll.sh                 Cron polling script
-  install-cron.sh              Cron setup script
   jobs-tick.sh                 Scheduled-jobs dispatcher (every 60s)
   install-jobs.sh              Installs the scheduled-jobs dispatcher
   migrate-poll-to-jobs.sh      Replaces the global poll with per-project watch jobs (dry run unless --apply)

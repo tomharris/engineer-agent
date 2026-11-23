@@ -2,14 +2,14 @@
 # lib-time.sh — timestamp helpers for the scripted pollers.
 #
 # WHY A LIBRARY FOR SOMETHING THIS SMALL: `date -d "<iso>" +%s` is GNU-only. This plugin installs
-# its poll as a launchd LaunchAgent on macOS (install-cron.sh branches on `uname` = Darwin), where
+# its jobs dispatcher as a launchd LaunchAgent on macOS (install-jobs.sh branches on `uname`), where
 # `date` is BSD and needs `date -j -f <fmt>`. A GNU-only call site does not error out usefully on
 # macOS — it prints a usage message to stderr and returns empty, so an age filter silently compares
 # against 0 and every issue looks ancient (or brand new, depending on the comparison). Branch on the
 # platform ONCE, here, instead of at each call site.
 #
 # All functions speak ISO-8601 UTC ("2026-08-25T14:00:01Z"), the format already used throughout
-# state/last-poll.yaml and every queue item's created_at.
+# the job state files and every queue item's created_at.
 
 # _ea_date_flavor — "gnu" or "bsd", probed once and cached.
 _ea_date_flavor() {

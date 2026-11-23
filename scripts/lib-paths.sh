@@ -11,7 +11,7 @@
 # that is routing around a safety mechanism, not a fix.)
 #
 # The guard is invisible interactively, because a human is present to approve the prompt.
-# It is fatal headlessly: cron-poll.sh and approval-listener.sh have nobody to ask, so a
+# It is fatal headlessly: the scheduled runs and approval-listener.sh have nobody to ask, so a
 # denied write just... does nothing. Both ran for a month doing exactly nothing -- the
 # cron polled every 15 minutes and could never record state or queue an item.
 #
@@ -28,8 +28,7 @@ EA_CONFIG_FILE="${EA_AGENT_DIR}/engineer.yaml"
 # but NOT USER, and the Claude Code CLI keys its credential lookup on $USER -- a missing
 # USER yields "Not logged in - Please run /login" even when valid credentials are present
 # and work interactively (this silently broke every cron poll after a CLI update changed
-# credential resolution to depend on $USER). Same class of bug as the minimal-PATH guard
-# in cron-poll.sh. Derive it at runtime rather than capturing it at install time: unlike
+# credential resolution to depend on $USER). Same class of bug as cron's minimal PATH. Derive it at runtime rather than capturing it at install time: unlike
 # CLAUDE_BIN (a user choice), USER is always recoverable via `id -un`.
 export USER="${USER:-$(id -un)}"
 export LOGNAME="${LOGNAME:-$USER}"
@@ -55,9 +54,9 @@ EA_LEGACY_AGENT_DIR="${HOME}/.claude/engineer-agent"
 # NOT the dev repo. The model then EXPANDS that variable to this absolute path before Bash ever
 # sees it. So a headless `--allowedTools` rule for a plugin script (slack-mcp.sh) must match this
 # expanded cache path, not the dev-repo path nor the unexpanded `${CLAUDE_PLUGIN_ROOT}` literal.
-# cron-poll.sh / approval-listener.sh allowlist the shim for BOTH this root and their own
+# lib-poll-allowlist.sh / approval-listener.sh allowlist the shim for BOTH this root and their own
 # script-derived PLUGIN_ROOT so whichever one the runtime resolves, a rule matches. See the
-# "mcp-proxy gotcha" note in cron-poll.sh and CLAUDE.md.
+# "mcp-proxy gotcha" note in lib-poll-allowlist.sh.
 resolve_installed_plugin_root() {
   local base="${CLAUDE_CONFIG_DIR:-${HOME}/.claude}/plugins/cache/engineer-agent/engineer-agent"
   [ -d "$base" ] || return 0
@@ -73,8 +72,8 @@ resolve_installed_plugin_root() {
 # (resolve_installed_plugin_root, when marketplace-installed), AND this marketplace-checkout dir
 # — the last one observed emitting `.../marketplaces/engineer-agent/scripts/slack-mcp.sh read …`
 # and getting DENIED because the allowlist covered only the first two. The shim allowlist in
-# cron-poll.sh / approval-listener.sh must cover all three candidate roots so whichever one the
-# runtime resolves, a rule matches. See the "mcp-proxy gotcha" note in cron-poll.sh and CLAUDE.md.
+# lib-poll-allowlist.sh / approval-listener.sh must cover all three candidate roots so whichever
+# one the runtime resolves, a rule matches. See the "mcp-proxy gotcha" note in lib-poll-allowlist.sh.
 resolve_marketplace_plugin_root() {
   local dir="${CLAUDE_CONFIG_DIR:-${HOME}/.claude}/plugins/marketplaces/engineer-agent"
   [ -d "$dir" ] && [ -f "$dir/scripts/slack-mcp.sh" ] && printf '%s\n' "$dir"
@@ -284,7 +283,7 @@ resolve_real_path() {
   local p="$1" n=0 target dir
   [ -n "$p" ] || return 1
   # A bare command name (no slash) must be resolved through PATH first. CLAUDE_BIN is normally
-  # already absolute (`command -v claude`), but install-cron.sh/install-listener.sh bake in
+  # already absolute (`command -v claude`), but install-jobs.sh/install-listener.sh bake in
   # whatever CLAUDE_BIN held at install time — and a bare name would otherwise be returned
   # verbatim, so the record could never change and the preflight would silently never fire.
   case "$p" in
@@ -383,8 +382,8 @@ with_timeout() {
   return "$rc"
 }
 
-# phase_a_error <source> <message> — record a Phase A collector failure. cron-poll.sh exports
-# EA_PHASE_A_ERRORS and merges these into the receipt's errors:, so a collector that logs an error
+# phase_a_error <source> <message> — record a Phase A collector failure. job-watch.sh exports
+# EA_PHASE_A_ERRORS and the tick merges these into the job receipt's errors:, so a collector that logs an error
 # and carries on (exit 0) still shows up as status: partial rather than ok.
 phase_a_error() {
   [ -n "${EA_PHASE_A_ERRORS:-}" ] || return 0

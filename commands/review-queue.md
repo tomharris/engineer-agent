@@ -37,7 +37,7 @@ Pass `--type` / `--project` through from `$ARGUMENTS`. The script enumerates `dr
 relative ages. **Do not re-derive any of that** — in particular do not re-implement the type
 filter, which must match the frontmatter `type` **exactly and never as a prefix** (otherwise
 `--type ticket` sweeps up `ticket-plan`, `ticket-refinement` and `ticket-investigation`). Empty
-output means "No items to review. Run `/engineer-agent poll` to check for new work."
+output means "No items to review. Run `/engineer-agent jobs run <project>.<id>` to run a watch job now."
 
 `--tsv` gives the same rows machine-readably: `unrouted_rank`, `priority_rank`, `created_at`,
 `filename`, `type`, `project`, `priority`, `source_id`, `title`. Use it when you need the filename

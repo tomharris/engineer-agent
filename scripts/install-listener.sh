@@ -3,7 +3,7 @@
 # so ntfy phone approvals are acted on in near-real-time and survive reboots/crashes.
 #
 # Prefers a systemd user service; falls back to a nohup-managed background process on
-# hosts without systemd. Companion to install-cron.sh.
+# hosts without systemd. Companion to install-jobs.sh.
 
 set -euo pipefail
 

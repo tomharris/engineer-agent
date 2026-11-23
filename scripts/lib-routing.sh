@@ -158,7 +158,7 @@ _rt_jira_tier2() {
 # route_candidates_slite <labels-file> — Tier 0 for Slite docs. Every project whose configured
 # slite.doc_labels intersect the labels this document actually carries.
 #
-# skills/poll-slite/SKILL.md iterates PER PROJECT and queues a matching doc for each, which is the
+# The old poll-slite skill iterated PER PROJECT and queued a matching doc for each, which is the
 # shared-repo trap in a different costume: in a real config all six projects set
 # doc_labels: ["needs-review"], so the global source_id dedup would hand each doc to whichever
 # project the loop reached first — an arbitrary assignment that looks like a decision, with no
@@ -182,7 +182,7 @@ route_candidates_slite() {
 # contains this channel.
 #
 # CHANNELS ARE THE CANDIDATE SET, KEYWORDS ARE TIER 2 — and that split is the whole reason this
-# helper exists. skills/poll-slack/SKILL.md iterates per project and queues a matching message for
+# helper exists. The old poll-slack skill iterated per project and queued a matching message for
 # each, which is the shared-repo trap in its third costume: two projects watching #eng-general with
 # different keyword lists both match a message mentioning both, and the global source_id dedup then
 # awards it to whichever project the loop reached first. Collecting each channel ONCE and routing

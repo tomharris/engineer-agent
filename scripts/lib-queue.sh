@@ -168,7 +168,7 @@ queue_disposition() {
 # self-healing on the next 15-minute tick instead of permanent and invisible.
 #
 # Usage: poll_resume_candidates [--project <slug> [--unrouted]] [--source <s>] [--type <t>]...
-# No filters = every stranded item (the global poll, `status`). A watch job scopes the sweep to its
+# No filters = every stranded item (`status`). A watch job scopes the sweep to its
 # own project, source and types, or every concurrent job would re-emit the same file. --unrouted
 # also keeps _unrouted / project-less items; the caller passes it from exactly one job.
 poll_resume_candidates() {

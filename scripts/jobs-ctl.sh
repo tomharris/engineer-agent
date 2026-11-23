@@ -28,14 +28,14 @@ known_key() {
 fmt_epoch() { [ -n "$1" ] && _jobs_local "$1" '%Y-%m-%d %H:%M' || printf -- '-'; }
 
 cmd_list() {
-  local rows slug idx id integ action every hours days watch excl sup budget pause key state next last rstat
+  local rows slug idx id integ action every hours days watch sup budget pause key state next last rstat
   rows="$(jobs_enumerate)"
   [ -n "$rows" ] || { echo "No scheduled jobs configured."; return 0; }
   printf '%-32s %-16s %-6s %-12s %-26s %s\n' JOB KIND EVERY STATE "LAST RUN" "NEXT DUE"
-  while IFS='|' read -r slug idx id integ action every hours days watch excl sup budget pause; do
+  while IFS='|' read -r slug idx id integ action every hours days watch sup budget pause; do
     [ -n "$slug" ] || continue
     key="$(job_key "$slug" "$id")"
-    row="${slug}|${idx}|${id}|${integ}|${action}|${every}|${hours}|${days}|${watch}|${excl}|${sup}|${budget}|${pause}"
+    row="${slug}|${idx}|${id}|${integ}|${action}|${every}|${hours}|${days}|${watch}|${sup}|${budget}|${pause}"
     if reason="$(jobs_validate "$row" "$rows")"; then
       if job_is_paused "$key"; then state=paused
       elif [ -f "$(job_path "$key" lock)" ] && kill -0 "$(cat "$(job_path "$key" lock)")" 2>/dev/null; then state=running

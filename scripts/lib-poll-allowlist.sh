@@ -1,9 +1,35 @@
 #!/bin/bash
 # lib-poll-allowlist.sh — the READ-ONLY --allowedTools set for an unattended drafting run.
 #
-# Shared by cron-poll.sh and jobs-draft.sh so the two cannot drift: an allowlist that differs by one
-# rule is how every past silent poll outage started (see cron-poll.sh's gotcha list). The rationale
-# for each rule lives in cron-poll.sh's comment block above its `claude -p` call.
+# Used by jobs-draft.sh (and any future unattended drafting run) so no copy can drift: an allowlist
+# that differs by one rule is how every past silent poll outage started.
+#
+# READ-ONLY by design. Drafting ingests untrusted text (PR/issue bodies, Slack messages), so a
+# prompt-injection payload must not reach a write verb: `gh pr create/review`, `gh issue create`,
+# `gh api` (`-X POST` writes), the Slack `send` verb and every Jira/Slite write tool stay unmatched,
+# and anything unmatched fails non-interactively. `gh` is not one of Claude Code's built-in
+# read-only commands, so without these rules it prompts in every mode, and a prompt in `-p` is a
+# denial.
+#
+# Gotchas, each of which silently broke a real run:
+#   1. Bash rules match the literal command text; a `~/`-prefixed pattern misses the absolute paths
+#      the model writes.
+#   2. Edit(...), never Write(...): the CLI rejects Write(path) rules, and one Edit rule covers every
+#      file-editing tool.
+#   3. `//abs` anchors at the filesystem root; a single `/` anchors to the cwd. AGENT_DIR is
+#      absolute, hence "Edit(/${AGENT_DIR}/**)".
+#   4. MCP tools are denied unless named, like `gh`. Only the Jira/Slite READ tools are listed.
+#   5. Allowlist the read-only PREFLIGHTS (`gh auth status`, `gh --version`, Slack `auth`). A denied
+#      probe makes the model conclude the whole CLI is unavailable and abort every source without
+#      trying the allowed verbs (2026-07-24: five polls in a row, all GitHub sources "errored").
+#
+# Slack verbs are keyed off the effective binary, resolved in bash from agent.slack.method: `spy`,
+# or the bundled scripts/slack-mcp.sh for mcp-proxy (one Bash invocation, so its curl/jq/security
+# subprocesses need no rule). mcp-proxy gotcha: the model expands ${CLAUDE_PLUGIN_ROOT} itself
+# before calling Bash, and a marketplace install shadows --plugin-dir, so the path it calls may be
+# the installed cache root rather than PLUGIN_ROOT. The shim is allowlisted under every candidate
+# root (resolve_installed_plugin_root, resolve_marketplace_plugin_root) and in both the bare and
+# `bash `-prefixed form.
 #
 # poll_build_allowlist — sets the globals SLACK_METHOD, SLACK_BIN and the array allowed_tools.
 # Requires PLUGIN_ROOT, AGENT_DIR and lib-paths.sh.
