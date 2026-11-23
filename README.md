@@ -1031,7 +1031,7 @@ or via Approve), `scripts/pr-pipeline.sh` runs detached:
    (timeout `qa.script.timeout`, default 10m), with the same scrubbed env plus `QA_BASE_URL`, after
    the auth headers are deleted; the script signs in itself. A script over 64 KiB or naming any web
    address but the served URL is refused. The script is published verbatim in the Slite note and,
-   for Jira, attached to the ticket as `qa-<KEY>.sh` (where `cr-qa` picks up QA scripts); its
+   for Jira and only when it passed, attached to the ticket as `qa-<KEY>.sh` (where `cr-qa` picks up QA scripts); its
    output stays in `state/pr-pipeline/<item>/qa/script.out`. A failed or refused script stops like a
    failed check. This also executes model-written code, so it is opt-in. `qa.server` takes the same `setup`, `serve`,
    `url`, `ready_timeout` keys plus `setup_timeout` and `insecure`; its `url` host is pinned to

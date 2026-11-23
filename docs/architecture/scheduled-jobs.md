@@ -345,13 +345,16 @@ security → CI → browser → QA → ready → transition → announce. Things
   scripted section empty and every criterion manual (AIA-730). With `qa.script.enabled: true` the
   plan adds a `## QA Script` bash block; bash extracts it (the first fence under that heading, so a
   `## ` comment inside does not end it), refuses one over 64 KiB or naming any web address but the
-  served URL (it is published), and runs it from the worktree while the branch is served, under
+  served URL or that URL followed by `@` (it is published), and runs it from the worktree while the branch is served, under
   `with_timeout` with the `qa_unit` env plus `QA_BASE_URL`. The auth headers file is deleted first:
   the script signs in on its own, which keeps it runnable by a reviewer who has no adapter. Residual,
   accepted: as `qa.unit`, plus the served app is reachable. The script is published verbatim in the
-  Slite note inside a fence longer than any backtick run in it, and attached to the Jira ticket as
-  `qa-<KEY>.sh`, the form `cr-qa` takes QA scripts in; only pass/fail counts reach the comments,
-  and the output stays in `state/pr-pipeline/<item>/qa/script.out`. A re-run attaches another copy.
+  Slite note inside a fence longer than any backtick run in it and, only when it passed, attached
+  to the Jira ticket as `qa-<KEY>.sh`, the form `cr-qa` takes QA scripts in. That upload is under a
+  trusted account, so `cr-qa` will run it: a failing or refused script is never attached. The
+  script runs as you and could rewrite any file, so bash keeps the checked text in memory, runs a
+  private copy of it and publishes only that text. Only pass/fail counts reach the comments, and
+  the output stays in `state/pr-pipeline/<item>/qa/script.out`. A re-run attaches another copy.
 - **QA checks have their own server, and auth is a name, not a credential.** `qa.server` serves the
   branch for the checks without turning on the Chrome browser test (it falls back to `browser`).
   Its `url` may name any host, because bash pins that host to 127.0.0.1 with `--resolve`; `insecure`

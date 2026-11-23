@@ -445,7 +445,7 @@ ${unit_rule}End the file with the line 'QA-NONCE: ${nonce}'. ${NO_MEMORY_RULE} B
     cleanup; stop "QA run produced no plan"
   fi
   QA_MANUAL="$(_section "$plan" "Manual Checklist" | grep -c '^- \[ \]')"
-  QA_PASS=0 QA_FAIL=0 QA_UNIT="" QA_UNIT_STOP="" QA_SCRIPT="" QA_SCRIPT_STOP=""
+  QA_PASS=0 QA_FAIL=0 QA_UNIT="" QA_UNIT_STOP="" QA_SCRIPT="" QA_SCRIPT_STOP="" QA_SCRIPT_TEXT="" QA_SCRIPT_PASSED=0
   _section "$plan" "Scripted Tests" | awk '/^```/ { if (f) exit; f = 1; next } f' > "$D/qa/checks.json"
   jq -e 'type == "array"' "$D/qa/checks.json" >/dev/null 2>&1 || : > "$D/qa/checks.json"
   n="$(jq length "$D/qa/checks.json" 2>/dev/null)"
@@ -459,7 +459,7 @@ ${unit_rule}End the file with the line 'QA-NONCE: ${nonce}'. ${NO_MEMORY_RULE} B
     run_checks=1
   fi
   qa_script_on && qa_script_extract "$plan" "$url"
-  if [ "$run_checks" = 1 ] || [ -s "$D/qa/qa-script.sh" ]; then
+  if [ "$run_checks" = 1 ] || [ -n "$QA_SCRIPT_TEXT" ]; then
     if serve_branch "$srv"; then
       if [ "$run_checks" = 1 ]; then
         qa_auth_headers "$url"
@@ -469,10 +469,10 @@ ${unit_rule}End the file with the line 'QA-NONCE: ${nonce}'. ${NO_MEMORY_RULE} B
       fi
       # Model-written code must not read the auth headers.
       [ -z "$QA_AUTH_DIR" ] || { rm -rf "$QA_AUTH_DIR"; QA_AUTH_DIR=""; }
-      [ ! -s "$D/qa/qa-script.sh" ] || qa_script "$url"
+      [ -z "$QA_SCRIPT_TEXT" ] || qa_script "$url"
     else
       [ "$run_checks" = 0 ] || QA_AUTO="Automated: not executed — ${SERVE_ERR}"
-      [ ! -s "$D/qa/qa-script.sh" ] || QA_SCRIPT="QA script: not executed — ${SERVE_ERR}"
+      [ -z "$QA_SCRIPT_TEXT" ] || QA_SCRIPT="QA script: not executed — ${SERVE_ERR}"
     fi
   fi
   # Model-written tests must not read the auth headers or reach the served app.
@@ -487,8 +487,10 @@ qa_script_on() { [ "$(_arc "$P.qa.script.enabled")" = true ] && [ -n "$(qa_serve
 
 # qa_script_extract <plan> <served-url> — the first ```bash block under "## QA Script" (a "## " line
 # inside the block does not end it) to $D/qa/qa-script.sh. The script is published, so one over
-# 64 KiB, or naming any web address but the served URL, is refused and removed. Sets QA_SCRIPT and
-# QA_SCRIPT_STOP when there is nothing to run.
+# 64 KiB, or naming any web address but the served URL (or that URL followed by "@", which would name
+# another host), is refused and removed. Sets QA_SCRIPT_TEXT to the checked text: the script runs as
+# you and could rewrite any file, so only this in-memory copy is run and published. Sets QA_SCRIPT
+# and QA_SCRIPT_STOP when there is nothing to run.
 qa_script_extract() {
   local f="$D/qa/qa-script.sh"
   awk '$0 == "## QA Script" {h=1; next}
@@ -503,24 +505,27 @@ qa_script_extract() {
     rm -f "$f"; QA_SCRIPT="QA script: refused — over 64 KiB"; QA_SCRIPT_STOP=refused; return
   fi
   if awk -v u="$2" '{ while ((i = index($0, u)) > 0) $0 = substr($0, 1, i - 1) substr($0, i + length(u)); print }' "$f" \
-       | grep -qiE '[a-z][a-z0-9+.-]*://|www\.'; then
-    rm -f "$f"; QA_SCRIPT="QA script: refused — it names a web address other than the served app"; QA_SCRIPT_STOP=refused
+       | grep -qiE '[a-z][a-z0-9+.-]*://|www\.' || grep -qF -- "${2}@" "$f"; then
+    rm -f "$f"; QA_SCRIPT="QA script: refused — it names a web address other than the served app"; QA_SCRIPT_STOP=refused; return
   fi
+  QA_SCRIPT_TEXT="$(cat "$f"; printf x)"; QA_SCRIPT_TEXT="${QA_SCRIPT_TEXT%x}"
 }
 
 # qa_script <served-url> — bash runs the plan's QA script from the worktree root, with an env that
 # holds no credentials (as qa_unit) plus QA_BASE_URL. Model-written code, opt-in (see
-# scheduled-jobs.md). Its output stays in $D/qa/script.out; only the counts are published.
+# scheduled-jobs.md). It runs from a private copy of QA_SCRIPT_TEXT. Its output stays in
+# $D/qa/script.out; only the counts are published. Sets QA_SCRIPT_PASSED=1 when it passed.
 qa_script() {
   local secs tmp rc=0 pass fail
   secs="$(jobs_duration_seconds "$(_arc "$P.qa.script.timeout")")"; secs="${secs:-600}"
   tmp="$(mktemp -d)" || { QA_SCRIPT="QA script: not executed — no temp dir"; QA_SCRIPT_STOP=refused; return; }
+  printf '%s' "$QA_SCRIPT_TEXT" > "$tmp/qa-script.sh"
   ( cd "$WT" && with_timeout "$secs" env -i PATH="$PATH" HOME="$HOME" USER="$USER" LANG="${LANG:-C.UTF-8}" \
-      TMPDIR="$tmp" QA_BASE_URL="$1" bash "$D/qa/qa-script.sh" ) </dev/null > "$D/qa/script.out" 2>&1 || rc=$?
+      TMPDIR="$tmp" QA_BASE_URL="$1" bash "$tmp/qa-script.sh" ) </dev/null > "$D/qa/script.out" 2>&1 || rc=$?
   rm -rf "$tmp"
   pass="$(grep -c '^ *PASS: ' "$D/qa/script.out")"; fail="$(grep -c '^ *FAIL: ' "$D/qa/script.out")"
   case "$rc" in
-    0)   if [ "$fail" = 0 ]; then QA_SCRIPT="QA script: ${pass} passed, 0 failed"
+    0)   if [ "$fail" = 0 ]; then QA_SCRIPT="QA script: ${pass} passed, 0 failed"; QA_SCRIPT_PASSED=1
          else QA_SCRIPT="QA script: ${pass} passed, ${fail} failed (exit 0)"; QA_SCRIPT_STOP=failed; fi ;;
     124) QA_SCRIPT="QA script: failed (timed out after ${secs}s; ${pass} passed, ${fail} failed)"; QA_SCRIPT_STOP=failed ;;
     *)   QA_SCRIPT="QA script: ${pass} passed, ${fail} failed (exit ${rc})"; QA_SCRIPT_STOP=failed ;;
@@ -618,12 +623,12 @@ qa_note_md() {
     printf '\n### QA Script\n\n%s\n' "$QA_SCRIPT"
     # Verbatim, inside a fence longer than any backtick run in it; qa_script_extract has already
     # refused a script naming another web address.
-    if [ -s "$D/qa/qa-script.sh" ]; then
+    if [ -n "$QA_SCRIPT_TEXT" ]; then
       local fence
-      fence="$(awk '{ s = $0; while (match(s, /`+/)) { if (RLENGTH > m) m = RLENGTH; s = substr(s, RSTART + RLENGTH) } } END { n = (m >= 3 ? m + 1 : 3); while (n-- > 0) printf "`" }' "$D/qa/qa-script.sh")"
+      fence="$(printf '%s' "$QA_SCRIPT_TEXT" | awk '{ s = $0; while (match(s, /`+/)) { if (RLENGTH > m) m = RLENGTH; s = substr(s, RSTART + RLENGTH) } } END { n = (m >= 3 ? m + 1 : 3); while (n-- > 0) printf "`" }')"
       printf '\nRun from a checkout of %s with the branch served: `QA_BASE_URL=<served url> bash %s`\n\n%sbash\n' \
         "$BRANCH" "$(qa_script_name)" "$fence"
-      cat "$D/qa/qa-script.sh"; printf '%s\n' "$fence"
+      printf '%s' "$QA_SCRIPT_TEXT"; printf '%s\n' "$fence"
     fi
   fi
   printf '\n## Manual Checklist (skipped, unattended)\n\n'
@@ -667,10 +672,13 @@ qa_publish() {
   if [ "$TRACKER" = jira ]; then
     ar_jira_init || stop "QA: ${AR_ERR}"
     TMPD="$D/qa"; jira_add_comment "$KEY" "$c" || stop "QA: Jira comment failed (HTTP ${JIRA_HTTP})"
-    # The script that ran goes on the ticket, where cr-qa takes QA scripts from.
-    if [ -s "$D/qa/qa-script.sh" ] && [ -f "$D/qa/script.out" ] && [[ "$KEY" =~ ^[A-Z][A-Z0-9_]*-[0-9]+$ ]]; then
-      jira_add_attachment "$KEY" "$D/qa/qa-script.sh" "$(qa_script_name)" \
-        || stop "QA: Jira attachment failed (HTTP ${JIRA_HTTP})"
+    # A script that passed goes on the ticket, where cr-qa takes QA scripts from (as a trusted
+    # upload, so a failing one is never handed on). Uploaded from the checked in-memory text.
+    if [ "$QA_SCRIPT_PASSED" = 1 ] && [[ "$KEY" =~ ^[A-Z][A-Z0-9_]*-[0-9]+$ ]]; then
+      local up; up="$(mktemp -d)" || stop "QA: no temp dir for the Jira attachment"
+      printf '%s' "$QA_SCRIPT_TEXT" > "$up/$(qa_script_name)"
+      jira_add_attachment "$KEY" "$up/$(qa_script_name)" "$(qa_script_name)" || { rm -rf "$up"; stop "QA: Jira attachment failed (HTTP ${JIRA_HTTP})"; }
+      rm -rf "$up"
     fi
   fi
   log "QA published${NOTE_URL:+ (${NOTE_URL})}"
