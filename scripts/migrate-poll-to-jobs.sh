@@ -97,10 +97,11 @@ dispatcher_installed() {
 # from jobs-default-watch.sh) appended to projects.<slug>.jobs, re-indented to the list's own item
 # indent, creating `jobs:` when absent. Exit 3: flow-style jobs; 4: project not found.
 insert_jobs() {
-  awk -v slug="$2" -v entries="$3" '
+  # entries via ENVIRON: BSD awk rejects a newline in a -v value.
+  EA_INSERT_ENTRIES="$3" awk -v slug="$2" '
     function ind(s) { match(s, /^ */); return RLENGTH }
     function emit(n,   arr, c, k, pad, l) {
-      c = split(entries, arr, "\n"); pad = ""
+      c = split(ENVIRON["EA_INSERT_ENTRIES"], arr, "\n"); pad = ""
       for (k = 0; k < n; k++) pad = pad " "
       for (k = 1; k <= c; k++) { l = arr[k]; sub(/^      /, "", l); print pad l }
     }
@@ -198,8 +199,8 @@ github_repos|${owner}/${r}|"
 jira_projects|${i}|"
       done ;;
   esac
-  printf '%s\n' "$LAST_FLAT" | awk -v ps="$prefixes" '
-    BEGIN { n = split(ps, p, "\n") }
+  printf '%s\n' "$LAST_FLAT" | EA_STATE_PREFIXES="$prefixes" awk '
+    BEGIN { n = split(ENVIRON["EA_STATE_PREFIXES"], p, "\n") }
     { for (k = 1; k <= n; k++) if (index($0, p[k]) == 1) { print; next } }'
 }
 

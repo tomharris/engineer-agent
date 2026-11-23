@@ -701,7 +701,7 @@ want="      - id: github-watch
         every: 15m"
 eq "configured, unwatched sources only; an existing slack watch is kept" "$want" "$(bash "$DW" alpha)"
 cp "$CFG" "$TMP/dw.yaml"
-awk -v add="$want" '{print} /^        watch: \[channels\]$/ && !d {print add; d=1}' "$TMP/dw.yaml" > "$CFG"
+ADD="$want" awk '{print} /^        watch: \[channels\]$/ && !d {print ENVIRON["ADD"]; d=1}' "$TMP/dw.yaml" > "$CFG"
 reset_state
 eq "appended entries are valid jobs" "alpha.github-watch:ok alpha.jira-watch:ok" \
   "$( . "$REPO_ROOT/scripts/lib-paths.sh"; . "$REPO_ROOT/scripts/lib-jobs.sh"; rows="$(jobs_enumerate)"

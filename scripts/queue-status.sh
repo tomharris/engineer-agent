@@ -130,8 +130,12 @@ while IFS= read -r slug; do
         paused)  notes="${notes}, ${key} paused" ;;
         *) covered=1 ;;
       esac
-      for ts in "$(state_last_checked "$key" "$slug" "$src")" \
-                "$(case "$(job_receipt_field "$key" status)" in ok|partial) job_receipt_field "$key" finished_at ;; esac)"; do
+      # Not `$(case … in ok|partial) …)`: bash 3.2 misparses a case pattern inside $().
+      rts=""
+      case "$(job_receipt_field "$key" status)" in
+        ok|partial) rts="$(job_receipt_field "$key" finished_at)" ;;
+      esac
+      for ts in "$(state_last_checked "$key" "$slug" "$src")" "$rts"; do
         [ -n "$ts" ] || continue
         if [ -z "$best" ] || [[ "$ts" > "$best" ]]; then best="$ts"; best_key="$key"; fi
       done
