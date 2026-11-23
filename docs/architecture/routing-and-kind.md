@@ -3,7 +3,8 @@
 ### Ticket Routing
 
 **`references/routing-ladder.md` is the single source of truth for which project a ticket belongs
-to.** `poll-jira`, `poll-github-issues`, and `add-ticket` all `Read` it and follow it rather than
+to.** `lib-routing.sh` implements its deterministic tiers for the collectors; the drafting run
+(`jobs-draft.sh`, Tier 3b) and `add-ticket` `Read` it and follow it rather than
 describing routing themselves — the same single-source-of-truth invariant `execute-item` has for
 approvals, and for the same reason: three prose copies of a rule drift.
 
@@ -30,7 +31,7 @@ writing `_unrouted` (`routing_method: manual`).
 
 **Two traps encoded in the GitHub path, each of which broke a real behavior:**
 - `gh issue list --label a --label b` is **AND, not OR**, so several watchers' label filters cannot
-  be unioned into one query the way `poll-jira` unions statuses into `status IN (...)`. Fetch the
+  be unioned into one query the way `poll-jira.sh` unions statuses into `status IN (...)`. Fetch the
   repo unfiltered and apply `github.issues.labels` as a *routing* predicate at Tier 2.
 - Collection must be deduplicated **per repo**, not per project. When it ran per project, the global
   `source_id` dedup handed a shared repo's issue to whichever project the loop reached first — an
@@ -77,8 +78,9 @@ project's config drafts the item; every posting verb stays in `execute-item`, be
 
 **`references/ticket-kind.md` is the single source of truth for what a ticket delivers** — a code
 change (branch → draft PR → QA) or a findings document (a `## Findings` comment on the ticket + a
-local archive). `poll-jira`, `poll-github-issues`, `add-ticket`, and `review-queue`'s unrouted
-assignment flow all `Read` it, for the same reason they do the routing ladder.
+local archive). `lib-ticket-kind.sh` implements its deterministic tiers for the collectors; the
+drafting run (Form B), `add-ticket`, and `review-queue`'s unrouted assignment flow `Read` it, for
+the same reason they do the routing ladder.
 
 Two independent ladders, and **routing runs first**: the kind lists are per-project overridable, so
 there is no correct kind to compute until a slug exists. Routing answers *which project*; this

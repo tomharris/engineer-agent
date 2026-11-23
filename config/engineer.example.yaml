@@ -10,7 +10,6 @@ agent:
                                      # the queue). 0 or absent = no age limit.
   standup_channel: "C98765432"
   digest_channel: "C98765432"
-  cron_interval_minutes: 15
 
   # Which tickets deliver a DOCUMENT instead of code. A Spike/Decision/research-shaped ticket gets a
   # `## Findings` comment posted on the ticket plus a local archive under
@@ -64,8 +63,8 @@ agent:
   #                      Keychain (read-only) and talks to Anthropic's MCP proxy fronting the
   #                      official Slack connector. No browser tokens, zero model-token cost.
   #                      Requires curl + jq. Depends on the login keychain being unlocked, so
-  #                      the headless poll must run in your GUI login session (the LaunchAgent
-  #                      installed by scripts/install-cron.sh already does — see CLAUDE.md).
+  #                      headless jobs must run in your GUI login session (the LaunchAgent
+  #                      installed by scripts/install-jobs.sh already does — see CLAUDE.md).
   slack:
     method: "spy"         # "spy" (default) | "mcp-proxy" (Slack Enterprise Grid)
     bin: "spy"            # path to the spy binary — only used when method: spy (default "spy")

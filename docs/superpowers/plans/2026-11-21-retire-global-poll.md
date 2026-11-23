@@ -112,11 +112,12 @@ The resume sweep emits every undrafted `incoming/` item regardless of project or
 
 ## Task 9: Docs
 
-- [ ] `README.md`: replace the polling/install-cron section with jobs as the only scheduler; document the rulings (no model fallback, per-project fetch cost).
-- [ ] `docs/architecture/scheduled-jobs.md`: `watch` for all sources, drafting lock, project-scoped resume sweep, hygiene cadence.
-- [ ] `docs/architecture/deterministic-polling.md`, `overview.md`, `headless-runs.md`, `notifications.md`, `queue.md`, `integrations.md`: remove/redirect global-poll references.
-- [ ] `CLAUDE.md`: core invariant "Polling reads" now names `jobs-draft.sh` / `job-watch.sh`; remove `cron-poll` mentions in conventions; update the jq note ("Cron path is jq-free" applies only to the GitHub collectors).
-- [ ] Bump plugin version (`.claude-plugin/plugin.json`, marketplace).
+- [x] `README.md`: replace the polling/install-cron section with jobs as the only scheduler; document the rulings (no model fallback, per-project fetch cost).
+- [x] `docs/architecture/scheduled-jobs.md`: `watch` for all sources, drafting lock, project-scoped resume sweep, hygiene cadence.
+- [x] `docs/architecture/deterministic-polling.md`, `overview.md`, `headless-runs.md`, `notifications.md`, `queue.md`, `integrations.md`: remove/redirect global-poll references.
+- [x] `CLAUDE.md`: core invariant "Polling reads" now names `jobs-draft.sh` / `job-watch.sh`; remove `cron-poll` mentions in conventions; update the jq note ("Cron path is jq-free" applies only to the GitHub collectors).
+- [x] Bump plugin version (`.claude-plugin/plugin.json`, marketplace). (`plugin.json` carries no version; marketplace 1.30.3 → 1.31.0.)
+- [x] Also: dropped the unread `agent.cron_interval_minutes`; README's polling section is now "Discovery (watch jobs)" + "Running unattended"; config, confined-runs, integrations, queue, routing-and-kind and notifications docs redirected.
 
 ## Order and checkpoints
 

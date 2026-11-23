@@ -1,8 +1,9 @@
 # Scheduled jobs
 
 
-`projects.<slug>.jobs` gives one project's integration its own interval, **alongside** the global
-poll. Spec: `docs/superpowers/specs/2026-11-09-scheduled-jobs-design.md` (phased; phases 1–5 are built —
+`projects.<slug>.jobs` gives one project's integration its own interval. Jobs are the only
+scheduler: `watch` jobs are the only discovery path (the global poll, `cron-poll.sh`, was removed;
+`migrate-poll-to-jobs.sh` converts an old install). Spec: `docs/superpowers/specs/2026-11-09-scheduled-jobs-design.md` (phased; phases 1–5 are built —
 dispatcher, `watch` for every source (`github`, `github-issues`, `jira`, `slite`, `slack`), `slack`/`watch` with `channels`/`mentions`/`my-threads`, status reactions,
 `jira`/`implement-next`, and `github-issues`/`implement-next` as phase 6a, plus `after_pr` and
 `github-issues`/`address-feedback` below).
@@ -28,10 +29,10 @@ Things a reader will otherwise "fix" back:
   env-cache trap and the TCC re-grant. The plist sets `AbandonProcessGroup` because jobs run
   detached from the tick; without it launchd kills them when the tick exits.
 - **Each job keeps its own cutoff file** (`EA_POLL_STATE_FILE` → `state/jobs/<key>.state.yaml`,
-  honored by `lib-state.sh`). Sharing `last-poll.yaml` with the global poll would be two
-  unsynchronized read-modify-writes. Overlap between the two paths is the queue's job: the
-  `(type, source_id)` reconciliation dedups.
-- **One drafter at a time: `state/drafting.lock`**, shared by `jobs-draft.sh` and the global poll,
+  required by `lib-state.sh`, which has no default file, so a collector without one exits 2
+  instead of touching shared state). A shared file would be N unsynchronized read-modify-writes.
+  Overlap between jobs is the queue's job: the `(type, source_id)` reconciliation dedups.
+- **One drafter at a time: `state/drafting.lock`**, shared by `jobs-draft.sh` and queue hygiene,
   and a held lock means *deferred*, not failed. Jobs dispatch concurrently, so acquiring is atomic
   (`ln` of a temp PID file, `lib-drafting-lock.sh`). Deferral never strands: the job's next collector
   run re-emits them.
@@ -39,35 +40,41 @@ Things a reader will otherwise "fix" back:
   of its own project, `source` and types (`poll_resume_candidates --project --source --type`).
   Stranded `_unrouted` items go to one job per integration: the first key among its valid, unpaused
   watch jobs (`jobs_unrouted_owner`), which `job-watch.sh` passes `--resume-unrouted`. Unscoped,
-  every job would re-emit every stranded file. The global poll keeps the unscoped sweep.
+  every job would re-emit every stranded file.
 - **Queue hygiene runs in the tick** (`queue-hygiene.sh`: `queue-heal-stranded.sh --heal`, then
   `queue-dedup-check.sh --heal` and the push-once duplicate ledger), after dispatch, at most every
   `EA_HYGIENE_EVERY` (default `15m`, `state/jobs/_hygiene.last-run`). It takes `drafting.lock`: a
   heal racing a draft would move or reject a file a model is still editing. A held lock skips the run
   without stamping `last-run`, so the next tick retries. Skipped under `--only` (manual single-job
-  runs) and when no jobs are configured. The global poll calls the same script with `--lock-held`.
+  runs) and when no jobs are configured. `--lock-held` is for a caller that already holds the lock.
 - **Manual adds write no poll state.** `add-ticket` relies on queue reconciliation alone (the
   scripted collectors never read `seen_*`); `poll-jira.test.sh` / `poll-github-issues.test.sh` pin
   that a watch run over a manually added key creates nothing. `add-project` offers
-  `jobs-default-watch.sh` output (one `watch` job per configured, unwatched source) instead of
-  seeding `last-poll.yaml`.
+  `jobs-default-watch.sh` output (one `watch` job per configured, unwatched source).
 - **`status` reads job state** (`queue-status.sh`). Per configured project source, "last checked"
   is the newest of its watch jobs' `last_checked` (state file) and `ok`/`partial` receipt
   `finished_at`; Slack's state holds a message ts, not a wall clock, so it counts only through the
-  receipt. A configured source with no valid, unpaused watch job is reported **UNCOVERED**: without
-  the global poll, that is silent loss. Job health is an aggregate count plus each non-ok job's first
+  receipt. A configured source with no valid, unpaused watch job is reported **UNCOVERED**: nothing
+  else discovers it, so that is silent loss. With no jobs at all, `status` says so in one line. Job health is an aggregate count plus each non-ok job's first
   error (a pause falls back to the `.paused` marker's text).
-- **The drafting allowlist is the poll's**, via `lib-poll-allowlist.sh`. Do not fork a second copy;
+- **The drafting allowlist is `lib-poll-allowlist.sh`** (read verbs only). Do not fork a second copy;
   allowlist drift caused most past silent outages.
 - **Drafting success is ground truth**: a row counts only if its file is in `drafts/` (or carries a
   draft while `_unrouted` in `incoming/`), never the model's report.
-- **`exclusive: true` is honored only for a job that can run** (supported pair, not paused) and
-  is computed in `ea-config.sh`'s `_source_state`, so the scripted path, the bash receipt and the
-  model's `EXCLUSIVE:` prompt line all agree. A paused job claiming a source would make it silently
-  unpolled. The job's own collector sets `EA_JOBS_IGNORE_EXCLUSIVE=1`.
+- **Drafting rules live in `references/drafting.md`** (which skill drafts each type; the ticket
+  and investigation plan templates). `jobs-draft.sh`'s prompt and `add-ticket` both point there;
+  the per-source `poll-*` skills that used to hold them are gone.
+- **No model-driven discovery.** A `watch` job needs its scripted collector; a missing dependency
+  (jq, credential, `agent.jira.site`, TypeSafe for Slack) fails the run's `--check` preflight. So
+  Slack without TypeSafe, or an install without jq, has no Slack/Jira/Slite discovery.
+- **Per-project collection repeats fetches.** Each job runs its collector with `--project`, so a
+  source shared by N projects is fetched N times; unrouted hits coalesce into one `_unrouted` item
+  by `(type, source_id)`. A short-TTL per-source fetch cache is the fix if the cost ever matters.
+- **A leftover `exclusive:` key is inert.** It used to hide a source from the global poll; with
+  the poll gone nothing reads it.
 - **`migrate-poll-to-jobs.sh` drops `exclusive:` and removes the poll in one step.** Dropping it
-  while the poll still ran would hand an owned source (e.g. a cr-qa channel) back to the poll and
-  its status reactions, so `--apply` removes the poll's LaunchAgent / crontab entry in the same run
+  while the poll still ran would have handed an owned source (e.g. a cr-qa channel) back to the
+  poll and its status reactions, so `--apply` removes the poll's LaunchAgent / crontab entry in the same run
   and refuses while the dispatcher isn't installed. New jobs come from `jobs-default-watch.sh` at
   the poll's cadence (`StartInterval` / `*/N`; a `StartCalendarInterval` poll becomes `every: 1h`
   plus `hours:` only when its hours are contiguous). Each new job's state file is seeded from
@@ -75,11 +82,10 @@ Things a reader will otherwise "fix" back:
   project's Jira keys and `github_repos.<owner/repo>` for its repos, because those watermarks are
   what the Jira and GitHub-issues collectors actually filter on. An existing state file is never
   overwritten. The rewritten config must read back (via `ea-config.sh dump`) as exactly the old
-  jobs plus the new ones, none exclusive, before anything is written.
+  jobs plus the new ones before anything is written.
 - **A non-Slack `watch` job on an unconfigured source is invalid** (`jobs_validate_watch_source`,
   reason from `_source_state`). The collector would skip the source and report `ok` forever. Slack
-  is exempt: `mentions` / `my-threads` need no channels. "Owned by scheduled job" counts as
-  configured, since ownership only hides the source from the global poll.
+  is exempt: `mentions` / `my-threads` need no channels.
 - **Collector availability is checked per run, not in `jobs_validate`.** `jobs_watch_preflight`
   runs `poll-<source>.sh --check`, which resolves credentials (a Keychain call on macOS); doing
   that for every job on every tick costs too much. A failed check is a failed run, so it pushes and
@@ -104,7 +110,7 @@ Things a reader will otherwise "fix" back:
   item's frontmatter and the emoji from `agent.slack.reactions`, so a model running it (execute-item
   on `posted`/`rejected`) picks only which of its own items to signal. `posted` also records the
   thread for `my-threads`, regardless of the tier. Always exits 0.
-- **`drafted` fires from bash** (cron-poll.sh and jobs-draft.sh), only for items that reached
+- **`drafted` fires from bash** (`jobs-draft.sh`), only for items that reached
   `drafts/`, never on the model's word.
 - **Shim verbs are discovered, not assumed.** `slack-mcp.sh react`/`unreact`/`search` look the
   tool up in `tools/list` and map arguments from its `inputSchema`; a missing tool exits 64. The
@@ -423,9 +429,8 @@ Things a reader will otherwise "fix" back:
   That message is read alone (its real header comes first) and the job acts on what that read
   says; if it is not a trusted request for this project the ts is marked `untrusted` (safe: no
   trusted request lives there), so a forged header can neither inject nor suppress a request.
-- **Pair it with `exclusive: true` while the global poll runs.** The global poll's own "detected"
-  status reaction defaults to `eyes`; without exclusivity it would mark requests claimed before
-  cr-qa sees them. Once the poll is gone (`migrate-poll-to-jobs.sh --apply`) the key is dropped.
+- **Don't also `watch` a cr-qa channel.** A `slack` / `watch` job's "detected" status reaction
+  defaults to `eyes`, which would mark requests claimed before cr-qa sees them.
 - **Review.** One read-only model run runs `/code-review high origin/<base>` through the Skill
   tool (granted `Skill(code-review)`, `Agent`, `ReportFindings`, and Read on the worktree and workdir
   only — `Read(...)` also scopes Grep/Glob, so neither is granted bare) and replies with nonce-bearing
