@@ -15,7 +15,7 @@
   covers the whole call. **But that rule must match the shim's path as the model *actually runs*
   it, and getting there took several corrections, each learned from a real failing poll (transcript
   evidence, not theory):** the skills reference the shim as `${CLAUDE_PLUGIN_ROOT}/scripts/slack-mcp.sh`
-  (per `poll-slack`/execute-item), and (1) the **model expands `${CLAUDE_PLUGIN_ROOT}` to an
+  (per execute-item and the drafting run), and (1) the **model expands `${CLAUDE_PLUGIN_ROOT}` to an
   absolute path** before Bash ever sees it — it does *not* pass the literal `${CLAUDE_PLUGIN_ROOT}`
   token, so a single-quoted-literal allowlist rule is dead code and never matches (an earlier fix
   that added one did nothing); and (2) **that expanded root is not stable — it has been observed
@@ -25,7 +25,7 @@
   `--plugin-dir`), **and** the *marketplace checkout* path
   (`~/.claude/plugins/marketplaces/engineer-agent`). A rule built from only one or two of these
   misses whenever the runtime picks the third, and any miss denies the Slack call non-interactively
-  (a prompt under `-p` is a denial). Fix: `cron-poll.sh` and `approval-listener.sh` allowlist the
+  (a prompt under `-p` is a denial). Fix: `lib-poll-allowlist.sh` and `approval-listener.sh` allowlist the
   shim's **expanded** abs path for **all three** candidate roots — the script's own `PLUGIN_ROOT`,
   `resolve_installed_plugin_root()` (highest-version installed cache dir), and
   `resolve_marketplace_plugin_root()` (the marketplace checkout) — all three in `lib-paths.sh`, so
@@ -36,7 +36,7 @@
   `mcp__claude_ai_Slack__slack_read_channel` connector, which is *also* unlisted, so both Slack
   paths were denied and the poll silently drafted nothing for the affected projects while its
   narrative sometimes still (wrongly) claimed Slack "succeeded" — trust the receipt's `errors:`
-  list and the transcript, not the prose summary. `cron-poll.sh` allowlists `read`/`thread`/`auth`
+  list and the transcript, not the prose summary. `lib-poll-allowlist.sh` allowlists `read`/`thread`/`auth`
   for every root; `approval-listener.sh` uses a trailing-`*` rule that already covers all verbs.
   (`spy` needs none of this — it is a bare literal identical in rule and invocation; that is the
   pattern the shim's path form can't reach.) (4) **A rule must match the command *form*, not just

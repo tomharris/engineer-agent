@@ -25,11 +25,11 @@ from a run that failed silently):
   later poll then loaded, re-read, and confirmed **instead of retesting**. That converts an
   independent transient into a correlated, self-citing, permanent outage, and it defeats the
   receipt-based liveness design (which assumes failures are independent). Every headless prompt
-  in `cron-poll.sh` and `approval-listener.sh` (the shared `NO_MEMORY_RULE`, applied to the
-  generic execute, ticket implementation, and QA runs alike) therefore forbids creating/updating
+  (`jobs-draft.sh`'s `MEMORY:` line; `approval-listener.sh`'s shared `NO_MEMORY_RULE`, applied to
+  the generic execute, ticket implementation, and QA runs alike) therefore forbids creating/updating
   memory files and forbids treating an existing memory as evidence about the current run.
-  **Memory is keyed by CWD, not by which script launched the run** — the poll and the listener's
-  `run_generic_execute` both run from `$HOME`, so they share
+  **Memory is keyed by CWD, not by which script launched the run** — the drafting run and the
+  listener's `run_generic_execute` both run from `$HOME`, so they share
   `~/.claude/projects/-home-tom/memory/` and can cross-contaminate; the ticket/QA runs `cd` into
   a per-run worktree and so get a throwaway namespace, but only as a side effect of the path
   sandbox, which is why the rule is applied uniformly rather than relying on that accident. If an
@@ -49,13 +49,13 @@ from a run that failed silently):
   single leading `/` anchors to the cwd.
 - **Never trust the exit code.** `claude -p` exits 0 whenever the CLI ran, regardless of whether the
   work happened. Determine success from a real side effect: the listener checks that the item left
-  `queue/drafts/`; the cron mints a `RUN_ID` only it knows and checks that the model echoed that
-  exact id back into `state/last-poll-receipt.yaml` as its final step, pushing an ntfy alert if the
-  receipt is missing or stale (and a lower-priority one if the receipt's `status` isn't `ok`).
+  `queue/drafts/`; `jobs-draft.sh` counts a manifest row only if its file reached `drafts/` (or
+  carries a draft while `_unrouted` in `incoming/`), never the model's report. (The removed global
+  poll minted a `RUN_ID` and checked the model echoed it into a receipt.)
 - **Prove liveness with a token the script controls, not with mutation of a file the model authors
-  for another purpose.** The cron used to fingerprint `last-poll.yaml` and warn if the hash was
+  for another purpose.** The old global poll used to fingerprint `last-poll.yaml` and warn if the hash was
   unchanged — but that file is a *semantic dedup cutoff*, not a health signal, and overloading it
-  as one was wrong twice over: `poll-slack`'s `last_checked_ts` legitimately can't advance on a
+  as one was wrong twice over: Slack's `last_checked_ts` legitimately can't advance on a
   zero-message poll (so a Slack-only config false-warned on every quiet poll), and the timestamps
   are model-authored and were observed fabricated (a real run wrote a `last_checked` 40 minutes in
   the future). Content-change is only a freshness signal if the content is reliably distinct per
@@ -77,11 +77,11 @@ from a run that failed silently):
   **launchd LaunchAgent bootstrapped into `gui/$UID`** runs *in* the session and reads the keychain
   fine — **verified 2026-07-17**: a throwaway gui-session LaunchAgent authenticated and exited 0
   running the exact binary a sibling crontab run failed on, and the `approval-listener` has always
-  used this path. So on macOS `install-cron.sh` installs the poll as a **LaunchAgent**
-  (`engineer-agent-poll`, mirroring `install-listener.sh`), not a crontab entry; Linux keeps crontab
+  used this path. So on macOS `install-jobs.sh` installs the jobs tick as a **LaunchAgent**
+  (`engineer-agent-jobs`, mirroring `install-listener.sh`), not a crontab entry; Linux keeps crontab
   (no per-user GUI-keychain split there). An earlier note lumped "cron/launchd" together as both
   failing the keychain — that was wrong; only *out-of-session* schedulers fail. The tradeoff of the
-  in-session agent: it only polls while the user is logged into the GUI. This is why we **do NOT
+  in-session agent: jobs run only while the user is logged into the GUI. This is why we **do NOT
   re-add the reverted `auth.env`/`CLAUDE_CODE_OAUTH_TOKEN` loader** — the launchd path keeps no
   long-lived secret on disk.
 - **macOS privacy (TCC) grants are keyed to the RESOLVED binary, so every `claude` auto-update
@@ -93,11 +93,11 @@ from a run that failed silently):
   `NetworkVolumes` grants per version (`2.1.245` … `2.1.248`, each set being a human clicking Allow
   after that update) and **none** for the freshly-installed `2.1.251`. Interactively this is a
   dialog; under launchd the access is simply refused, and — unlike a denied `--allowedTools` rule —
-  nothing lands in the receipt, so the poll reports `status: ok` on a run that could not read.
+  nothing lands in the receipt, so a run reports `status: ok` when it could not read.
   `claude_bin_changed()` in `lib-paths.sh` is the preflight, shared by **both** unattended entry
   points: it records the resolved path in `state/claude-bin.path` and pushes one low-priority ntfy
-  warning when it changes. `cron-poll.sh` calls it only when a model run will actually start (a
-  scripted-only poll never launches `claude`, so it cannot raise a dialog); `approval-listener.sh`
+  warning when it changes. `jobs-draft.sh` calls it only when a model run will actually start (a
+  run with an empty manifest never launches `claude`, so it cannot raise a dialog); `approval-listener.sh`
   calls it at startup **and** before each dispatch, because the service runs for days and the mtime
   self-reexec cannot catch this staleness — the script file is unchanged, it is the binary that
   moved. The record is deliberately **shared** between the two: they run as the same user against
@@ -148,36 +148,37 @@ from a run that failed silently):
   patch the `claude` binary's `managed/settings` string to make it unreadable) — it is an
   intentional corporate security control, and MDM restores it anyway.
 
-Both `cron-poll.sh` and `approval-listener.sh` resolve the Claude Code binary from `PATH` by default, but honor a `CLAUDE_BIN` env var override (a specific shim/wrapper/install path). Because cron, systemd, and launchd do not inherit the interactive shell environment, `install-cron.sh` and `install-listener.sh` capture `CLAUDE_BIN` when set at install time and bake it into the launchd `EnvironmentVariables` (macOS) / systemd `Environment=` (Linux listener) / crontab entry (Linux poll) so the supervised runs use the same binary. On macOS `install-cron.sh` also accepts `EA_POLL_HOURS` (comma-separated clock hours) + `EA_POLL_MINUTE` to emit a `StartCalendarInterval` schedule confined to business hours instead of the default `StartInterval` every-N-minutes; this caps how much a first poll on a large assigned backlog can spend.
+The job runs (`jobs-draft.sh` and the job handlers) and `approval-listener.sh` resolve the Claude Code binary from `PATH` by default, but honor a `CLAUDE_BIN` env var override (a specific shim/wrapper/install path). Because cron, systemd, and launchd do not inherit the interactive shell environment, `install-jobs.sh` and `install-listener.sh` capture `CLAUDE_BIN` when set at install time and bake it into the launchd `EnvironmentVariables` (macOS) / systemd `Environment=` (Linux listener) / crontab entry (Linux jobs tick) so the supervised runs use the same binary. Business-hours confinement is per job (`hours:` / `days:`, `scheduled-jobs.md`).
 
 > **Changing `CLAUDE_BIN` (or any `EnvironmentVariables` entry) in a LaunchAgent plist does not
 > affect the running job — you must `bootout` + `bootstrap`, not `kickstart`.** launchd caches a
 > job's environment block when the job is loaded, so an edited plist is inert until the job
 > definition is re-read. `launchctl kickstart -k` restarts the *process* but reuses the *cached
 > definition*, so it silently does not pick up the change. This burned a real migration: both
-> `engineer-agent-poll` and `engineer-agent-listener` ran for hours with a live
+> the then-current poll agent and `engineer-agent-listener` ran for hours with a live
 > `CLAUDE_BIN` pointing at a wrapper whose target binary had been moved away, while the plists on
 > disk had already been corrected — the poll wrote no receipt and the listener failed every
 > approval with `No such file or directory` and left the item in `drafts/`. Note the
 > `approval-listener.sh` mtime self-reexec **cannot** catch this class of staleness: the script file
 > is unchanged, it is the job environment that is stale. So always verify with
 > `launchctl print gui/$UID/<job> | grep CLAUDE_BIN` — reading the plist proves nothing about what
-> is running. `install-cron.sh` / `install-listener.sh` do a full bootout+bootstrap, so a
+> is running. `install-jobs.sh` / `install-listener.sh` do a full bootout+bootstrap, so a
 > re-install is also a valid fix; a hand-edited plist is not.
 
-The poll's own per-run budget is capped with `--max-budget-usd`, default **`6.00`**, overridable via
-`EA_POLL_BUDGET_USD` (captured at install time and baked into launchd/crontab like `CLAUDE_BIN`). A
-full 6-project × 4-source poll that reads live Slack channels and may draft a PR review / ticket
-intent inline can exceed a low cap; when it does, `claude -p` aborts mid-run, writes no receipt, and
-the next fire re-attempts the same work — a flat `2.00` did exactly this once mcp-proxy Slack reads
-started succeeding. `cron-poll.sh` also takes a **PID lockfile** (`state/drafting.lock`, shared with every job's
-`jobs-draft.sh`; see `lib-drafting-lock.sh`) and exits early if another drafter is already running (a stale lock from a dead PID is reclaimed): two concurrent
-polls thrash the same state/receipt files and each burns its full budget racing the other.
+A drafting run's budget is capped with `--max-budget-usd`: the job's `budget_usd`, else
+`EA_JOB_DRAFT_BUDGET_USD` (default `2.00`). A run that exceeds it aborts mid-run; undrafted items
+stay in `incoming/` and the job's next collector run re-emits them, so give a busy source headroom
+(the old global poll needed `6.00` once it drafted every source in one run). Drafting takes a
+**PID lockfile** (`state/drafting.lock`, `lib-drafting-lock.sh`, also taken by queue hygiene) and
+defers if another drafter holds it (a stale lock from a dead PID is reclaimed): two concurrent
+drafters would edit the same queue files.
 
-> **The lockfile cannot catch a hung poll under launchd — launchd never starts a second instance of
+> **A lockfile cannot catch a hung run under launchd — launchd never starts a second instance of
 > a job that is still running, so the next fire never reaches the lock check.** Observed
-> 2026-09-22: one `gh pr list` blocked for 24h, every later fire was silently swallowed, and
-> `launchctl print` still said `running` / `last exit code = 0`. Three guards, all in plain bash:
+> 2026-09-22 under the old global poll: one `gh pr list` blocked for 24h, every later fire was
+> silently swallowed, and `launchctl print` still said `running` / `last exit code = 0`. Jobs run
+> detached from the tick, so the tick itself keeps firing, but a hung job still holds its job lock.
+> Three guards, all in plain bash:
 > - **Per-command timeout.** Every `gh` call in the GitHub collectors and every Slack CLI call in
 >   `poll-slack.sh` runs under `with_timeout` (`lib-paths.sh`; macOS ships no `timeout(1)`),
 >   `EA_POLL_CMD_TIMEOUT` seconds, default 120. The curl-based collectors already carry
@@ -185,13 +186,13 @@ polls thrash the same state/receipt files and each burns its full budget racing 
 >   It TERMs the command's whole process tree (KILL after 5s): signalling only the direct child
 >   left a wrapper script's `curl`/`claude` grandchild running, holding a caller's `$(...)` open
 >   until it finished on its own.
-> - **Whole-run watchdog.** `cron-poll.sh` kills its own process tree after `EA_POLL_MAX_SECONDS`
->   (default 3600) and pushes an urgent ntfy alert first, since a killed run never reaches the
->   receipt check.
+> - **Whole-run watchdog.** `jobs-tick.sh` kills a job's process tree after `EA_JOB_MAX_SECONDS`
+>   (default 3600) and records the timeout in the job's receipt `errors:`, so it counts as a
+>   failure (push, then pause).
 > - **Phase A errors reach the receipt.** The GitHub collectors log a failed repo and carry on
->   (exit 0), so neither receipt writer saw the failure and the receipt said `ok`. Collectors now
->   call `phase_a_error`, which appends to `state/poll-phase-a-errors.txt` (truncated per run);
->   `cron-poll.sh` merges each line into `errors:` and downgrades `ok` to `partial`.
+>   (exit 0), so the receipt used to say `ok`. Collectors now call `phase_a_error`, which appends
+>   to the run's errors file (`EA_PHASE_A_ERRORS`, set by `job-watch.sh`); `jobs-tick.sh` puts each
+>   line in the job receipt's `errors:` and downgrades `ok` to `partial`.
 
 > **A supervised daemon runs whatever it parsed at launch — editing the script on disk
 > does not reload it.** `install-listener.sh`'s `systemctl --user enable --now` is a no-op on an

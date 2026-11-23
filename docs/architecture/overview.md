@@ -36,9 +36,9 @@ config/engineer.example.yaml   — Config template
 (which project), `ticket-kind.md` (what the ticket delivers), `queue-reconciliation.md` (whether
 an item enters the queue), `epistemics.md` (how confidently an evidence-based answer may word
 each claim), and `writing-style.md` (what posted text must avoid). It is plain markdown read
-with `Read`, deliberately not a skill or subagent: `scripts/cron-poll.sh` allowlists `Read` but not
-`Skill`/`Agent`, so anything shaped that way is unreachable from the cron — the one path with no
-human fallback.
+with `Read`, deliberately not a skill or subagent: the unattended drafting run (`jobs-draft.sh`,
+allowlist from `lib-poll-allowlist.sh`) has `Read` but not `Skill`/`Agent`, so anything shaped that
+way is unreachable from it — the one path with no human fallback.
 
 > **Reference these files via `${CLAUDE_PLUGIN_ROOT}`, never a bare relative path.** Cron runs from
 > `$HOME`, so `references/routing-ladder.md` resolves to `~/references/…` and the `Read` fails —
@@ -54,8 +54,8 @@ of truth for this location — source it rather than hardcoding the path.
 > `.claude/` directory as sensitive and refuses the Edit/Write tools there — an explicit
 > `--allowedTools "Edit(...)"` rule does **not** override it. The guard is invisible
 > interactively (a human just approves the prompt), but silently fatal headlessly: it left both
-> `cron-poll.sh` and `approval-listener.sh` unable to record state or move queue files, so the
-> cron polled every 15 minutes for a month and never queued a single item. Installs predating
+> the then-current poll and `approval-listener.sh` unable to record state or move queue files, so
+> the poll ran every 15 minutes for a month and never queued a single item. Installs predating
 > the move are migrated with `scripts/migrate-storage.sh`.
 
 ```
@@ -69,9 +69,7 @@ of truth for this location — source it rather than hardcoding the path.
 ├── uat-plans/                 — Saved UAT checklists from /engineer-agent uat-plan (not part of the queue)
 ├── investigations/            — Archived findings docs from ticket-investigation items (not part of the queue)
 └── state/
-    ├── last-poll.yaml         — Dedup timestamps and seen IDs (per project, per Jira project key, per GitHub repo)
-    ├── last-poll-receipt.yaml — Liveness receipt from the last cron poll (run_id, status, item count, skipped, errors)
-    ├── claude-bin.path        — Resolved `claude` executable the last unattended poll ran (macOS TCC preflight)
+    ├── claude-bin.path        — Resolved `claude` executable the last unattended run used (macOS TCC preflight)
     ├── ntfy-seen.yaml         — Processed ntfy command message IDs (remote-approval dedup)
     ├── jobs/                  — Per scheduled job (<project>.<id>.*): last-run, receipt, lock, failures, paused, invalid, state.yaml (its own cutoffs), picks (implement-next daily_cap)
     ├── autopilot-items.tsv    — Queue items the implement-next job wrote (the only provenance the listener trusts for a Jira claim)
@@ -81,7 +79,7 @@ of truth for this location — source it rather than hardcoding the path.
     ├── watched-threads.tsv    — Slack threads answered via engineer-agent (channel, thread_ts, last_seen_ts, added_at, project) for the my-threads watch
     ├── slack-events.log       — Outcomes of scripts/slack-event.sh (status reactions, thread watches)
     ├── jobs.log               — Scheduled-jobs dispatcher log
-    ├── config-dump.cache      — `ea-config.sh dump` output, keyed by a checksum of the config, the rendering scripts, paused jobs and EA_JOBS_IGNORE_EXCLUSIVE (safe to delete)
+    ├── config-dump.cache      — `ea-config.sh dump` output, keyed by a checksum of the config and the rendering scripts (safe to delete)
     ├── turn-notify/           — One marker per session armed for turn-completion pushes (<session_id>)
     └── turn-notify.log        — Turn-completion hook diagnostics (only when EA_TURN_NOTIFY_DEBUG=1)
 ```

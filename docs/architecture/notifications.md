@@ -4,7 +4,7 @@
 
 ntfy turns the approval gate into a remote, async one without a custom server. Both directions are ntfy topics:
 
-- **Outbound** (`topic`): after a poll, `cron-poll.sh` calls `scripts/notify.sh` to push each new draft with **Approve / Reject / Open** action buttons.
+- **Outbound** (`topic`): a job's drafting run (`jobs-draft.sh`) calls `scripts/notify.sh` to push each new draft with **Approve / Reject / Open** action buttons.
 - **Inbound** (`command_topic`): the Approve/Reject buttons are ntfy `http` actions that POST `approve|<item-id>` / `reject|<item-id>` back to the command topic. `scripts/approval-listener.sh` (a long-running service installed by `scripts/install-listener.sh`) streams that topic and runs `/engineer-agent execute <item-id> <decision>` headlessly (an approved `ticket` takes the separate confined-implementation path instead — see "Confined headless ticket implementation"). After validating a command the listener also pushes two best-effort acknowledgements back to the outbound `topic` via `notify.sh --fyi`: a **receipt** ack (low priority, "📨 Received…") the moment the tap lands, and an **outcome** ack after the run — "✅ Done…" (normal) when the item leaves `queue/drafts/`, or "⚠️ Failed…" (urgent) when it did not. Invalid or already-seen commands are not acknowledged (avoids noise and confirming a live listener to a prober). The ack adds no posting capability — it is an outbound notification only, so the "polling reads; only execute-item writes" invariant is untouched.
 
 > **`handle_line` dispatches SYNCHRONOUSLY, so a long run makes the listener look dead — the
@@ -29,7 +29,7 @@ pausing to ask you something, or dead on an API error.
 
 It is a **Claude Code hook**, not a `notify.sh` line in the skill, and that distinction is the
 whole point. This repo has learned twice over that a model's own report is not a completion signal
-(hence the run-id receipt in `cron-poll.sh` and the `drafts/` existence check in the listener). A
+(hence the `drafts/` ground-truth check in `jobs-draft.sh` and the `drafts/` existence check in the listener). A
 prompt instruction fires only when the model chooses to — so it would go quiet on exactly the turns
 worth hearing about: budget abort, API error, an early bail. `hooks/hooks.json` registers
 `scripts/turn-notify-hook.sh` on five events and the harness fires them regardless.
@@ -61,8 +61,7 @@ no jq, no network.
   the prompt — and `UserPromptSubmit` stdout on exit 0 is **injected into the model's context**. So
   no `set -e`, no stray `echo`; diagnostics go to `state/turn-notify.log` under
   `EA_TURN_NOTIFY_DEBUG=1`.
-- **jq is a soft dependency.** `cron-poll.sh` makes "deliberately NOT jq" policy for anything
-  outside the separately-installed listener, and a plugin-wide hook is even more exposed. Every
+- **jq is a soft dependency.** A plugin-wide hook runs in every session, jq or not. Every
   field used to *decide whether to push* is escape-free by construction (uuid / enum / skill slug /
   anchored raw-JSON prefix) and is read with `sed`. jq is used for exactly one thing — decoding
   `last_assistant_message` for the excerpt — so no jq means a label-only push, never a broken hook.

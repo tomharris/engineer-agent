@@ -2,18 +2,17 @@
 
 ## Queue File Format
 
-Items enter the queue either via polling (`/engineer-agent poll` or the cron) or manually (`/engineer-agent add-ticket <ref>`). Both paths produce identically-shaped queue files.
+Items enter the queue either via a scheduled `watch` job or manually (`/engineer-agent add-ticket <ref>`). Both paths produce identically-shaped queue files.
 Invoking `/engineer-agent:implement-ticket <ref>` directly also goes through `add-ticket` (forced
-`--implement`) before implementing, so the ticket gets a queue item and a `seen_*` entry and the
-next poll reconciles it as `unchanged` instead of queueing a duplicate. `seen_*` alone would not
-do this: pollers dedup on queue files, and the scripted collectors never read `seen_*`.
+`--implement`) before implementing, so the ticket gets a queue item and the next watch run
+reconciles it as `unchanged` instead of queueing a duplicate: collectors dedup on queue files.
 
 Files move through: `~/.local/share/engineer-agent/queue/incoming/` → `queue/drafts/` → `queue/completed/` or `queue/rejected/`
 
 **Invariant: at most one item per `(type, source_id)`.** `references/queue-reconciliation.md` is the
 rule every poller follows to uphold it — skip / update-in-place / create, one branch each — and
 `scripts/queue-dedup-check.sh` is the executable check, run automatically by `queue-hygiene.sh` (each
-jobs tick, at most every `EA_HYGIENE_EVERY`, and after each `cron-poll.sh`). A duplicate is otherwise
+jobs tick, at most every `EA_HYGIENE_EVERY`). A duplicate is otherwise
 invisible: queue filenames carry a `{YYYYMMDD-HHmmss}`
 minted at write time, so a second copy of a ticket never collides with the first — it just sits
 alongside it and the human reviews (or implements) the same work twice.
@@ -102,8 +101,8 @@ YAML frontmatter fields:
 - `watch_source`: (slack-question only) `mentions` | `my-threads` when a slack/watch job found it
   that way; absent for a channel scan
 - `relevance_method`: (slack-question only) how the "is this a question for me?" tier was decided —
-  `typesafe` when `scripts/poll-slack.sh` judged it. Absent on a model-drafted item, which decided
-  it inline and recorded nothing
+  `typesafe` when `scripts/poll-slack.sh` judged it. Absent on items created before the scripted
+  collector (the old model-driven poll recorded nothing)
 - `relevance_scores`: (slack-question only, with `relevance_method`) the four raw probabilities,
   e.g. `question=0.93 directed=0.88 answered=0.04 engineer=0.81`. Recorded for the same reason
   `routing_rationale` is: this is a judgment tier reading untrusted prose, so the gate must be able

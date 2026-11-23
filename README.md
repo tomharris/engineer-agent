@@ -29,7 +29,7 @@ Everything goes through an approval queue — nothing is posted until you say so
 - **GitHub CLI (`gh`)** — for PR reviews, code operations, and GitHub API access. Install from [cli.github.com](https://cli.github.com) and run `gh auth login`
 - **Slack** — for channel polling and message posting. Two backends, selected by `agent.slack.method`:
   - **`spy` (default)** — the [Spy Slack CLI](https://github.com/tomharris/spy), which reuses your local Slack desktop session (no OAuth or app install). Build it (`go install ./cmd/spy`), sign in to the Slack desktop app, run `spy auth` to confirm, and set `agent.slack.workspace` (required when multiple workspaces are signed in). Best for a single, non-Enterprise-Grid workspace.
-  - **`mcp-proxy`** — for **Slack Enterprise Grid**, where spy's browser-token scraping is broken and unsafe (the first automated call force-logs you out; session tokens rotate hourly). Set `agent.slack.method: mcp-proxy` and `agent.slack.mcp.server_id` to your Slack connector's `mcpsrv` id. The bundled `scripts/slack-mcp.sh` client reads Claude Code's existing OAuth token from your macOS Keychain (read-only) and talks to Anthropic's MCP proxy fronting the official Slack connector — no browser tokens, zero model-token cost. Requires `curl` + `jq`; no spy install. It depends on the login keychain being unlocked, so the headless poll must run in your GUI login session (the macOS LaunchAgent `install-cron.sh` installs already does).
+  - **`mcp-proxy`** — for **Slack Enterprise Grid**, where spy's browser-token scraping is broken and unsafe (the first automated call force-logs you out; session tokens rotate hourly). Set `agent.slack.method: mcp-proxy` and `agent.slack.mcp.server_id` to your Slack connector's `mcpsrv` id. The bundled `scripts/slack-mcp.sh` client reads Claude Code's existing OAuth token from your macOS Keychain (read-only) and talks to Anthropic's MCP proxy fronting the official Slack connector — no browser tokens, zero model-token cost. Requires `curl` + `jq`; no spy install. It depends on the login keychain being unlocked, so headless jobs must run in your GUI login session (the macOS LaunchAgent `install-jobs.sh` installs already does).
 - **Jira MCP integration** (optional) — for ticket polling and implementation when using Jira as tracker (`mcp__atlassian__*`). Either Jira or GitHub Issues per project — GitHub Issues uses the `gh` CLI (already a prerequisite)
 - **Slite MCP integration** (optional) — for document reviews (`mcp__slite__*`)
 - **ntfy** (optional) — for push notifications and remote approval. No install needed to publish (uses `curl` against [ntfy.sh](https://ntfy.sh) or your self-hosted server); install the [ntfy mobile app](https://ntfy.sh/app) to receive alerts and tap Approve/Reject. The approval listener also needs **`jq`** on the host running it. Turn-completion pushes (below) add no new requirement — they use `jq` when it is present, for the message excerpt only, and fall back to a label-only push when it isn't.
@@ -52,7 +52,7 @@ Then initialize from any project directory:
 /engineer-agent setup
 ```
 
-This creates the user-level config, queue directories, and installs automated polling in one step. It also registers the current project. After setup, edit `~/.local/share/engineer-agent/engineer.yaml` to configure your sources.
+This creates the user-level config, queue directories, and installs the scheduled-jobs dispatcher in one step. It also registers the current project. After setup, edit `~/.local/share/engineer-agent/engineer.yaml` to configure your sources.
 
 To register additional projects:
 
@@ -71,7 +71,6 @@ agent:
   max_pr_files: 50
   standup_channel: "C98765432"
   digest_channel: "C98765432"
-  cron_interval_minutes: 15
   slack:                                  # Slack settings (optional)
     method: "spy"                         # "spy" (default) | "mcp-proxy" (Enterprise Grid)
     bin: "spy"                            # spy binary path (method: spy; default "spy" on PATH)
@@ -264,7 +263,7 @@ being silently assigned to whichever project happened to be polled first.
 
 ### `/engineer-agent setup`
 
-One-time user-level initialization. Creates config at `~/.local/share/engineer-agent/`, queue directories, installs cron polling, and registers the current project.
+One-time user-level initialization. Creates config at `~/.local/share/engineer-agent/`, queue directories, installs the scheduled-jobs dispatcher, and registers the current project.
 
 ```
 /engineer-agent setup
@@ -300,7 +299,7 @@ Manually add a Jira ticket or GitHub issue to the implementation queue, bypassin
 /engineer-agent add-ticket ENG-789 --implement                      # Force code work (escape hatch for a wrong guess)
 ```
 
-The command fetches the ticket, resolves a project using the same routing ladder as polling (see [Ticket Routing](#ticket-routing)), and writes a queue item identical in shape to a polled one. Because it's interactive, it prompts you to pick a project instead of marking the ticket unrouted — but only where the ladder genuinely can't tell, which should be rare. Active-queue dedup blocks adding a ticket already sitting in `incoming/` or `drafts/`, but completed/rejected tickets and `seen_tickets`/`seen_issues` state are bypassed so you can re-queue manually. It writes no poll state: the queue item itself stops the owning watch job (or the poll) from queueing the ticket again.
+The command fetches the ticket, resolves a project using the same routing ladder as polling (see [Ticket Routing](#ticket-routing)), and writes a queue item identical in shape to a polled one. Because it's interactive, it prompts you to pick a project instead of marking the ticket unrouted — but only where the ladder genuinely can't tell, which should be rare. Active-queue dedup blocks adding a ticket already sitting in `incoming/` or `drafts/`, but completed/rejected tickets and `seen_tickets`/`seen_issues` state are bypassed so you can re-queue manually. It writes no poll state: the queue item itself stops the owning watch job from queueing the ticket again.
 
 ### `/engineer-agent review-queue [filter] [--project <slug>]`
 
@@ -344,12 +343,13 @@ It resolves the item against `queue/drafts/` (a no-op if already handled) and ru
 
 ### `/engineer-agent status`
 
-Check system health: config status, queue counts, per-project last poll times, and anything needing
+Check system health: config status, queue counts, per-project last-checked times and job health, and anything needing
 attention — items stranded in `incoming/` (either with no draft yet, or with a **finished** draft
 that no approval path can see), and duplicate queue items that auto-healing declined to resolve
-(the poll pushes about each of those only once, so this is where a standing duplicate stays
-visible). Both stranding shapes are healed automatically by the poll; a non-zero count means the
-heal was declined and needs a look.
+(queue hygiene pushes about each of those only once, so this is where a standing duplicate stays
+visible). Both stranding shapes heal automatically (the owning watch job re-drafts an undrafted
+item; queue hygiene moves a finished one); a non-zero count means the heal was declined or hasn't
+run yet.
 
 ```
 /engineer-agent status
@@ -357,10 +357,9 @@ heal was declined and needs a look.
 
 When scheduled jobs are configured, `status` also shows, per project and source, when a watch job
 last checked it (newest across that source's jobs) and which job did; flags **UNCOVERED** sources (configured, but no
-valid, unpaused `watch` job, so nothing will discover new work there once the global poll is
-removed); and sums job health (`ok` / `partial` / `error` / `paused` / `invalid` / `never run`),
-listing each job that is not ok with its first error. The global poll's `last-poll.yaml` and receipt
-are shown, labelled "legacy", only while they exist.
+valid, unpaused `watch` job, so nothing discovers new work there); and sums job health (`ok` /
+`partial` / `error` / `paused` / `invalid` / `never run`), listing each job that is not ok with its
+first error. With no jobs configured it says that nothing discovers new work.
 
 ### `/engineer-agent jobs [list | run <project>.<id> | pause <project>.<id> | resume <project>.<id> | preview <project>.<id>]`
 
@@ -557,13 +556,13 @@ Both the terminal (`review-queue`) and remote (`execute`) paths funnel through o
 
 Queue items are markdown files with YAML frontmatter. Each item carries a `project` field linking it to a project in the config. Filenames follow the pattern `{YYYYMMDD-HHmmss}-{type}-{short-id}.md`.
 
-**Duplicates heal themselves.** At most one item may exist per `(type, source_id)`; each poll checks
-this and repairs what it safely can. If a poller minted a second copy of a ticket and one copy holds
+**Duplicates heal themselves.** At most one item may exist per `(type, source_id)`; queue hygiene (in the jobs
+tick, at most every `EA_HYGIENE_EVERY`) checks this and repairs what it safely can. If a poller minted a second copy of a ticket and one copy holds
 no work yet, the redundant copy is moved to `rejected/` automatically (with a `rejected_reason`
 saying so, so you can see or undo it) and you are never notified. Only the two cases needing your
 judgement survive — a copy alongside an already-`completed/` one (which may be a deliberate
 `add-ticket` re-add), or two drafts either of which you might be mid-review on — and those are
-pushed **once**, not on every poll. `/engineer-agent status` shows the standing count, so a
+pushed **once**, not on every run. `/engineer-agent status` shows the standing count, so a
 duplicate you have not dealt with is never silently forgotten.
 
 ### Skills
@@ -589,31 +588,32 @@ Skills are auto-invoked while drafting and processing queue items:
 | `codify-learnings` | `/engineer-agent codify` | Scans recent completed/rejected work for recurring learnings, drafts memory-file / skill-note / CLAUDE.md candidates |
 | `execute-item` | Approve/reject from `review-queue` or `execute` | Performs the external action for one item; the single source of truth shared by terminal and remote approval |
 
-## Automated Polling
+## Discovery (watch jobs)
 
-`/engineer-agent setup` installs cron polling automatically with the interval from your config (default: 15 minutes). One cron job polls all projects.
+New work is found only by per-project `watch` [scheduled jobs](#scheduled-jobs). There is no global
+poll and no model-driven discovery. `/engineer-agent setup` installs the jobs dispatcher, and
+`/engineer-agent add-project` offers one `watch` job per configured source
+(`scripts/jobs-default-watch.sh <slug>`). Until a project has watch jobs, nothing discovers work
+for it, and `/engineer-agent status` says so. Moving from an older install that ran the global poll
+(`cron-poll.sh`)? Run `scripts/migrate-poll-to-jobs.sh` (see [Scheduled Jobs](#scheduled-jobs)).
 
-### Fast polling (deterministic collectors)
+Two consequences to know:
 
-By default every poll starts a model session that reads the polling instructions and every raw API
-response — even when there is nothing new, which is most of the time. Opt into scripted collection
-and the mechanical work (fetch, filter, deduplicate, route, classify, write the queue file, update
-state) happens in bash instead, leaving the model to do only what needs judgment: **drafting**.
+- **Every source needs its scripted collector.** A missing `jq`, credential, `agent.jira.site` or,
+  for Slack, TypeSafe key fails that job's run with the reason (first failure pushes, repeated
+  failures pause the job). Nothing falls back to a model: Slack without TypeSafe, or an install
+  without `jq`, has no Slack/Jira/Slite discovery.
+- **Each project fetches its own sources.** A repo, Jira key or Slite tag shared by N projects is
+  fetched N times, once per project's job. Hits more than one project matches still become a single
+  `_unrouted` item.
 
-```yaml
-agent:
-  poll:
-    scripted_sources: ["github-issues", "github", "jira", "slite"]
-```
+### Collectors
 
-- **When a poll finds nothing new and every configured source is scripted, no model runs at all.**
-  A full poll of a five-repo config takes a few seconds instead of a model session.
-- The receipt written to `state/last-poll-receipt.yaml` is identical in shape to the model's, so
-  `/engineer-agent status` and the cron health check are unaffected.
-- Supported sources are `github-issues`, `github` (PR review), `jira`, `slite` and `slack`. Any
-  configured source that is not scripted keeps the model in the loop for that run, so on a typical
-  config you need to list every source you actually use before a quiet poll can skip the model
-  entirely.
+A watch run has two phases. **Phase A** is bash (`scripts/poll-<source>.sh --project`): fetch,
+filter, deduplicate, route, classify, write the queue file, update the job's state. **Phase B**
+(`scripts/jobs-draft.sh`) starts a model only when Phase A found something, and the model only
+drafts (`references/drafting.md` says how for each item type). A quiet run starts no model at all.
+
 - **Jira and Slite need one extra step.** The GitHub collectors reuse the already-authenticated `gh`
   CLI; Jira and Slite have no CLI, so their collectors call the REST APIs directly and need an API
   credential plus `agent.jira.site` / `agent.jira.email`. Store the credential with:
@@ -624,26 +624,20 @@ agent:
   ```
 
   The token goes into your **login keychain**, not into `engineer.yaml`. That is deliberate: cron and
-  launchd hand the poll a minimal environment, so a token exported from your shell profile works in
-  every terminal you test from and is silently absent in the supervised poll. `check` warns when
-  your token resolves only from the environment.
-- Missing credential, missing `jq`/`curl`, or an unreachable API is a **clean skip**: that source is
-  left to the model for the run, exactly as before. Listing a source here cannot break polling.
-- **Off by default.** Omit the block and polling behaves exactly as before. `EA_POLL_SCRIPTED_SOURCES`
-  overrides it at runtime (space- or comma-separated), which is handy for a side-by-side comparison.
+  launchd hand scheduled jobs a minimal environment, so a token exported from your shell profile
+  works in every terminal you test from and is silently absent in the supervised job. `check` warns
+  when your token resolves only from the environment.
 
-#### Scripted Slack polling (`"slack"`) — double opt-in
+#### Slack relevance (`slack` / `watch`) — double opt-in
 
 Slack is the odd one out, and worth reading about before enabling. Every other source is filtered by
 a field comparison — a Jira status, a GitHub assignee, a Slite tag. Slack's filter is a judgment:
-`skills/poll-slack/SKILL.md` asks the model to decide whether a keyword hit is "actually a question
-directed at the user", because a keyword filter alone is mostly false positives ("deploy" appears in
-every deploy announcement). That one sentence is why Slack kept every poll paying for a model
-session even on a quiet day.
+is a keyword hit "actually a question directed at the user"? A keyword filter alone is mostly false
+positives ("deploy" appears in every deploy announcement).
 
-`scripts/poll-slack.sh` keeps the judgment but stops paying a full session for it. Each candidate
-message gets **one** batched request to [TypeSafe](https://typesafe.ai)'s System One model, which
-returns four probabilities instead of prose:
+`scripts/poll-slack.sh` makes that judgment without a model session. Each candidate message gets
+**one** batched request to [TypeSafe](https://typesafe.ai)'s System One model, which returns four
+probabilities instead of prose:
 
 | Question | Meaning |
 |---|---|
@@ -657,8 +651,6 @@ and testable rather than living inside a prompt:
 
 ```yaml
 agent:
-  poll:
-    scripted_sources: ["github-issues", "github", "jira", "slite", "slack"]
   slack:
     user_id: "U0123456789"      # optional: drops your own messages for free, and sharpens
     user_name: "Your Name"      #           the "is this aimed at me?" judgment
@@ -675,9 +667,9 @@ agent:
 /path/to/engineer-agent/scripts/setup-credentials.sh typesafe
 ```
 
-- **Both opt-ins are required.** Listing `"slack"` without a resolvable `agent.typesafe` key makes
-  the collector exit cleanly and Slack stays model-driven — you cannot enable this by accident.
-- **This is the one poll-path integration that sends your content to a third party.** Slack message
+- **Both opt-ins are required.** A `slack` / `watch` job without a resolvable `agent.typesafe` key
+  fails its preflight with the reason — you cannot enable this by accident.
+- **This is the one discovery integration that sends your content to a third party.** Slack message
   and thread text goes to `api.typesafe.ai`. `gh`, Jira and Slite all talk to systems that already
   hold the data being sent; this does not. That asymmetry is the whole reason for the second opt-in
   — and the same reason the key alone enables nothing else either (see the next section).
@@ -688,8 +680,9 @@ agent:
 - **Tune the thresholds against your own channels.** The shipped defaults are a starting point: a
   busy `#general` wants `min_directed` higher, a quiet team channel lower. Raise a `min_*` or lower
   `max_answered` to queue less.
-- A failed request is **not** a silent "no" — the run reports an error, leaves the cutoff where it
-  was, and hands Slack back to the model, so a transient outage cannot quietly swallow messages.
+- A failed request is **not** a silent "no" — the run reports an error and leaves the cutoff where
+  it was, so the next run re-judges those messages and a transient outage cannot quietly swallow
+  them.
 
 #### Ticket-kind Form B (`agent.typesafe.ticket_kind`) — its own opt-in
 
@@ -767,28 +760,30 @@ Anything the scripts cannot decide is *flagged*, never guessed — an ambiguous 
 ambiguous "is this title an imperative?", on an install that has not enabled the judgment for it, is
 handed to the model with the rest of the ladder already applied.
 
-To customize the interval or reinstall manually:
+### Running unattended
 
-```bash
-# Install with a custom interval (in minutes)
-/path/to/engineer-agent/scripts/install-cron.sh 30
-```
+`scripts/install-jobs.sh` installs the jobs dispatcher (`scripts/jobs-tick.sh`, every minute). On
+**macOS** it registers a **launchd LaunchAgent** (`engineer-agent-jobs`) — required for headless
+auth, see below; on **Linux** it installs a **crontab entry**. Logs go to
+`~/.local/share/engineer-agent/state/jobs.log`. Cadence, business hours and budget are per job
+(`every`, `hours`, `days`, `budget_usd`; see [Scheduled Jobs](#scheduled-jobs)).
 
-This installs a scheduled job that runs `scripts/cron-poll.sh`, which invokes Claude headlessly to poll all sources for all projects. On **macOS** it registers a **launchd LaunchAgent** (`engineer-agent-poll`) — required for headless auth, see below; on **Linux** it installs a **crontab entry**. Logs are written to `~/.local/share/engineer-agent/state/cron-poll.log`.
+**Discovery is read-only by construction.** Collectors call read verbs only, and the drafting run
+gets an allowlist limited to read verbs (`gh pr list/view/diff`, `gh issue list/view`, the read-only
+preflights `gh auth status`/`gh --version`, and the Slack backend's read-only `read`/`thread`/`auth`
+— `spy` or `scripts/slack-mcp.sh` depending on `agent.slack.method`), so it can draft responses but
+cannot post anything. Under `mcp-proxy` those Slack verbs are allowlisted for every candidate plugin
+root and in both the bare and `bash `-prefixed invocation form, because the model does not always
+emit the same one — a form the allowlist misses is denied outright. The Slack `send` verb is never
+allowlisted for drafting under either method. Every outbound action stays behind the approval gate.
 
-On macOS you can confine polling to specific clock hours (e.g. business hours, to cap spend on a first poll over a large backlog) by setting `EA_POLL_HOURS` (comma-separated, 0–23) and optionally `EA_POLL_MINUTE` at install time — e.g. `EA_POLL_HOURS=9,10,11,13,14,15,16 EA_POLL_MINUTE=3 scripts/install-cron.sh`. Without them the poll runs every N minutes.
+**Headless auth (macOS): why jobs run under launchd, not cron.** On macOS the Claude credential lives in the login keychain, which only unlocks *inside* your GUI login session. A **crontab** job runs outside that session and can't read it, so it fails with `Not logged in` even though the same credentials work interactively. A **launchd LaunchAgent** bootstrapped into your GUI session *can* read the keychain — so `install-jobs.sh` installs the dispatcher as a LaunchAgent on macOS (the approval-listener already uses this path). No token on disk; the tradeoff is that jobs run only while you're logged in. On Linux there's no per-user GUI-keychain split, so crontab is fine.
 
-Each poll run is capped at **$6.00** by default (`--max-budget-usd`), tunable via `EA_POLL_BUDGET_USD` set at install time (baked into the launchd plist / crontab entry like `CLAUDE_BIN`). A full multi-project poll that reads live Slack channels and drafts responses inline can be token-heavy; if a run exceeds its cap it aborts without recording state and the next run retries the same work, so give it headroom. The poll also takes a lockfile (`state/drafting.lock`, shared with scheduled jobs' drafting runs) and skips a cycle if a previous run or a job's drafting is still in flight, so two drafting runs never run concurrently. Each `gh` / Slack CLI call in the scripted collectors is capped at `EA_POLL_CMD_TIMEOUT` seconds (default 120), and a whole run is killed after `EA_POLL_MAX_SECONDS` (default 3600) with an urgent ntfy alert, since launchd never starts a new run while a hung one is alive. A repo a collector failed to query is recorded in the receipt's `errors:` and the status becomes `partial`.
+**Editing a LaunchAgent plist by hand?** Run `launchctl bootout gui/$UID/<job>` then `launchctl bootstrap gui/$UID <plist>` — launchd caches a job's `EnvironmentVariables` at load, so an edited plist has no effect until the definition is re-read, and `launchctl kickstart -k` restarts the process while reusing the *cached* definition. Check what's actually live with `launchctl print gui/$UID/<job> | grep CLAUDE_BIN`; reading the plist tells you nothing about the running job. Re-running `install-jobs.sh` / `install-listener.sh` also reloads correctly.
 
-**The poll is read-only by construction.** It runs with an allowlist limited to read verbs (`gh pr list/view/diff`, `gh issue list/view`, the read-only preflights `gh auth status`/`gh --version`, and the Slack backend's read-only `read`/`thread`/`auth` — `spy` or `scripts/slack-mcp.sh` depending on `agent.slack.method`), so it can find work and draft responses but cannot post anything. Under `mcp-proxy` those Slack verbs are allowlisted for every candidate plugin root and in both the bare and `bash `-prefixed invocation form, because the model does not always emit the same one — a form the allowlist misses is denied outright, which reads as "Slack is unavailable" and errors the source. The Slack `send` verb is never allowlisted in the poll under either method. Every outbound action stays behind the approval gate.
+**Separately — a `forceLoginOrgUUID` managed policy blocks *environment* credentials, but not your keychain login.** If your org deploys a `forceLoginOrgUUID` managed policy (`/Library/Application Support/ClaudeCode/managed-settings.json`), Claude Code rejects `ANTHROPIC_API_KEY`, `apiKeyHelper`, *and* a `claude setup-token` OAuth token — org membership can't be verified for an environment credential, so a freshly-minted, org-valid token still fails with `Unable to verify organization for the current authentication token`. (An `auth.env` / `CLAUDE_CODE_OAUTH_TOKEN` loader was tried and removed for exactly this reason — don't re-add it.) **Your normal login-keychain credential is not an environment credential**, so when it belongs to a verified member of the named org it works under the policy — and the LaunchAgent above reads it. Verified on a machine with the policy active and MDM-enforced: a full headless run went clean. So the policy is *not* a headless dead end, and the two failure modes read differently: `Unable to verify organization…` means an environment credential is in play (remove it), while a plain `Not logged in` means the keychain isn't reachable (out-of-session scheduler, missing `USER`, or nobody logged into the GUI). Only if no interactive login is possible at all (a true headless build box) do the fallbacks apply: a cloud-provider inference path (Amazon Bedrock / Google Vertex / Microsoft Foundry) or an org/IT-provided machine exemption; both require your org's IT. If the policy is present, don't delete, truncate, or shim around it — and don't patch the `claude` binary to make it unreadable — it's an intentional security control, and MDM will restore it anyway.
 
-**Headless auth (macOS): why the poll runs under launchd, not cron.** On macOS the Claude credential lives in the login keychain, which only unlocks *inside* your GUI login session. A **crontab** job runs outside that session and can't read it, so a cron poll fails with `Not logged in` even though the same credentials work interactively. A **launchd LaunchAgent** bootstrapped into your GUI session *can* read the keychain — so `install-cron.sh` installs the poll as a LaunchAgent on macOS (the approval-listener already uses this path). No token on disk; the tradeoff is that it only polls while you're logged in. On Linux there's no per-user GUI-keychain split, so crontab is fine.
-
-**Editing a LaunchAgent plist by hand?** Run `launchctl bootout gui/$UID/<job>` then `launchctl bootstrap gui/$UID <plist>` — launchd caches a job's `EnvironmentVariables` at load, so an edited plist has no effect until the definition is re-read, and `launchctl kickstart -k` restarts the process while reusing the *cached* definition. Check what's actually live with `launchctl print gui/$UID/<job> | grep CLAUDE_BIN`; reading the plist tells you nothing about the running job. Re-running `install-cron.sh` / `install-listener.sh` also reloads correctly.
-
-**Separately — a `forceLoginOrgUUID` managed policy blocks *environment* credentials, but not your keychain login.** If your org deploys a `forceLoginOrgUUID` managed policy (`/Library/Application Support/ClaudeCode/managed-settings.json`), Claude Code rejects `ANTHROPIC_API_KEY`, `apiKeyHelper`, *and* a `claude setup-token` OAuth token — org membership can't be verified for an environment credential, so a freshly-minted, org-valid token still fails with `Unable to verify organization for the current authentication token`. (An `auth.env` / `CLAUDE_CODE_OAUTH_TOKEN` loader was tried and removed for exactly this reason — don't re-add it.) **Your normal login-keychain credential is not an environment credential**, so when it belongs to a verified member of the named org it works under the policy — and the LaunchAgent above reads it. Verified on a machine with the policy active and MDM-enforced: a full headless poll ran clean. So the policy is *not* a headless dead end, and the two failure modes read differently: `Unable to verify organization…` means an environment credential is in play (remove it), while a plain `Not logged in` means the keychain isn't reachable (out-of-session scheduler, missing `USER`, or nobody logged into the GUI). Only if no interactive login is possible at all (a true headless build box) do the fallbacks apply: a cloud-provider inference path (Amazon Bedrock / Google Vertex / Microsoft Foundry) or an org/IT-provided machine exemption; both require your org's IT. If the policy is present, don't delete, truncate, or shim around it — and don't patch the `claude` binary to make it unreadable — it's an intentional security control, and MDM will restore it anyway.
-
-Because `claude -p` exits 0 whenever the CLI ran — regardless of whether the poll actually happened — the cron doesn't trust the exit code. It mints a per-run id and requires the poll to write it back into `state/last-poll-receipt.yaml` as its final step; if that receipt is missing or stale the run failed silently, and the cron logs a `WARN` and — when ntfy is configured — sends you an urgent push. A poll that legitimately finds **zero items** writes a normal receipt (`status: ok`, `items_queued: 0`) and stays silent, and a **partial** failure (one source errored while others succeeded) is now surfaced too — something the previous state-fingerprint check could never detect.
+Because `claude -p` exits 0 whenever the CLI ran — regardless of whether the work happened — the drafting run doesn't trust the exit code: an item counts as drafted only if its file reached `queue/drafts/`. Each job writes its own receipt (`state/jobs/<project>.<id>.receipt`) with `ok` / `partial` / `error`; a collector that failed one repo or source makes the run `partial`, and `/engineer-agent status` lists every job that is not ok with its first error.
 
 **Upgrading from a version before runtime data moved?** Data used to live in `~/.claude/engineer-agent/`, which Claude Code guards as sensitive — headless runs (cron, ntfy listener) couldn't write there, so they silently did nothing. Migrate with:
 
@@ -798,23 +793,22 @@ Because `claude -p` exits 0 whenever the CLI ran — regardless of whether the p
 
 It copies everything to `~/.local/share/engineer-agent/`, never overwrites, and leaves the old tree intact for you to delete. Set `EA_AGENT_DIR` to choose a different location (`XDG_DATA_HOME` is honored).
 
-By default the scripts resolve the `claude` binary from `PATH`. To use a specific Claude Code binary (a version shim, wrapper, or non-standard install path), set the `CLAUDE_BIN` env var — e.g. `CLAUDE_BIN=/opt/claude/bin/claude scripts/install-cron.sh 30`. Because the scheduled run doesn't inherit your interactive shell environment, the installer bakes the value set at install time into the launchd plist (`EnvironmentVariables`, macOS) or crontab entry (Linux) so the scheduled run uses the same binary.
+By default the scripts resolve the `claude` binary from `PATH`. To use a specific Claude Code binary (a version shim, wrapper, or non-standard install path), set the `CLAUDE_BIN` env var — e.g. `CLAUDE_BIN=/opt/claude/bin/claude scripts/install-jobs.sh`. Because the scheduled run doesn't inherit your interactive shell environment, the installer bakes the value set at install time into the launchd plist (`EnvironmentVariables`, macOS) or crontab entry (Linux) so the scheduled run uses the same binary.
 
 ```bash
 # macOS (launchd)
-launchctl print gui/$(id -u)/engineer-agent-poll   # verify / status
-launchctl kickstart -k gui/$(id -u)/engineer-agent-poll   # run one poll now
-launchctl bootout gui/$(id -u)/engineer-agent-poll; rm ~/Library/LaunchAgents/engineer-agent-poll.plist   # remove
+launchctl print gui/$(id -u)/engineer-agent-jobs   # verify / status
+/path/to/engineer-agent/scripts/install-jobs.sh --uninstall   # remove
 
 # Linux (crontab)
 crontab -l | grep engineer-agent            # verify
-crontab -l | grep -v engineer-agent | crontab -   # remove
+/path/to/engineer-agent/scripts/install-jobs.sh --uninstall   # remove
 ```
 
 ## Scheduled Jobs
 
-The global poll checks every source of every project on one interval. Scheduled jobs give one
-project's integration its **own** interval, running alongside the poll (not replacing it):
+Scheduled jobs give one project's integration its **own** interval. They are the only scheduler:
+`watch` jobs are the only way new work is discovered.
 
 ```yaml
 projects:
@@ -837,7 +831,7 @@ Install the dispatcher once; it fires every minute and runs whatever is due:
 /path/to/engineer-agent/scripts/install-jobs.sh --uninstall
 ```
 
-**Moving off the global poll.** `scripts/migrate-poll-to-jobs.sh` adds a `watch` job for every
+**Moving off the global poll** (installs from before it was removed). `scripts/migrate-poll-to-jobs.sh` adds a `watch` job for every
 configured source that has none, at the poll's old cadence (its `StartInterval` / `*/N`; an
 `EA_POLL_HOURS` poll becomes `every: 1h` with `hours:` when the hours are contiguous). It seeds each
 new job's state from `last-poll.yaml` so the first run doesn't re-discover the backlog, drops
@@ -849,7 +843,7 @@ installed, and never overwrites a job's existing state file. Re-running it is a 
 `slack` / `watch` uses the scripted Slack collector's relevance judgment and routing, so it
 requires an `agent.typesafe` credential (plus `curl` and `jq`). Its `watch` sources:
 
-- `channels` — the project's own channels, as the global poll scans them.
+- `channels` — the project's own channels, filtered by its `slack.keywords`.
 - `mentions` — `search "<@you>"` across the workspace (needs `agent.slack.user_id`). If several
   projects watch mentions, a hit becomes an `_unrouted` item listing them.
 - `my-threads` — new replies in threads you answered through engineer-agent. Approving a Slack
@@ -872,7 +866,7 @@ idle. Before each run the job checks that its collector can run (`poll-<source>.
 `curl`, credentials, required config; no network). If not, the run fails with the reason (first
 failure pushes, repeated failures pause the job) and `jobs list` shows it as `unavailable: <reason>`.
 
-When it finds something, a drafting run starts using the poll's read-only allowlist; drafts land in
+When it finds something, a drafting run starts using the read-only drafting allowlist (`lib-poll-allowlist.sh`); drafts land in
 `drafts/` and push to ntfy as usual. Reaction triggers are specified in
 `docs/superpowers/specs/2026-11-09-scheduled-jobs-design.md` and not built yet.
 
@@ -1064,13 +1058,13 @@ How it behaves:
 
 - **Each job is isolated.** It has its own lock, a wall-clock timeout (`EA_JOB_MAX_SECONDS`,
   default 3600) that kills its whole process tree, its own receipt at
-  `state/jobs/<project>.<id>.receipt`, and its own Slack cutoff file, so it never races the
-  global poll's `last-poll.yaml`. Anything both paths find is deduplicated by the queue.
+  `state/jobs/<project>.<id>.receipt`, and its own state file (`state/jobs/<project>.<id>.state.yaml`),
+  so no two jobs share a cutoff. Anything two jobs both find is deduplicated by the queue.
 - **Failures are loud once, then pause.** The first failed run pushes one alert. After
   `guards.pause_after_failures` failures in a row (default 3) the job pauses itself and pushes once
-  more. Resume it with `/engineer-agent jobs resume <project>.<id>`. A paused job never claims
-  `exclusive`, so the global poll picks that source back up.
-- **One drafter at a time.** Drafting runs (every job's and the poll's) share `state/drafting.lock`.
+  more. Resume it with `/engineer-agent jobs resume <project>.<id>`. While it is paused, `status`
+  shows its source as UNCOVERED if no other watch job covers it.
+- **One drafter at a time.** Every job's drafting run shares `state/drafting.lock`.
   If another is running, drafting is deferred (`drafting: deferred` in the receipt) and the next tick retries.
 - **The tick also keeps the queue healthy.** At most every `EA_HYGIENE_EVERY` (default `15m`) it
   moves finished drafts out of `incoming/`, resolves mechanical duplicates, and pushes once about
@@ -1085,14 +1079,14 @@ With an `agent.notify.ntfy` block configured, the agent pushes work to your phon
 **How it works:**
 
 ```
-cron-poll → drafts item → notify.sh ──ntfy push (Approve / Reject / Open)──▶ 📱
+watch job → drafts item → notify.sh ──ntfy push (Approve / Reject / Open)──▶ 📱
                                                                               │ tap
             approval-listener.sh ◀── ntfy command_topic ◀── button POSTs ─────┘
                      │
                      └─▶ claude -p "/engineer-agent execute <item> <decision>" → posts the action
 ```
 
-1. After each poll, every new draft is pushed to your `topic` with **Approve**, **Reject**, and **Open** buttons.
+1. After each drafting run, every new draft is pushed to your `topic` with **Approve**, **Reject**, and **Open** buttons.
 2. Tapping Approve/Reject POSTs a command (`approve|<item>` / `reject|<item>`) to your `command_topic`.
 3. `scripts/approval-listener.sh` — a long-running service on your machine — reads the command topic and runs `/engineer-agent execute` headlessly to perform the action. It confirms each tap on your phone: a **receipt** notification ("📨 Received…") the instant the tap lands, then an **outcome** notification once the run finishes — "✅ Done…" on success or "⚠️ Failed…" if the item still needs a re-run. (Malformed or duplicate taps are ignored silently.)
 
@@ -1204,7 +1198,7 @@ scripts/
   ea-config.sh                 Normalizes engineer.yaml to a flat, greppable view
   poll-github-issues.sh        Deterministic GitHub Issues collector
   poll-github-prs.sh           Deterministic GitHub PR collector
-  queue-status.sh              Queue counts / poll times / receipt health
+  queue-status.sh              Queue counts / per-source last-checked / job health
   queue-list.sh                Sorted review-queue table
   draft-lint.sh                Flags AI-writing tells in a draft's postable text (review-queue)
   queue-dedup-check.sh         Asserts (and with --heal, resolves) the one-item-per-(type, source_id) invariant
@@ -1263,7 +1257,7 @@ scripts/
                                test, QA + publish, mark ready, transition, Slack announce
   lib-slite-api.sh             Slite REST (key on curl stdin), shared by poll-slite and pr-pipeline
   confined-push.sh             The only push a confined run may make: one prefixed branch, no force
-  lib-poll-allowlist.sh        Read-only allowlist shared by the poll and job drafting
+  lib-poll-allowlist.sh        Read-only allowlist for job drafting runs
   notify.sh                    Publish a push notification to ntfy
   turn-notify-hook.sh          Hook handler: FYI push at each implement-ticket turn end
   approval-listener.sh         Long-running ntfy command-topic subscriber (remote approval)
@@ -1286,9 +1280,7 @@ config/
     rejected/                  Rejected with reason
   investigations/              Archived findings docs from ticket-investigation items
   state/
-    last-poll.yaml             Dedup timestamps and seen IDs (per project + per Jira project key)
-    last-poll-receipt.yaml     Liveness receipt from the last cron poll (run_id, status, item count, skipped, errors)
-    claude-bin.path            Resolved claude executable an unattended poll last ran (macOS TCC preflight)
+    claude-bin.path            Resolved claude executable an unattended run last used (macOS TCC preflight)
     queue-dedup-notified.tsv   Duplicate (type, source_id) pairs already pushed about (push-once ledger)
     queue-dedup-baseline.tsv   Known historical duplicates suppressed from the check
     ntfy-seen.yaml             Processed ntfy command message IDs (remote-approval dedup)

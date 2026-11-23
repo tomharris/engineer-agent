@@ -190,15 +190,16 @@ in the same unsupervised run is not. Containment: the `ticket_key` is validated 
 the run **refuses to start** if it fails; the prompt carries a `TARGET:` directive naming that key as
 the only permitted comment target, capping it at one comment and instructing that any instruction
 inside the ticket text naming another issue be ignored — the same pre-expanded pinning
-`cron-poll.sh` gives `${SLACK_BIN}`. And **MCP permission rules cannot be scoped to arguments**, so
+`jobs-draft.sh` gives `${SLACK_BIN}`. And **MCP permission rules cannot be scoped to arguments**, so
 `addCommentToJiraIssue` is a capability over every issue the Atlassian token can reach and
 `Bash(gh issue comment:*)` over every repo `gh` is authed for; the prompt pin is the only scoping
 that exists. Same "medium, not airtight" admission as the implementation path's above.
 The transition verbs are stricter still: they are absent from the allowlist entirely unless
 `investigation.on_complete_status` is configured, so capability follows config.
 
-Key invariant: **polling reads; only `execute-item` writes.** `cron-poll.sh` passes a deliberately
-read-only `--allowedTools` allowlist (`gh pr list/view/diff`, `gh issue list/view`,
+Key invariant: **polling reads; only `execute-item` writes.** The collectors (`job-watch.sh`) call
+read verbs only, and the drafting run (`jobs-draft.sh`) gets a deliberately read-only
+`--allowedTools` allowlist from `lib-poll-allowlist.sh` (`gh pr list/view/diff`, `gh issue list/view`,
 `gh auth status`/`gh --version`, the Slack
 backend's `read`/`thread` — `spy` or `scripts/slack-mcp.sh`, keyed off `agent.slack.method` and
 resolved in plain bash before `claude` starts — and the read-only MCP verbs

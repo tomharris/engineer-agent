@@ -18,7 +18,7 @@ references/                 shared specs skills Read at runtime (routing-ladder.
                             scripts/lib-routing.sh and lib-ticket-kind.sh implement their
                             deterministic tiers
 hooks/hooks.json            turn-completion push hooks
-scripts/                    cron poll, ntfy notify/listener, collectors, jobs, setup, credentials
+scripts/                    jobs (tick, watch, drafting), collectors, ntfy notify/listener, setup, credentials
 tests/                      shell suites; bash tests/run-all.sh
 config/engineer.example.yaml
 docs/architecture/          detailed design rationale (read before changing that area)
@@ -41,7 +41,8 @@ docs/architecture/          detailed design rationale (read before changing that
 
 ## Core invariants
 
-- **Polling reads; only `execute-item` writes.** Poll allowlists contain read verbs only; posting
+- **Polling reads; only `execute-item` writes.** Collectors (`job-watch.sh`) call read verbs only and
+  the drafting run (`jobs-draft.sh`, `lib-poll-allowlist.sh`) allowlists read verbs only; posting
   verbs live behind the gate. New source ⇒ add its read verbs (and read-only preflights) only.
 - **`execute-item` is the single definition of approval** for both `review-queue` and remote
   `execute`. Exceptions: `qa-test-plan` is interactive-only; remote `ticket-investigation` runs the
@@ -89,9 +90,9 @@ docs/architecture/          detailed design rationale (read before changing that
   override); never hardcode.
 - **Never put runtime data under `~/.claude/`** — the sensitive-path guard silently blocks
   Edit/Write headlessly.
-- Reference plugin files via `${CLAUDE_PLUGIN_ROOT}`, never a bare relative path (cron runs from
-  `$HOME`). `references/` is plain markdown, not a skill: the cron allowlist has `Read` but not
-  `Skill`/`Agent`.
+- Reference plugin files via `${CLAUDE_PLUGIN_ROOT}`, never a bare relative path (scheduled jobs
+  run from `$HOME`). `references/` is plain markdown, not a skill: the drafting allowlist has `Read`
+  but not `Skill`/`Agent`.
 - Headless `claude -p` rules (details in `headless-runs.md`): pin `--permission-mode`; pass
   `--allowedTools` including read-only preflights (`gh auth status`, `gh --version`, Slack `auth`,
   `echo:*`); don't put `--allowedTools` last; use `Edit(//abs)` not `Write(path)`; `</dev/null`;
@@ -102,8 +103,8 @@ docs/architecture/          detailed design rationale (read before changing that
 - Hooks (`turn-notify-hook.sh`) always `exit 0`, never write stdout, keep jq optional, and strip
   URLs before pushing.
 - Pushes from a linked worktree use `--no-verify`; from the human's checkout they don't.
-- Cron path is jq-free (`gh --jq`); Jira/Slite/Slack collectors soft-require jq (exit 3 ⇒ model
-  fallback). Portable bash/BSD awk only — see the gotchas list in `deterministic-polling.md`.
+- GitHub collectors are jq-free (`gh --jq`); Jira/Slite/Slack collectors require jq (exit 3 ⇒ the
+  job run fails; no model fallback). Portable bash/BSD awk only — see the gotchas list in `deterministic-polling.md`.
 - LaunchAgent env changes need `bootout` + `bootstrap`, not `kickstart`.
 - ntfy pushes: push once per condition, never every poll; auto-heals send no push.
 

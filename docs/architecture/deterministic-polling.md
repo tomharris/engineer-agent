@@ -1,25 +1,27 @@
 # Deterministic polling (scripted collectors)
 
 
-A poll used to be one `claude -p` session that read ~87KB of instructions (`commands/poll.md`, five
-`skills/poll-*/SKILL.md`, three `references/*.md`) plus every raw API response, on **every fire,
+A poll used to be one `claude -p` session that read ~87KB of instructions (a poll command, five
+per-source skills, three `references/*.md`) plus every raw API response, on **every fire,
 every 15 minutes**, to do work that is almost entirely string comparison and file writing. The
 steady state of a healthy queue is `items_queued: 0`, so most of that spend bought the answer
 "nothing new".
 
-`agent.poll.scripted_sources` moves the mechanical half into bash. The run becomes two phases:
+The collectors move the mechanical half into bash. Each `watch` job (`scheduled-jobs.md`) runs in
+two phases:
 
 ```
-cron-poll.sh
-  ├─ PHASE A  scripts/poll-{github-issues,github-prs,jira,slite,slack}.sh   (no model)
-  │           fetch → filter → reconcile → route → classify → write queue file → state + receipt
-  │           emits queue/incoming/*.md + state/poll-manifest.tsv
-  └─ PHASE B  claude -p, ONLY if the manifest is non-empty
-              drafts each manifest item and moves it to drafts/
+job-watch.sh <project>.<id>
+  ├─ PHASE A  scripts/poll-{github-issues,github-prs,jira,slite,slack}.sh --project   (no model)
+  │           fetch → filter → reconcile → route → classify → write queue file → job state
+  │           emits queue/incoming/*.md + the run's manifest.tsv
+  └─ PHASE B  jobs-draft.sh: claude -p, ONLY if the manifest is non-empty
+              drafts each manifest item (references/drafting.md) and moves it to drafts/
 ```
 
-**When Phase A finds nothing and every configured source is scripted, `claude` is never started.**
-A full 5-repo poll of a real config takes ~6s and writes a receipt byte-identical to the model's.
+**When Phase A finds nothing, `claude` is never started.** There is no model-driven discovery: a
+source whose collector can't run (exit 3, or a failed `--check`) fails the job run, which pushes
+and eventually pauses (`scheduled-jobs.md`).
 
 ### What is scripted and what is not
 
@@ -33,7 +35,7 @@ A full 5-repo poll of a real config takes ~6s and writes a receipt byte-identica
 | Credential resolution (env → file → Keychain), read-only | bash (`lib-secret.sh`) |
 | Ticket-kind **tiers 0–2, 3 Form A, and the Form B precondition** | bash (`lib-ticket-kind.sh`) |
 | Filename, frontmatter, `## Context`, branch slug | bash (`lib-queue-write.sh`) |
-| State + receipt | bash (`lib-state.sh`, `cron-poll.sh`) |
+| State + receipt | bash (`lib-state.sh`, `jobs-tick.sh`) |
 | Slack **relevance** — is this a question aimed at me? | **System One** (`lib-typesafe.sh`), composed in bash |
 | Kind **Form B** (imperative-vs-noun), when opted in | **System One** (`lib-ticket-kind-judge.sh`), thresholded in bash |
 | Routing **tier 3b** (which project), when opted in | **System One** (`lib-routing-judge.sh`), a Choice over the candidate set, thresholded in bash |
@@ -62,7 +64,7 @@ and re-asking Phase B would pay twice to re-litigate it.
 | `lib-routing.sh` / `lib-ticket-kind.sh` | the deterministic ladder tiers |
 | `lib-ticket-kind-judge.sh` | kind Tier 3 Form B as one typed judgment; inert unless opted in, and degrades to the model on any failure |
 | `lib-routing-judge.sh` | routing Tier 3b as one typed Choice over the config-derived candidate set; same opt-in and same degradation |
-| `lib-state.sh` | round-trips `state/last-poll.yaml`, preserving model-written sections |
+| `lib-state.sh` | round-trips the job's state file (`EA_POLL_STATE_FILE`; no default, a collector without one exits 2) |
 | `lib-time.sh` | GNU/BSD-portable timestamp helpers |
 | `poll-github-issues.sh` / `poll-github-prs.sh` / `poll-jira.sh` / `poll-slite.sh` / `poll-slack.sh` | the collectors |
 | `lib-typesafe.sh` | a minimal System One client: fixed yes/no questions in, floats out. NOT a general LLM client |
@@ -102,10 +104,9 @@ model-driven. Four consequences that a reader will otherwise try to "simplify" a
   reconstructing prose from that in bash would be a parser of its own, and its failure mode is a
   queue item with an empty or mangled `### Description` that a human then approves work from. v2
   returns text. Both are supported on Jira Cloud.
-- **`jq` is a hard dependency of these two collectors and a soft one for the poll.** The GitHub
-  collectors use `gh --jq` (gh's embedded engine) to honour the "the cron path is jq-free" policy;
-  there is no equivalent for curl. So a missing `jq` exits 3 and the model polls that source, which
-  is what the policy actually protects.
+- **`jq` is a hard dependency of these two collectors.** The GitHub collectors use `gh --jq` (gh's
+  embedded engine) and stay jq-free; there is no equivalent for curl. A missing `jq` fails the
+  job's `--check` preflight, so the run fails visibly rather than reporting a quiet `ok`.
 - **The JQL timezone conversion is load-bearing.** A bare datetime in JQL is read in the *account's*
   Jira profile timezone, not UTC, so feeding it a UTC watermark's clock digits shifts the window by
   the account offset — six hours into the **future** for a Denver account, after which every ticket
@@ -119,7 +120,7 @@ model-driven. Four consequences that a reader will otherwise try to "simplify" a
   comparison. An *unrecognisable* response shape exits 3 rather than yielding zero docs — "no docs
   need review" must never be something a parse failure can say.
 
-**A bug fixed in passing:** `skills/poll-slite/SKILL.md` iterates per project and queues a matching
+**A bug fixed in passing:** the old model-driven Slite poll iterated per project and queued a matching
 doc for each. In a real config all six projects set `doc_labels: ["needs-review"]`, so every review
 doc matches every project and the global `source_id` dedup silently awards it to whichever project
 the loop reached first — the shared-repo trap in a different costume. `poll-slite.sh` collects docs
@@ -136,16 +137,15 @@ a secret.
 
 > **Prefer the Keychain on macOS.** cron/launchd/systemd hand the run a minimal environment, so a
 > token exported from a shell profile is present in every terminal you test from and ABSENT in the
-> supervised poll — the collector then skips cleanly every 15 minutes forever, and the only symptom
-> is that Jira is never actually scripted. This is the same class of bug as the missing `$USER` that
-> once broke every cron poll. The poll already runs as a `gui/$UID` LaunchAgent specifically so it
-> can read the login keychain (`slack-mcp.sh` relies on the same property), so this needs no
+> supervised job — its `--check` then fails on every run. This is the same class of bug as the
+> missing `$USER` that once broke every cron poll. The jobs tick already runs as a `gui/$UID`
+> LaunchAgent specifically so it can read the login keychain (`slack-mcp.sh` relies on the same property), so this needs no
 > scheduler change. `setup-credentials.sh check` warns when a token resolves only from the
 > environment.
 
 Credentials are passed to curl via `--config -` (**stdin**), never `-u`/`-H` in argv: an argv
-credential is readable by any other process on the box via `ps`, and this runs unattended every 15
-minutes. Both test suites assert the secret never appears in argv.
+credential is readable by any other process on the box via `ps`, and this runs unattended on every
+job run. Both test suites assert the secret never appears in argv.
 
 ### Two hazards the design has to handle
 
@@ -183,16 +183,15 @@ warning. `tests/lib-queue.test.sh` and `tests/poll-github-issues.test.sh` both p
 > to precisely the case the hazard describes.
 
 **2. `gh --jq`, not `jq`.** The collectors use gh's *embedded* jq engine, so they add no dependency
-and stay inside the "the cron path is jq-free" policy `cron-poll.sh` sets. The Slack collector needs
-real `jq` (there is no embedded engine behind `curl`) and so gates on it softly — exit 3, fall back
-to the model — never hard-fail. Same rule Jira and Slite follow.
+and stay jq-free. The Slack collector needs real `jq` (there is no embedded engine behind `curl`) and
+gates on it with exit 3, which fails the job run. Same rule Jira and Slite follow.
 
 ### Scripted Slack polling: a judgment tier that is not the model
 
 Slack was listed here as permanently model-driven for the same stated reason Jira and Slite once
 were, but a *different* underlying one. Jira/Slite lacked a CLI; Slack lacks a **mechanical
 predicate**. Every other source's "is this work?" test is a field comparison — a status, an
-assignee, a tag. `skills/poll-slack/SKILL.md` §3b is literally "use judgment to determine if it's
+assignee, a tag. The old model-driven Slack poll's instructions said literally "use judgment to determine if it's
 actually a question directed at the user", because a keyword filter alone is mostly false positives
 ("deploy" appears in every deploy announcement). That one sentence is why Slack kept every poll
 paying for a model session even on a quiet day.
@@ -222,12 +221,12 @@ that item still passes the human approval gate. It cannot name a project (routin
 ladder computed from config alone), cannot reach a posting verb, and cannot emit a string any later
 stage executes. Phase A still only reads.
 
-> **DOUBLE OPT-IN, and the second gate is not ceremony.** `slack` in `agent.poll.scripted_sources`
-> is not sufficient: an `agent.typesafe` credential must also resolve, or the collector exits 3 and
-> Slack stays model-driven. That is because **this is the only thing in the poll path that sends
+> **DOUBLE OPT-IN, and the second gate is not ceremony.** A `slack` / `watch` job is not
+> sufficient: an `agent.typesafe` credential must also resolve, or the job's `--check` fails and
+> nothing discovers Slack. That is because **this is the only thing in the poll path that sends
 > your content to a third party.** `gh`, Jira and Slite all talk to systems that already hold the
 > data being sent; `api.typesafe.ai` does not. Anyone enabling it should be making that decision
-> deliberately rather than inheriting it from a config array, so it costs a second explicit step
+> deliberately rather than inheriting it from a job definition, so it costs a second explicit step
 > (`setup-credentials.sh typesafe`, which says so at the prompt).
 >
 > **This generalizes: the credential is necessary for every TypeSafe-backed feature and sufficient
@@ -248,12 +247,12 @@ stage executes. Phase A still only reads.
   the same point, both because it is a second Slack call and because it is the evidence
   `already_answered` needs.
 - **A failed judgment is not a silent "no", and does not advance the cutoff.** The run counts it as
-  an error and exits 3, which hands Slack back to the model — but a cutoff already moved past the
-  messages that *did* get judged would hide them from that fallback too, so a transient outage would
-  quietly eat everything around it. Re-judging a handful next tick is the cheaper mistake;
+  an error and exits 3, failing the job run — and a cutoff already moved past the messages around
+  it would hide them from the next run too, so a transient outage would quietly eat everything
+  around it. Re-judging a handful next tick is the cheaper mistake;
   reconciliation stops anything already written from duplicating.
 - **`last_checked_ts` still does not advance on a zero-message poll** (it is a Slack message
-  timestamp, not a clock — `SKILL.md` §3e), nor on an exit-75 token skip. It *does* advance past
+  timestamp, not a clock), nor on an exit-75 token skip. It *does* advance past
   messages the gate **rejected**: those have been judged, and re-examining them would pay for the
   same answer forever.
 

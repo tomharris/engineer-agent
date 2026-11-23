@@ -5,14 +5,14 @@
 Every skill and command that needs config should start by reading `~/.local/share/engineer-agent/engineer.yaml`. If missing, tell the user to run `/engineer-agent setup` and stop.
 
 The config has two top-level sections:
-- `agent` — global settings (branch_prefix, max_pr_files, `max_issue_age_days`, channels, cron interval, `autonomy`, `notify`)
+- `agent` — global settings (branch_prefix, max_pr_files, `max_issue_age_days`, channels, `autonomy`, `notify`)
 - `projects` — a map of project slugs to per-project integration config
 
 `agent.max_issue_age_days` (optional) caps how old an assigned GitHub issue may be to enter the
-queue: `poll-github-issues` drops issues whose `updatedAt` is older than that many days. `0` or
+queue: `poll-github-issues.sh` drops issues whose `updatedAt` is older than that many days. `0` or
 absent ⇒ no age limit. This is the recency guard that keeps a multi-year assigned backlog in a
-shared tracker from flooding the queue (and exhausting the cron run's budget) on a first poll,
-without having to pre-seed `seen_issues`.
+shared tracker from flooding the queue (and exhausting the drafting run's budget) on a job's first
+run.
 
 Two `agent` subsections drive autonomy (both optional):
 - `agent.autonomy.auto_execute` — a list of action tiers allowed to run **without** an approval gate. Supported: `draft-pr` (draft PRs merge nothing / request no review), and for the `implement-next` scheduled jobs `implement` (start the confined implementation without an Approve tap) and `jira-claim` / `github-claim` (assign/transition the Jira ticket, or assign the GitHub issue and set its Projects board status, without one); a job needs `implement` plus its tracker's claim tier to run unattended (see "Scheduled jobs"). `pr-ready` lets the `after_pr` pipeline (`scripts/pr-pipeline.sh`) mark an autopilot PR ready for review once CI is green and the browser test passed. The pipeline's other stages each have their own tier: `security-review` (run the `security.command` adapter and fix what the PR introduced), `qa-publish` (QA plan, Slite note, PR and Jira comments), `jira-transition` (move the ticket after ready) and `slack-post` (the `announce` message). `slack-react` adds/removes the `agent.slack.reactions` status emoji on a Slack item's message. The `slack`/`cr-qa` job needs `slack-react` (claim/approve reactions), `slack-post` (verdict replies in the request's thread), `pr-comment`, `jira-comment`, `jira-transition` and `security-review`. Absent ⇒ empty ⇒ everything is gated.
@@ -22,10 +22,6 @@ Two `agent` subsections drive autonomy (both optional):
   Jira type `Task`. Per-project `projects.<slug>.investigation.*` **replaces** a list rather than
   merging it, so a project can *narrow* the triggers (the operation that fixes a false positive); an
   explicitly empty list disables that tier. See "Ticket Kind" below.
-- `agent.poll.scripted_sources` — a list of sources collected by a **deterministic script**
-  rather than by the model (`github-issues`, `github`, `jira`, `slite`, `slack`). Absent/empty ⇒ the
-  prompt-driven path, unchanged. Env override `EA_POLL_SCRIPTED_SOURCES`. See "Deterministic
-  polling" below. `slack` additionally requires `agent.typesafe` — see "Scripted Slack polling".
 - `agent.typesafe` — API access for the System One judgments (`api_key_env`, `api_key_file`,
   `api_base`, `model`, plus each feature's thresholds: `slack.min_question` / `slack.min_directed`
   / `slack.max_answered` / `slack.min_engineer`, `ticket_kind.min_imperative` and
@@ -34,8 +30,9 @@ Two `agent` subsections drive autonomy (both optional):
   **This is the only poll-path integration that sends content to a third party**, so the key is
   necessary for every feature below and sufficient for none — **each one opts in separately**, and
   without its own opt-in that judgment stays model-driven exactly as before:
-  - **Slack relevance** — `slack` in `agent.poll.scripted_sources`. Sends message + thread text.
-    See "Scripted Slack polling".
+  - **Slack relevance** — a `slack` / `watch` job. Sends message + thread text. Without the
+    credential the job's collector can't run, so nothing discovers Slack. See "Scripted Slack
+    polling".
   - **Ticket-kind Tier 3 Form B** — `agent.typesafe.ticket_kind.enabled: true` (deny-by-default;
     only the exact string `true`). Sends a GitHub issue title + labels, never the body, and only
     for a title whose leading word already matches a configured keyword. See "Ticket Kind".
@@ -77,9 +74,8 @@ every call site does is resolve the **effective Slack binary**, then invoke it i
     unchanged; execute-item/digest treat a `75` on `send` as a failed post left in `drafts/`).
     Claude Code re-auths on its own and the next run succeeds.
   - **In-session keychain.** `security find-generic-password` reads the login keychain, which on
-    macOS only unlocks inside the GUI (Aqua) session — the same reason the poll runs as a
-    gui-session LaunchAgent (see "Notifications & Remote Approval"). No new scheduler work: the
-    existing `engineer-agent-poll` LaunchAgent already runs in-session.
+    macOS only unlocks inside the GUI (Aqua) session — the same reason the jobs tick runs as a
+    gui-session LaunchAgent (`engineer-agent-jobs`, `headless-runs.md`).
 - `agent.slack.workspace` — default Slack workspace. Effective workspace =
   `projects.<slug>.slack.workspace` ?? `agent.slack.workspace`. Pass it as `-w <workspace>` on
   every call. Under `spy` it disambiguates multiple signed-in workspaces (spy errors without a
@@ -124,5 +120,5 @@ The `qa` subsection drives QA test plans: `base_url`, `test_command` (runs gener
 `transition` (required, target status on approve), `trigger_prefix` (default `CR/QA`),
 `reactions: {claim, approve}` (defaults `eyes`, `approve`), `security: {command, timeout}`
 (`command` required, absolute or `~/`), `qa: {timeout}` (per script, default `30m`), plus the usual
-`every`/`hours`/`days`/`exclusive`/`budget_usd`/`guards` (`daily_cap`, default 10). The project
+`every`/`hours`/`days`/`budget_usd`/`guards` (`daily_cap`, default 10). The project
 needs `tracker: jira`, `github.repos`, and `exec.allowed_commands` for the QA run.
