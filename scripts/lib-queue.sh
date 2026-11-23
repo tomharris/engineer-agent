@@ -32,7 +32,14 @@ type_family() { case "$1" in ticket|ticket-investigation) echo "ticket" ;; *) ec
 # deliberate and documented in references/queue-reconciliation.md: the checker must not stay red
 # after a human resolves a duplicate by rejecting it, while a poller must never re-queue work a
 # human explicitly declined.
-counts_toward_invariant() { [ "$1" != "rejected" ]; }
+#
+# counts_toward_invariant <dir> [type] — a completed qa-test-plan is also exempt: qa is
+# interactive-only (/engineer-agent qa), so a second plan for one ticket is a deliberate re-run.
+counts_toward_invariant() {
+  [ "$1" = "rejected" ] && return 1
+  [ "$1" = "completed" ] && [ "${2:-}" = "qa-test-plan" ] && return 1
+  return 0
+}
 
 # --- Frontmatter -----------------------------------------------------------------------------
 

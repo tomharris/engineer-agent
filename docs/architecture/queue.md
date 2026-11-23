@@ -15,7 +15,8 @@ rule every poller follows to uphold it — skip / update-in-place / create, one 
 jobs tick, at most every `EA_HYGIENE_EVERY`). A duplicate is otherwise
 invisible: queue filenames carry a `{YYYYMMDD-HHmmss}`
 minted at write time, so a second copy of a ticket never collides with the first — it just sits
-alongside it and the human reviews (or implements) the same work twice.
+alongside it and the human reviews (or implements) the same work twice. A completed `qa-test-plan`
+is exempt: `qa` is interactive-only, so a second completed plan is a deliberate re-run.
 
 > **A duplicate must not become a recurring notification.** The check used to be a pure alarm: it
 > stayed red, and the poll re-pushed the identical ntfy warning **every 15 minutes** until a human

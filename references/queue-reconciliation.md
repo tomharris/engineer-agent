@@ -23,6 +23,10 @@ human judgement — see "Auto-healing" at the end of this file.
 types over its life (a `ticket` item, then a `qa-test-plan` for the same `ticket_key`). Those are
 not duplicates. Two `ticket` items for one `source_id` always are.
 
+A **completed `qa-test-plan`** does not count toward the invariant. `qa` is interactive-only (no
+poller writes it), so a second plan for one ticket is a deliberate re-run, e.g. after the PR
+changed. Two *live* `qa-test-plan` items for one `source_id` are still a duplicate.
+
 ### The one exception: `{ticket, ticket-investigation}` is a single type family
 
 `ticket` (code change → draft PR) and `ticket-investigation` (findings document → ticket comment)
