@@ -487,8 +487,7 @@ qa_script_on() { [ "$(_arc "$P.qa.script.enabled")" = true ] && [ -n "$(qa_serve
 
 # qa_script_extract <plan> <served-url> — the first ```bash block under "## QA Script" (a "## " line
 # inside the block does not end it) to $D/qa/qa-script.sh. The script is published, so one over
-# 64 KiB, or naming any web address but the served URL (or that URL followed by "@", which would name
-# another host), is refused and removed. Sets QA_SCRIPT_TEXT to the checked text: the script runs as
+# 64 KiB, or naming any web address but the served URL as a whole origin, is refused and removed. Sets QA_SCRIPT_TEXT to the checked text: the script runs as
 # you and could rewrite any file, so only this in-memory copy is run and published. Sets QA_SCRIPT
 # and QA_SCRIPT_STOP when there is nothing to run.
 qa_script_extract() {
@@ -504,8 +503,15 @@ qa_script_extract() {
   if [ "$(wc -c < "$f")" -gt 65536 ]; then
     rm -f "$f"; QA_SCRIPT="QA script: refused — over 64 KiB"; QA_SCRIPT_STOP=refused; return
   fi
-  if awk -v u="$2" '{ while ((i = index($0, u)) > 0) $0 = substr($0, 1, i - 1) substr($0, i + length(u)); print }' "$f" \
-       | grep -qiE '[a-z][a-z0-9+.-]*://|www\.' || grep -qF -- "${2}@" "$f"; then
+  # The served URL counts only as a whole origin: followed by "/", a quote, whitespace, "}" or the
+  # line end. Any other occurrence (":18443.evil.example", "...@host") keeps its scheme and is refused.
+  if awk -v u="$2" '{ out = ""; s = $0
+         while ((i = index(s, u)) > 0) {
+           c = substr(s, i + length(u), 1)
+           out = out substr(s, 1, i - 1) ((c == "" || c ~ /[\/"'"'"'[:space:]}]/) ? "" : "x://")
+           s = substr(s, i + length(u))
+         }
+         print out s }' "$f" | grep -qiE '[a-z][a-z0-9+.-]*://|www\.'; then
     rm -f "$f"; QA_SCRIPT="QA script: refused — it names a web address other than the served app"; QA_SCRIPT_STOP=refused; return
   fi
   QA_SCRIPT_TEXT="$(cat "$f"; printf x)"; QA_SCRIPT_TEXT="${QA_SCRIPT_TEXT%x}"

