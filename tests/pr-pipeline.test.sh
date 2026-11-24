@@ -940,11 +940,24 @@ git --git-dir="$ORIGIN" merge-base --is-ancestor "$main1" "refs/heads/$BR" && ok
 git --git-dir="$ORIGIN" update-ref refs/heads/main "$main0"
 
 reset; write_config '["pr-ready"]'
+printf 'status-fail\tcihub static_analysis_1/4\thttps://ci.example/p/9/failures/3\t\n' \
+  > "$ST/checks.$(git --git-dir="$ORIGIN" rev-parse "refs/heads/$BR")"
+run >/dev/null
+grep -qxF '=== FAILED CHECK: cihub static_analysis_1/4 (https://ci.example/p/9/failures/3): no log available to gh' "$PD/ci-failure.log" \
+  && ok "a commit status with no description is marked logless" || bad "log: $(cat "$PD/ci-failure.log")"
+grep -qF 'No failure output is available for: cihub static_analysis_1/4.' "$CLAUDE_ARGS" \
+  && ok "the fix run is told which checks have no output" || bad "logless checks missing from the fix prompt"
+grep -qF 'search the tests for expectations the change made stale' "$CLAUDE_ARGS" \
+  && ok "the fix run is told how to find a logless failure" || bad "no guidance for logless checks"
+
+reset; write_config '["pr-ready"]'
 printf 'status-fail\tcihub build\thttps://ci.example/p/9\tCode and migrations cannot share a PR.\n' \
   > "$ST/checks.$(git --git-dir="$ORIGIN" rev-parse "refs/heads/$BR")"
 run >/dev/null
 grep -q 'FAILED CHECK: cihub build (https://ci.example/p/9): Code and migrations cannot share a PR.' "$PD/ci-failure.log" \
   && ok "a commit status's description is handed to the fix run" || bad "log: $(cat "$PD/ci-failure.log")"
+grep -q 'No failure output is available' "$CLAUDE_ARGS" \
+  && bad "a check with a description is reported as having no output" || ok "a described check is not reported as logless"
 grep -q 'confined-push.sh:\*' "$CLAUDE_ARGS" && ok "fix run may push only via confined-push" || bad "no confined-push rule"
 grep -q 'Bash(make \*)' "$CLAUDE_ARGS" && ok "fix run gets the project's build rules" || bad "no build rules"
 eq "PR is marked ready after the fix" 1 "$(readied)"
