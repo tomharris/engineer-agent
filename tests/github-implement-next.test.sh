@@ -183,6 +183,17 @@ echo "2 1" > "$ST/search"
 eq "title_prefixes matches only the start of the title, case-insensitively" \
   "acme/web#2 skip  title_prefixes: title does not start with any|acme/web#1 PICK" "$(verdicts | paste -sd'|' -)"
 
+echo "== pagination"
+reset; write_config "[]"
+GH_STUB_STATUS=Todo mkissue 1; GH_STUB_STATUS=Todo mkissue 2; mkissue 3
+echo "1 2 3" > "$ST/search"
+eq "an eligible issue past the first page is picked" \
+  "acme/web#1 skip  project_statuses: 'Todo' not in list|acme/web#2 skip  project_statuses: 'Todo' not in list|acme/web#3 PICK" \
+  "$(GR_PAGE_SIZE=2 verdicts | paste -sd'|' -)"
+eq "no page is fetched past GR_MAX_PAGES" \
+  "acme/web#1 skip  project_statuses: 'Todo' not in list|acme/web#2 skip  project_statuses: 'Todo' not in list" \
+  "$(GR_PAGE_SIZE=2 GR_MAX_PAGES=1 verdicts | paste -sd'|' -)"
+
 echo "== claim / release"
 reset; write_config "[]"
 ITEM="$Q/drafts/x-ticket-gh-1.md"

@@ -16,7 +16,9 @@ GR_REQ_LISTS="labels_any labels_none milestones issue_types project_statuses tit
 GR_REQ_SCALARS="assignee min_age min_quiet no_open_blockers no_linked_pr has_acceptance_criteria min_body_chars reopened_with_feedback"
 GR_CLAIM_KEYS="assign project_status"
 GR_ONFAIL_KEYS="unassign project_status"
-GR_MAX_RESULTS="${GR_MAX_RESULTS:-30}"
+GR_PAGE_SIZE="${GR_PAGE_SIZE:-100}"
+# GitHub search serves at most 1000 results.
+GR_MAX_PAGES="${GR_MAX_PAGES:-10}"
 GR_GH_TIMEOUT="${EA_POLL_CMD_TIMEOUT:-120}"
 
 _gr_lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
@@ -352,7 +354,7 @@ _gr_kind_skip() {
 # eligible, or a reason (rc 2) on error. A failed search aborts rather than falling through.
 # AR_TRACE=1 logs every verdict to stderr; AR_EVAL_ALL=1 keeps evaluating after the pick.
 gr_select() {
-  local slug="$1" idx="$2" n j p name q count k sid qsid action pick="" reason need_me=0 hit fields board bo bn bf
+  local slug="$1" idx="$2" n j p name q count k sid qsid action pick="" reason need_me=0 hit fields board bo bn bf after page more
   local -a vars
   jobs_cfg_load
   n="$(_arc "projects.${slug}.job.${idx}.rule_count")"
@@ -374,42 +376,50 @@ gr_select() {
     p="$(ar_prefix "$slug" "$idx" "$j")"
     name="$(_arc "$p.name")"
     q="$(gr_search_query "$slug" "$p")"
-    vars=(-f "q=$q" -F "n=$GR_MAX_RESULTS")
-    if [ -n "$board" ]; then
-      vars+=(-f "field=$bf")
-      gr_graphql "$TMPD/rule.json" "query(\$q: String!, \$n: Int!, \$field: String!) { search(query: \$q, type: ISSUE, first: \$n) { nodes { ... on Issue { $fields } } } }" "${vars[@]}" \
-        || { echo "rule ${name}: search failed: $(gr_graphql_error "$TMPD/rule.json")"; return 2; }
-    else
-      gr_graphql "$TMPD/rule.json" "query(\$q: String!, \$n: Int!) { search(query: \$q, type: ISSUE, first: \$n) { nodes { ... on Issue { $fields } } } }" "${vars[@]}" \
-        || { echo "rule ${name}: search failed: $(gr_graphql_error "$TMPD/rule.json")"; return 2; }
-    fi
-    count="$(jq -r '.data.search.nodes | length' "$TMPD/rule.json" 2>/dev/null)"
-    [[ "$count" =~ ^[0-9]+$ ]] || { echo "rule ${name}: unrecognised search response"; return 2; }
-    _ar_trace "rule ${name}: ${count} fetched"
-    k=0
-    while [ "$k" -lt "$count" ]; do
-      jq ".data.search.nodes[$k]" "$TMPD/rule.json" > "$TMPD/issue.json"
-      k=$((k+1))
-      sid="$(jq -r '"\(.repository.nameWithOwner // "")#\(.number // "")"' "$TMPD/issue.json")"
-      [[ "$sid" =~ ^[A-Za-z0-9-]+/[A-Za-z0-9._-]+#[0-9]+$ ]] || { _ar_trace "  ?  skip  not an issue"; continue; }
-      qsid="$(gr_queue_sid "$TMPD/issue.json" "$sid" "$action")"
-      [ -n "$qsid" ] || { _ar_trace "  ${sid}  skip  reopened_with_feedback: never reopened"; continue; }
-      hit="$(queue_lookup ticket "$qsid")"
-      if [ -n "$hit" ]; then
-        _ar_trace "  ${sid}  skip  already queued (${hit%%	*})"
-        continue
-      fi
-      if reason="$(gr_eval "$TMPD/issue.json" "$p" "$slug" "$idx")" && reason="$(_gr_kind_skip "$TMPD/issue.json" "$slug")"; then
-        if [ -z "$pick" ]; then
-          pick="$(printf '%s\t%s' "$name" "$sid")"
-          _ar_trace "  ${sid}  PICK"
-          [ "${AR_EVAL_ALL:-0}" = 1 ] || { printf '%s\n' "$pick"; return 0; }
-        else
-          _ar_trace "  ${sid}  eligible"
-        fi
+    after=""; page=0; more=true
+    while [ "$more" = true ] && [ "$page" -lt "$GR_MAX_PAGES" ]; do
+      page=$((page+1))
+      vars=(-f "q=$q" -F "n=$GR_PAGE_SIZE")
+      [ -n "$after" ] && vars+=(-f "after=$after")
+      if [ -n "$board" ]; then
+        vars+=(-f "field=$bf")
+        gr_graphql "$TMPD/rule.json" "query(\$q: String!, \$n: Int!, \$after: String, \$field: String!) { search(query: \$q, type: ISSUE, first: \$n, after: \$after) { pageInfo { hasNextPage endCursor } nodes { ... on Issue { $fields } } } }" "${vars[@]}" \
+          || { echo "rule ${name}: search failed: $(gr_graphql_error "$TMPD/rule.json")"; return 2; }
       else
-        _ar_trace "  ${sid}  skip  ${reason}"
+        gr_graphql "$TMPD/rule.json" "query(\$q: String!, \$n: Int!, \$after: String) { search(query: \$q, type: ISSUE, first: \$n, after: \$after) { pageInfo { hasNextPage endCursor } nodes { ... on Issue { $fields } } } }" "${vars[@]}" \
+          || { echo "rule ${name}: search failed: $(gr_graphql_error "$TMPD/rule.json")"; return 2; }
       fi
+      count="$(jq -r '.data.search.nodes | length' "$TMPD/rule.json" 2>/dev/null)"
+      [[ "$count" =~ ^[0-9]+$ ]] || { echo "rule ${name}: unrecognised search response"; return 2; }
+      more="$(jq -r '.data.search.pageInfo.hasNextPage == true' "$TMPD/rule.json")"
+      after="$(jq -r '.data.search.pageInfo.endCursor // ""' "$TMPD/rule.json")"
+      [ -n "$after" ] || more=false
+      if [ "$page" = 1 ]; then _ar_trace "rule ${name}: ${count} fetched"; else _ar_trace "rule ${name}: page ${page}: ${count} fetched"; fi
+      k=0
+      while [ "$k" -lt "$count" ]; do
+        jq ".data.search.nodes[$k]" "$TMPD/rule.json" > "$TMPD/issue.json"
+        k=$((k+1))
+        sid="$(jq -r '"\(.repository.nameWithOwner // "")#\(.number // "")"' "$TMPD/issue.json")"
+        [[ "$sid" =~ ^[A-Za-z0-9-]+/[A-Za-z0-9._-]+#[0-9]+$ ]] || { _ar_trace "  ?  skip  not an issue"; continue; }
+        qsid="$(gr_queue_sid "$TMPD/issue.json" "$sid" "$action")"
+        [ -n "$qsid" ] || { _ar_trace "  ${sid}  skip  reopened_with_feedback: never reopened"; continue; }
+        hit="$(queue_lookup ticket "$qsid")"
+        if [ -n "$hit" ]; then
+          _ar_trace "  ${sid}  skip  already queued (${hit%%	*})"
+          continue
+        fi
+        if reason="$(gr_eval "$TMPD/issue.json" "$p" "$slug" "$idx")" && reason="$(_gr_kind_skip "$TMPD/issue.json" "$slug")"; then
+          if [ -z "$pick" ]; then
+            pick="$(printf '%s\t%s' "$name" "$sid")"
+            _ar_trace "  ${sid}  PICK"
+            [ "${AR_EVAL_ALL:-0}" = 1 ] || { printf '%s\n' "$pick"; return 0; }
+          else
+            _ar_trace "  ${sid}  eligible"
+          fi
+        else
+          _ar_trace "  ${sid}  skip  ${reason}"
+        fi
+      done
     done
     j=$((j+1))
   done

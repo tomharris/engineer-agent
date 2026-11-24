@@ -5,7 +5,7 @@
 # State under $ST (owner/repo is always acme/web):
 #   issues/<N>.json   GraphQL Issue node fixture (search + fetch)
 #   <N>.assignees     comma-separated logins            <N>.status   board status ("" = not on board)
-#   <N>.state         OPEN | CLOSED                     search       issue numbers every search returns
+#   <N>.state         OPEN | CLOSED                     search       issue numbers every search returns (paged by -F n)
 #   race_on_assign    an assign also adds "other"       me           own login (default tom)
 # Writes are logged to $REQ_LOG as "<VERB> <what>".
 
@@ -43,7 +43,11 @@ if [ "$path" = graphql ]; then
     *"search(query"*)
       [ -f "$ST/search_fail" ] && { echo '{"errors":[{"message":"boom"}]}'; exit 1; }
       printf '%s\n' "${F_q}" >> "$ST/queries"
-      for n in $(cat "$ST/search"); do node "$n"; done | jq -s '{data: {search: {nodes: .}}}' ;;
+      # Pages of $F_n; the cursor is the offset of the next page.
+      for n in $(cat "$ST/search"); do node "$n"; done \
+        | jq -s --argjson off "${F_after:-0}" --argjson size "${F_n:-100}" '
+            {data: {search: {nodes: .[$off:$off+$size],
+              pageInfo: {hasNextPage: (length > $off + $size), endCursor: "\($off + $size)"}}}}' ;;
     *"repositoryOwner"*)
       echo '{"data":{"repositoryOwner":{"projectV2":{"id":"PVT_1","field":{"id":"F_1","options":[{"id":"o1","name":"Todo"},{"id":"o2","name":"In Progress"},{"id":"o3","name":"Ready"}]}}}}}' ;;
     *"addProjectV2ItemById"*)
