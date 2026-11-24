@@ -343,6 +343,16 @@ security → CI → browser → QA → ready → transition → announce. Things
   `serve`/`setup`, which already execute the branch's model-written code; the QA run's inputs (its
   worktree, the trust-checked ticket text, the diff) are no wider than the implementation's.
   Only its status line is published; the raw output stays in `state/pr-pipeline/<item>/qa/unit.out`.
+- **`qa.repl` publishes what a reviewer reruns; unit test files are not published.** Unit tests
+  prove the change, but a reviewer reruns a QA plan by hand, so the note carries REPL scripts. With
+  `qa.repl.command` the QA run may write `ea_repl/repl-<N>.txt` (an `Edit` rule on that directory);
+  bash runs at most 10, in numeric order, each piped on stdin to the command with the `qa_unit`
+  env. `with_timeout` backgrounds its command, which sets stdin to `/dev/null`, so the redirect is
+  inside the command (`exec < "$QA_REPL_INPUT"`). A script passes on exit 0 with no `FAIL:` line:
+  a REPL keeps reading after an exception, so the exit code alone is not enough. Each text is
+  checked (name `repl-<N>.txt`, at most 64 KiB, no web address) and kept in memory before it runs,
+  and only that text is published, in a fence longer than any backtick run in it. A refused
+  script never runs and is never published. Its output stays in `qa/repl-<N>.out`.
 - **`qa.script` is a second opt-in for model-written code: a QA script a reviewer can run.** JSON
   checks are single requests, so a change that only alters what an existing endpoint accepts (a
   validator behind publish, say) or needs a flow (create, then publish, then read back) left the

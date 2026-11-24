@@ -179,6 +179,18 @@ $v" '{type: "result", result: $r}' ;;
         link) ln -s /etc/hosts "$udir/test_nav.py" ;;
       esac
     fi
+    rdir="$(printf '%s' "$*" | sed -nE 's/.*one file ([^ ]+\/ea_repl)\/repl-<N>\.txt .*/\1/p')"
+    if [ -n "$rdir" ]; then
+      mkdir -p "$rdir"
+      case "${FAKE_REPL:-none}" in
+        pass) printf 'check("nav")\n```\n' > "$rdir/repl-1.txt"; printf 'check("footer")' > "$rdir/repl-2.txt" ;;
+        fail) printf 'check("nav")\n' > "$rdir/repl-1.txt"; printf 'FAIL\n' > "$rdir/repl-2.txt" ;;
+        url)  printf 'check("nav")\n' > "$rdir/repl-1.txt"; printf 'get("https://evil.example/x")\n' > "$rdir/repl-2.txt" ;;
+        link) ln -s /etc/hosts "$rdir/repl-1.txt" ;;
+        many) for i in $(seq 1 11); do printf 'check("%s")\n' "$i" > "$rdir/repl-$i.txt"; done ;;
+        name) printf 'check("nav")\n' > "$rdir/repl-[x](javascript:y).txt" ;;
+      esac
+    fi
     [ -n "${QA_FAIL:-}" ] && checks="${checks}"',{"name":"footer link","method":"GET","path":"/missing","expect_status":200}'
     [ "${QA:-}" = extra ] && checks="${checks}"',{"name":"see https://evil.example/n [x](y)","method":"GET","path":"/nav","expect_contains":"www.evil.example","https://evil.example/k":1}'
     [ "${QA:-}" = auth ] && checks="${checks}"',{"name":"signed in","method":"GET","path":"/me","auth":"session","expect_status":200}'\
@@ -702,6 +714,79 @@ grep -qF 'Unit tests: not executed — ea_qa holds a link or special file' "$ST/
 qa_jira "$QA_AFTER"; run >/dev/null
 grep 'Write a QA plan' "$CLAUDE_ARGS" | grep -q 'ea_qa' && bad "QA run without qa.unit may write tests" || ok "without qa.unit, the QA run may write only its plan"
 grep -qF 'Unit tests:' "$ST/pr-comment.md" && bad "unit line without qa.unit" || ok "no unit line without qa.unit"
+
+echo "== QA REPL scripts"
+# A fake REPL: records cwd, env and stdin; prints FAIL for a FAIL line (exit 0), else PASS.
+cat > "$TMP/bin/qa-repl" <<'EOF'
+#!/bin/bash
+ST=__ST__
+in="$(cat)"
+printf '%s\n' "$PWD" > "$ST/repl.cwd"
+env > "$ST/repl.env"
+printf '%s\n===\n' "$in" >> "$ST/repl.stdin"
+if printf '%s\n' "$in" | grep -qx FAIL; then echo "FAIL: footer (expected 1, got 2)"; else echo "PASS: nav"; fi
+EOF
+sed -i.bak "s|__ST__|'$ST'|" "$TMP/bin/qa-repl" && rm -f "$TMP/bin/qa-repl.bak"
+chmod +x "$TMP/bin/qa-repl"
+QA_REPL_AFTER="{ mark_ready: true, ci: { fix_attempts: 0 }, qa: { document: true, repl: { command: \"$TMP/bin/qa-repl --quiet\" } } }"
+note() { jq -r .markdown "$ST/slite-note.json"; }
+
+qa_jira "$QA_REPL_AFTER"; rm -f "$ST/repl.stdin"
+eq "passing REPL scripts: exits 0, PR ready" "0|1" "$(FAKE_REPL=pass run)|$(readied)"
+eq "each script is piped on stdin, in order" 'check("nav")|```|===|check("footer")|===' "$(paste -sd'|' - < "$ST/repl.stdin")"
+case "$(cat "$ST/repl.cwd" 2>/dev/null)" in
+  "$(cd "$EA_AGENT_DIR" && pwd -P)"/worktrees/*-pr-*) ok "the REPL runs in the branch worktree" ;;
+  *) bad "repl cwd: $(cat "$ST/repl.cwd" 2>/dev/null)" ;;
+esac
+grep -qE "^(T_JIRA|T_SLITE)=" "$ST/repl.env" && bad "a credential env var reached the REPL" || ok "the REPL gets no credential env"
+grep -qF 'REPL scripts: 2 passed, 0 failed' "$ST/pr-comment.md" && ok "comment reports the REPL scripts" || bad "comment: $(cat "$ST/pr-comment.md")"
+eq "note: each script verbatim in a fence longer than its backticks, with how to run it" \
+  "#### repl-1.txt — passed (1 checks)||Run from a checkout of tom/gh-7-fix-nav: \`$TMP/bin/qa-repl --quiet < repl-1.txt\`||\`\`\`\`|check(\"nav\")|\`\`\`|\`\`\`\`" \
+  "$(note | awk '/^#### repl-1.txt/ {f = 1} /^#### repl-2.txt/ {f = 0} f' | sed -e :a -e '/^\n*$/{$d;N;ba' -e '}' | paste -sd'|' -)"
+eq "note: a script with no final newline still closes its fence" "check(\"footer\")|\`\`\`" \
+  "$(note | awk '/^#### repl-2.txt/ {f = 1} /^## Manual Checklist/ {f = 0} f' | grep . | tail -2 | paste -sd'|' -)"
+note | grep -qx 'PASS: nav' && bad "raw REPL output was published" || ok "raw REPL output stays local"
+eq "raw REPL output is kept locally" "PASS: nav" "$(cat "$PD/qa/repl-1.out" 2>/dev/null)"
+qa_args="$(grep 'Write a QA plan' "$CLAUDE_ARGS")"
+printf '%s' "$qa_args" | grep -qE "Edit\(/$EA_AGENT_DIR/worktrees/[^ ]+/ea_repl/\*\*\)" && ok "QA run may write REPL scripts in ea_repl" || bad "no ea_repl Edit rule"
+
+qa_jira "$QA_REPL_AFTER"
+eq "a REPL script printing FAIL stops, though it exits 0" 1 "$(FAKE_REPL=fail run)"
+eq "failed-REPL reason" "stopped	QA: REPL scripts failed — plan: https://example.slite.com/app/docs/n1" "$(cat "$PD/result")"
+grep -qF 'REPL scripts: 1 passed, 1 failed' "$ST/pr-comment.md" && ok "comment counts the failure" || bad "comment: $(cat "$ST/pr-comment.md")"
+note | grep -qx '#### repl-2.txt — failed (0 passed, 1 failed, exit 0)' && ok "note names the failing script" || bad "note: $(note)"
+eq "failed REPL: still documented, PR draft" "1|0" "$(commented)|$(readied)"
+
+qa_jira "$QA_REPL_AFTER"; rm -f "$ST/repl.stdin"
+eq "a REPL script naming a web address stops" 1 "$(FAKE_REPL=url run)"
+note | grep -qF 'evil.example' && bad "a web address was published" || ok "a script naming a web address is not published"
+grep -qF 'evil.example' "$ST/repl.stdin" && bad "a script naming a web address ran" || ok "a script naming a web address never runs"
+note | grep -qx '#### repl-2.txt — refused — it names a web address' && ok "note says why it was refused" || bad "note: $(note)"
+grep -qF 'REPL scripts: 1 passed, 0 failed, 1 refused' "$ST/pr-comment.md" && ok "comment counts the refusal" || bad "comment: $(cat "$ST/pr-comment.md")"
+eq "refused-REPL reason" "stopped	QA: REPL scripts refused — plan: https://example.slite.com/app/docs/n1" "$(cat "$PD/result")"
+
+qa_jira "$QA_REPL_AFTER"; rm -f "$ST/repl.stdin"
+eq "a link in ea_repl stops" 1 "$(FAKE_REPL=link run)"
+[ -e "$ST/repl.stdin" ] && bad "a REPL script ran through a link" || ok "a link in ea_repl is never run"
+grep -qF 'REPL scripts: not executed — ea_repl holds a link or special file' "$ST/pr-comment.md" && ok "comment names the refused link" || bad "comment: $(cat "$ST/pr-comment.md")"
+
+qa_jira "$QA_REPL_AFTER"; rm -f "$ST/repl.stdin"
+eq "more than 10 REPL scripts stops" 1 "$(FAKE_REPL=many run)"
+eq "only the first 10 run, in numeric order" "1|2|3|4|5|6|7|8|9|10" "$(grep -o 'check("[0-9]*")' "$ST/repl.stdin" | tr -dc '0-9\n' | paste -sd'|' -)"
+note | grep -qx '#### repl-11.txt — refused — over 10 scripts' && ok "note names the script over the cap" || bad "note: $(note)"
+
+qa_jira "$QA_REPL_AFTER"
+eq "a REPL file with another name stops" 1 "$(FAKE_REPL=name run)"
+note | grep -qF 'javascript' && bad "a model-chosen file name was published" || ok "an unexpected file name is never published"
+
+qa_jira "$QA_REPL_AFTER"; rm -f "$ST/repl.stdin"
+eq "no REPL scripts: not gated" "0|1" "$(FAKE_REPL=none run)|$(readied)"
+grep -qF 'REPL scripts: not executed — the plan wrote none' "$ST/pr-comment.md" && ok "comment says none were written" || bad "comment: $(cat "$ST/pr-comment.md")"
+[ -e "$ST/repl.stdin" ] && bad "the REPL ran with no scripts" || ok "the REPL does not run without scripts"
+
+qa_jira "$QA_AFTER"; run >/dev/null
+grep 'Write a QA plan' "$CLAUDE_ARGS" | grep -q 'ea_repl' && bad "QA run without qa.repl may write REPL scripts" || ok "without qa.repl, the QA run writes no REPL scripts"
+grep -qF 'REPL scripts:' "$ST/pr-comment.md" && bad "REPL line without qa.repl" || ok "no REPL line without qa.repl"
 
 
 echo "== QA server and auth"
@@ -1239,6 +1324,14 @@ write_config '[]' '{ qa: { unit: { command: "make test", dir: x } } }'
 eq "an unknown qa.unit key is refused" "after_pr.qa.unit: unknown key 'dir' (allowed: command timeout)" "$(valid)"
 write_config '[]' '{ qa: { unit: { command: "uv run pytest -q", timeout: 10m } } }'
 eq "a full qa.unit block is valid" "" "$(valid)"
+write_config '[]' '{ qa: { repl: { timeout: 5m } } }'
+eq "qa.repl without a command is refused" "after_pr.qa.repl.command is required" "$(valid)"
+write_config '[]' '{ qa: { repl: { command: "python -", timeout: soon } } }'
+eq "a bad qa.repl.timeout is refused" "after_pr.qa.repl.timeout 'soon' must look like 30m or 2h" "$(valid)"
+write_config '[]' '{ qa: { repl: { command: "python -", dir: x } } }'
+eq "an unknown qa.repl key is refused" "after_pr.qa.repl: unknown key 'dir' (allowed: command timeout)" "$(valid)"
+write_config '[]' '{ qa: { repl: { command: "uv run python -", timeout: 5m } } }'
+eq "a full qa.repl block is valid" "" "$(valid)"
 write_config '[]' '{ qa: { server: { serve: "x", url: "http://localhost:1" }, script: { enabled: maybe } } }'
 eq "a non-boolean qa.script.enabled is refused" "after_pr.qa.script.enabled 'maybe' must be true or false" "$(valid)"
 write_config '[]' '{ qa: { script: { enabled: true } } }'

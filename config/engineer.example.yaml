@@ -503,6 +503,9 @@ projects:
     #         unit:                      # optional; the QA run writes unit tests under ea_qa/ and
     #           command: "uv run pytest -q"  #   bash runs `<command> ea_qa` in the branch worktree
     #           timeout: 10m             #   (default 10m); a failure stops like a failed check
+    #         repl:                      # optional; the QA run writes REPL scripts ea_repl/repl-<N>.txt;
+    #           command: "uv run python -"   #   bash pipes each to <command> in the branch worktree;
+    #           timeout: 5m              #   per script (default 5m); published verbatim in the Slite note
     #         script:                    # optional, needs a server; the plan adds a bash QA script
     #           enabled: true            #   bash runs against the served branch; published in the
     #           timeout: 10m             #   Slite note and attached to the Jira ticket as qa-<KEY>.sh
