@@ -189,6 +189,7 @@ $v" '{type: "result", result: $r}' ;;
         link) ln -s /etc/hosts "$rdir/repl-1.txt" ;;
         many) for i in $(seq 1 11); do printf 'check("%s")\n' "$i" > "$rdir/repl-$i.txt"; done ;;
         name) printf 'check("nav")\n' > "$rdir/repl-[x](javascript:y).txt" ;;
+        swap) printf 'SWAP\n' > "$rdir/repl-1.txt"; printf 'check("footer")\n' > "$rdir/repl-2.txt" ;;
       esac
     fi
     [ -n "${QA_FAIL:-}" ] && checks="${checks}"',{"name":"footer link","method":"GET","path":"/missing","expect_status":200}'
@@ -724,6 +725,8 @@ in="$(cat)"
 printf '%s\n' "$PWD" > "$ST/repl.cwd"
 env > "$ST/repl.env"
 printf '%s\n===\n' "$in" >> "$ST/repl.stdin"
+# SWAP: a script that replaces the next one with a link to a secret.
+if printf '%s\n' "$in" | grep -qx SWAP; then rm -f ea_repl/repl-2.txt; ln -s "$ST/secret" ea_repl/repl-2.txt; fi
 if printf '%s\n' "$in" | grep -qx FAIL; then echo "FAIL: footer (expected 1, got 2)"; else echo "PASS: nav"; fi
 EOF
 sed -i.bak "s|__ST__|'$ST'|" "$TMP/bin/qa-repl" && rm -f "$TMP/bin/qa-repl.bak"
@@ -778,6 +781,11 @@ note | grep -qx '#### repl-11.txt — refused — over 10 scripts' && ok "note n
 qa_jira "$QA_REPL_AFTER"
 eq "a REPL file with another name stops" 1 "$(FAKE_REPL=name run)"
 note | grep -qF 'javascript' && bad "a model-chosen file name was published" || ok "an unexpected file name is never published"
+
+qa_jira "$QA_REPL_AFTER"; rm -f "$ST/repl.stdin"; echo 'TOPSECRET' > "$ST/secret"
+eq "a script swapping a later one for a link: the later one still runs as written" "0|SWAP|===|check(\"footer\")|===" \
+  "$(FAKE_REPL=swap run)|$(paste -sd'|' - < "$ST/repl.stdin")"
+note | grep -qF TOPSECRET && bad "a file swapped in by a running script was published" || ok "scripts are read before any runs"
 
 qa_jira "$QA_REPL_AFTER"; rm -f "$ST/repl.stdin"
 eq "no REPL scripts: not gated" "0|1" "$(FAKE_REPL=none run)|$(readied)"

@@ -508,11 +508,13 @@ ${unit_rule}${repl_rule}End the file with the line 'QA-NONCE: ${nonce}'. ${NO_ME
 # could rewrite the file. Output stays in $D/qa/repl-<N>.out; a script passes when it exits 0 and
 # prints no FAIL: line.
 qa_repl() {
-  local dir="$WT/$QA_REPL_DIR" secs f name text tmp rc pass fail ok=0 bad=0
+  local dir="$WT/$QA_REPL_DIR" secs f i name text tmp rc pass fail ok=0 bad=0
   if [ -n "$(find "$dir" ! -type f ! -type d -print -quit 2>/dev/null)" ]; then
     QA_REPL="REPL scripts: not executed — ${QA_REPL_DIR} holds a link or special file"; QA_REPL_STOP=refused; return
   fi
   secs="$(jobs_duration_seconds "$(_arc "$P.qa.repl.timeout")")"; secs="${secs:-300}"
+  # Every script is read and checked before any runs: a running script could swap a later one
+  # for a link to a secret, which would then be published. A "" result marks one still to run.
   while IFS= read -r f; do
     name="${f##*/}"
     if ! [[ "$name" =~ ^repl-[0-9]{1,3}\.txt$ ]]; then
@@ -528,25 +530,29 @@ qa_repl() {
     if printf '%s' "$text" | grep -qiE '[a-z][a-z0-9+.-]*://|www\.'; then
       QA_REPL_STOP=refused; QA_REPL_NAMES+=("$name"); QA_REPL_TEXTS+=(""); QA_REPL_RESULTS+=("refused — it names a web address"); continue
     fi
+    QA_REPL_NAMES+=("$name"); QA_REPL_TEXTS+=("$text"); QA_REPL_RESULTS+=("")
+  done < <(find "$dir" -maxdepth 1 -type f -name 'repl-*.txt' 2>/dev/null | awk -F'repl-' '{ n = $NF; sub(/\.txt$/, "", n); print (n ~ /^[0-9]+$/ ? n + 0 : 999999) "\t" $0 }' | sort -n | cut -f2-)
+  for i in "${!QA_REPL_NAMES[@]}"; do
+    [ -z "${QA_REPL_RESULTS[$i]}" ] || continue
+    name="${QA_REPL_NAMES[$i]}"
     tmp="$(mktemp -d)" || { QA_REPL_STOP=refused; QA_REPL="REPL scripts: not executed — no temp dir"; return; }
-    printf '%s' "$text" > "$tmp/input"
+    printf '%s' "${QA_REPL_TEXTS[$i]}" > "$tmp/input"
     # with_timeout backgrounds the command (stdin /dev/null), so the redirect lives inside it.
     rc=0
     ( cd "$WT" && with_timeout "$secs" env -i PATH="$PATH" HOME="$HOME" USER="$USER" LANG="${LANG:-C.UTF-8}" \
         TMPDIR="$tmp" QA_REPL_INPUT="$tmp/input" bash -c "exec < \"\$QA_REPL_INPUT\"; $1" ) </dev/null > "$D/qa/${name%.txt}.out" 2>&1 || rc=$?
     rm -rf "$tmp"
     pass="$(grep -c '^ *PASS: ' "$D/qa/${name%.txt}.out")"; fail="$(grep -c '^ *FAIL: ' "$D/qa/${name%.txt}.out")"
-    QA_REPL_NAMES+=("$name"); QA_REPL_TEXTS+=("$text")
     if [ "$rc" = 0 ] && [ "$fail" = 0 ]; then
-      ok=$((ok + 1)); QA_REPL_RESULTS+=("passed (${pass} checks)")
+      ok=$((ok + 1)); QA_REPL_RESULTS[$i]="passed (${pass} checks)"
     else
       bad=$((bad + 1)); QA_REPL_STOP="${QA_REPL_STOP:-failed}"
       case "$rc" in
-        124) QA_REPL_RESULTS+=("failed (timed out after ${secs}s; ${pass} passed, ${fail} failed)") ;;
-        *)   QA_REPL_RESULTS+=("failed (${pass} passed, ${fail} failed, exit ${rc})") ;;
+        124) QA_REPL_RESULTS[$i]="failed (timed out after ${secs}s; ${pass} passed, ${fail} failed)" ;;
+        *)   QA_REPL_RESULTS[$i]="failed (${pass} passed, ${fail} failed, exit ${rc})" ;;
       esac
     fi
-  done < <(find "$dir" -maxdepth 1 -type f -name 'repl-*.txt' 2>/dev/null | awk -F'repl-' '{ n = $NF; sub(/\.txt$/, "", n); print (n ~ /^[0-9]+$/ ? n + 0 : 999999) "\t" $0 }' | sort -n | cut -f2-)
+  done
   if [ "${#QA_REPL_NAMES[@]}" = 0 ]; then
     QA_REPL="REPL scripts: not executed — the plan wrote none"; return
   fi
