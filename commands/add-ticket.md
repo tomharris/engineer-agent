@@ -133,7 +133,12 @@ Output: `type` (`ticket` | `ticket-investigation`), `ticket_kind_method`, and
 
 ### 6. Write Queue Item
 
-Compute the current timestamp `YYYYMMDD-HHmmss` (local time, same as the collectors). Write a new file in `~/.local/share/engineer-agent/queue/incoming/` with frontmatter and `## Context` matching what the scripted collectors write (`scripts/lib-queue-write.sh`), so downstream skills see no difference between a manually-added and a polled item.
+**Re-run the Step 3 check immediately before writing** and abort the same way on a match: routing
+and kind classification take long enough for a poll to queue the same ticket in between. (A poll
+that loses this race the other way yields its copy in `scripts/jobs-draft.sh`.)
+
+Compute the current timestamp `YYYYMMDD-HHmmss` in **UTC** (`date -u +%Y%m%d-%H%M%S`, same as the
+collectors' `queue_ts`), so filename order is created_at order across manual and polled items. Write a new file in `~/.local/share/engineer-agent/queue/incoming/` with frontmatter and `## Context` matching what the scripted collectors write (`scripts/lib-queue-write.sh`), so downstream skills see no difference between a manually-added and a polled item.
 
 #### Jira ticket
 

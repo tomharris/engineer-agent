@@ -139,6 +139,44 @@ queue_lookup() {
   done < <(queue_items)
 }
 
+# queue_rivals <path> — other items holding a claim on the same work as <path>: same type family and
+# source_id, in incoming/, drafts/ or completed/ (counts_toward_invariant). Prints "<dir>/<file>"
+# per rival. Matched by basename so <path> may have moved since it was named. Split siblings (same
+# non-empty split_from) are deliberate and not rivals.
+queue_rivals() {
+  local self sid fam split f typ d
+  [ -f "$1" ] || return 0
+  self="$(basename "$1")"
+  sid="$(fm "$1" source_id)"; [ -n "$sid" ] || return 0
+  fam="$(type_family "$(fm "$1" type)")"
+  split="$(fm "$1" split_from)"
+  while IFS= read -r f; do
+    [ "$(basename "$f")" = "$self" ] && continue
+    grep -qF -- "$sid" "$f" || continue
+    [ "$(fm "$f" source_id)" = "$sid" ] || continue
+    typ="$(fm "$f" type)"
+    [ "$(type_family "$typ")" = "$fam" ] || continue
+    d="$(basename "$(dirname "$f")")"
+    counts_toward_invariant "$d" "$typ" || continue
+    [ -n "$split" ] && [ "$(fm "$f" split_from)" = "$split" ] && continue
+    printf '%s/%s\n' "$d" "$(basename "$f")"
+  done < <(queue_items incoming drafts completed)
+}
+
+# queue_reject <path> <reason> — move one item to rejected/ with status + rejected_reason. Never
+# clobbers a same-named rejected item (a different, earlier disposal); prints the new path.
+queue_reject() {
+  local src="$1" reason="$2" base dst n=1
+  [ -f "$src" ] || return 1
+  base="$(basename "$src")"
+  mkdir -p "${EA_AGENT_DIR}/queue/rejected"
+  dst="${EA_AGENT_DIR}/queue/rejected/$base"
+  while [ -e "$dst" ]; do dst="${EA_AGENT_DIR}/queue/rejected/${base%.md}-dup${n}.md"; n=$((n + 1)); done
+  fm_set "$src" status rejected || return 1
+  fm_set "$src" rejected_reason "$reason" || return 1
+  mv "$src" "$dst" && printf '%s\n' "$dst"
+}
+
 # queue_disposition <type> <source_id> — collapse the lookup into the single branch a poller must
 # take. Exactly one of:
 #

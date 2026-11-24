@@ -114,6 +114,18 @@ exists in a terminal directory, because a human asked for it by name. It must st
 *second live* item: if a matching item exists in `incoming/` or `drafts/`, report that and stop
 rather than duplicating.
 
+### Races with a manual add
+
+The lookup and the write are not atomic across writers. A manual `add-ticket` (model-driven, with
+routing between its check and its write) and a poll can each see nothing and each write a copy.
+Two guards close it:
+
+- `add-ticket` re-runs its live-item check immediately before writing.
+- `scripts/jobs-draft.sh` (`queue_rivals`, under `drafting.lock`) rejects a polled row to
+  `rejected/` when a **live** rival exists before drafting, or **any** rival (live or completed)
+  appears during drafting. A completed rival present *before* drafting is ignored: the collector
+  already skipped terminal work, so that row is a human re-add being resumed.
+
 ## Relationship to `seen_*` state
 
 A job state file's `seen_tickets` / `seen_issues` / `seen_prs` / `seen_docs` lists remain a

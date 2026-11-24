@@ -184,18 +184,7 @@ is_substantive() {
 # invariant already ignores (counts_toward_invariant), and keeping the file means an auto-resolution
 # can always be inspected — or undone — after the fact, which a delete would not allow.
 reject_copy() {
-  local rel="$1" keeper="$2" src dst base n=1
-  src="$QUEUE/$rel"
-  [ -f "$src" ] || return 1
-  base="$(basename "$rel")"
-  mkdir -p "$QUEUE/rejected"
-  dst="$QUEUE/rejected/$base"
-  # A same-named file already in rejected/ is a DIFFERENT item (same timestamp, same key, earlier
-  # disposal). Never clobber it — that would destroy the record this move exists to preserve.
-  while [ -e "$dst" ]; do dst="$QUEUE/rejected/${base%.md}-dup${n}.md"; n=$((n + 1)); done
-  fm_set "$src" status rejected || return 1
-  fm_set "$src" rejected_reason "auto-resolved duplicate of ${keeper} by queue-dedup-check --heal" || return 1
-  mv "$src" "$dst" || return 1
+  queue_reject "$QUEUE/$1" "auto-resolved duplicate of $2 by queue-dedup-check --heal" >/dev/null
 }
 
 # heal_group <key> <mode> — resolve one duplicate group, or decline to.
