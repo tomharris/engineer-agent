@@ -300,7 +300,8 @@ parse_messages_text() {
     (have && ts=="" && $0 ~ /^From: /) { h=$0; sub(/^From: /,"",h); setident(h); next }
     (have && ts=="" && $0 ~ /^Time: /) { next }
     /^Message TS: / { t=$0; sub(/^Message TS: /,"",t); ts=t; next }
-    { if (have) body=(body=="")?$0:body "\n" $0 }
+    # The connector may quote every body line ("> "), metadata lines included.
+    { if (have) { l=$0; sub(/^> ?/,"",l); body=(body=="")?l:body "\n" l } }
     END { flush() }
   ' | jq -Rs '
     split("\u001e") | map(select(length>0)) | map(split("\u001f")) | map({

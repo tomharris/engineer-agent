@@ -236,6 +236,12 @@ eq "_parse: From: in body kept"      "quoting:"$'\n'"From: someone else" "$(prin
 eq "_parse: thread identity"         "U888" "$(printf '%s' "$out" | jq -r '.[0].user_id')"
 # 13c. Empty input => empty array, not an error.
 eq "_parse: empty input"             "0" "$(printf '' | "$SHIM" _parse | jq -r 'length')"
+# 13d. Connector quotes every body line ("> "), metadata included: text is unquoted and the
+#      quoted Reactions/Thread lines are still parsed as metadata.
+out="$(printf '=== Message from Eve <e@x.com> (U777) at 2026-01-01 00:00:00 EST === \nMessage TS: 3.0\n> CR/QA request: <https://x/pull/1>\n> second line\n> Thread: 4 replies (latest: 2026-01-01 00:01:00 EST)\n> Reactions: eyes (1), approved (1)' | "$SHIM" _parse)"
+eq "_parse: quoted text"             "CR/QA request: <https://x/pull/1>"$'\n'"second line" "$(printf '%s' "$out" | jq -r '.[0].text')"
+eq "_parse: quoted reactions"        "eyes,approved" "$(printf '%s' "$out" | jq -r '.[0].reactions|join(",")')"
+eq "_parse: quoted reply_count"      "4" "$(printf '%s' "$out" | jq -r '.[0].reply_count')"
 
 # 14. missing server_id: a clear error mentioning server_id (no bogus default connector).
 unset EA_SLACK_MCP_SERVER_ID
