@@ -212,11 +212,17 @@ ci_wait() {
 }
 
 # ci_logs — failing checks (with a commit status's description, the only log a non-Actions CI
-# exposes to gh) and the tail of each failed Actions run's log, into $D/ci-failure.log.
+# exposes to gh) and the tail of each failed Actions run's log, into $D/ci-failure.log. Sets
+# CI_LOGLESS to the comma-separated checks with neither, whose details page gh cannot read.
 ci_logs() {
   local name link desc run
   : > "$D/ci-failure.log"
+  CI_LOGLESS=""
   while IFS="	" read -r _ name link desc; do
+    if [ -z "$desc" ] && ! printf '%s' "$link" | grep -q '/actions/runs/[0-9]'; then
+      desc="no log available to gh"
+      CI_LOGLESS="${CI_LOGLESS:+${CI_LOGLESS}, }${name}"
+    fi
     printf '=== FAILED CHECK: %s (%s)%s\n' "$name" "$link" "${desc:+: $desc}" >> "$D/ci-failure.log"
   done < "$D/ci.fail"
   sed -nE 's#.*/actions/runs/([0-9]+).*#\1#p' "$D/ci.fail" | sort -u | while IFS= read -r run; do
@@ -832,7 +838,9 @@ while :; do
       MERGE_BASE=1; log "CI failed and ${sha:0:7} conflicts with origin/${BASE}: the fix run merges it first"
       decide ci "merge origin/${BASE} in the fix run" "the head conflicts with its base" "${sha:0:7}" "merge started"
     fi
-    fix_run "CI failed on pull request #${PR} for branch ${BRANCH}. The failing checks and the tail of their logs are in ${D}/ci-failure.log — read it first."
+    logless=""
+    [ -z "$CI_LOGLESS" ] || logless=" No failure output is available for: ${CI_LOGLESS}. Their CI does not expose logs to gh, so reproduce them: run the project's check command, which may cover them. For a check it does not cover (a suite that needs services this worktree lacks), search the tests for expectations the change made stale (versions, constants, messages, fixtures this branch changed) and fix those. Push only a fix you can tie to this branch's diff."
+    fix_run "CI failed on pull request #${PR} for branch ${BRANCH}. The failing checks and the tail of their logs are in ${D}/ci-failure.log — read it first.${logless}"
     decide ci "fix ${n} of ${attempts}" "CI failed" "${sha:0:7} ${D}/ci-failure.log" "$(pushed_desc)"
     MERGE_BASE=0
     [ -n "$NEW_SHA" ] || stop "CI failed and fix attempt ${n} pushed nothing"
