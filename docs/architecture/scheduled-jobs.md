@@ -36,6 +36,10 @@ Things a reader will otherwise "fix" back:
   and a held lock means *deferred*, not failed. Jobs dispatch concurrently, so acquiring is atomic
   (`ln` of a temp PID file, `lib-drafting-lock.sh`). Deferral never strands: the job's next collector
   run re-emits them.
+- **A polled row yields to a rival copy** (`queue_rivals`, run under the lock before and after the
+  model): a live copy before drafting, or any copy that appears during it, sends the polled copy to
+  `rejected/`. This closes the poll-vs-`add-ticket` race (`references/queue-reconciliation.md`).
+  Observed: #6258 and #6347 each got a polled draft next to a human add-ticket that was already done.
 - **The resume sweep is scoped per job.** Under `--project`, a collector re-emits only stranded items
   of its own project, `source` and types (`poll_resume_candidates --project --source --type`).
   Stranded `_unrouted` items go to one job per integration: the first key among its valid, unpaused

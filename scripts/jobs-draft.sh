@@ -23,6 +23,8 @@ PLUGIN_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 . "${PLUGIN_ROOT}/scripts/lib-poll-allowlist.sh"
 # shellcheck source=lib-drafting-lock.sh
 . "${PLUGIN_ROOT}/scripts/lib-drafting-lock.sh"
+# shellcheck source=lib-queue.sh
+. "${PLUGIN_ROOT}/scripts/lib-queue.sh"
 AGENT_DIR="$EA_AGENT_DIR"
 
 MANIFEST=""; JOB=""; BUDGET="${EA_JOB_DRAFT_BUDGET_USD:-2.00}"
@@ -44,6 +46,27 @@ if ! holder="$(drafting_lock_acquire)"; then
   exit 4
 fi
 trap drafting_lock_release EXIT
+
+# Rival guard. The collector's disposition check and its write are not atomic with a manual
+# add-ticket (model-driven, minutes between its own check and write), so both can queue one ticket.
+# A polled row yields to a live rival present now, and to ANY rival that appears during drafting.
+# A completed rival present now is not one: the collector already skipped terminal work, so this
+# row is a human re-add being resumed. Runs under drafting.lock, so two polled copies never both yield.
+YIELDED=0
+KEPT="${MANIFEST}.kept"; : > "$KEPT"
+PRE_RIVALS="${MANIFEST}.rivals"; : > "$PRE_RIVALS"
+while IFS="	" read -r _action path _rest || [ -n "${path:-}" ]; do
+  [ -n "${path:-}" ] || continue
+  live="$(queue_rivals "$path" | grep -E '^(incoming|drafts)/' | head -1)"
+  if [ -n "$live" ] && queue_reject "$path" "duplicate of ${live}" >/dev/null; then
+    echo "jobs-draft: $(basename "$path") yielded to ${live}"
+    YIELDED=$((YIELDED+1)); continue
+  fi
+  queue_rivals "$path" | sed "s|^|$(basename "$path")	|" >> "$PRE_RIVALS"
+  printf '%s\t%s\t%s\n' "$_action" "$path" "$_rest" >> "$KEPT"
+done < "$MANIFEST"
+mv "$KEPT" "$MANIFEST"
+if [ ! -s "$MANIFEST" ]; then echo "jobs-draft: nothing left to draft (${YIELDED} yielded)"; exit 0; fi
 
 if NEW_CLAUDE_BIN="$(claude_bin_changed "$CLAUDE_BIN")"; then
   "${PLUGIN_ROOT}/scripts/notify.sh" \
@@ -81,6 +104,14 @@ while IFS="	" read -r _action path mtype _rest || [ -n "${path:-}" ]; do
   [ -n "${path:-}" ] || continue
   total=$((total+1))
   b="$(basename "$path")"
+  cur="${AGENT_DIR}/queue/drafts/${b}"; [ -f "$cur" ] || cur="${AGENT_DIR}/queue/incoming/${b}"
+  new="$(queue_rivals "$cur" | while IFS= read -r r; do
+           grep -qxF "${b}	${r}" "$PRE_RIVALS" || { printf '%s\n' "$r"; break; }
+         done)"
+  if [ -n "$new" ] && queue_reject "$cur" "duplicate of ${new} (appeared while this copy was being drafted)" >/dev/null; then
+    echo "jobs-draft: ${b} yielded to ${new}"
+    total=$((total-1)); continue
+  fi
   if [ "${mtype:-}" = slack-question ] && [ -f "${AGENT_DIR}/queue/drafts/${b}" ]; then
     bash "${PLUGIN_ROOT}/scripts/slack-event.sh" drafted "$b" >/dev/null 2>&1
   fi
