@@ -42,6 +42,23 @@ export LOGNAME="${LOGNAME:-$USER}"
 # the full failure analysis and the only surviving headless paths (cloud provider, or an IT
 # exemption).
 
+# ea_trust_system_ca — on macOS, unless SSL_CERT_FILE is set, export it as a bundle of the system
+# keychains' certificates. A TLS-intercepting proxy's CA is installed there, and TLS stacks with
+# their own bundle (Python's certifi, uv) otherwise reject every HTTPS connection through it, so an
+# adapter fails as if the service were down. The bundle is rebuilt when over a day old.
+ea_trust_system_ca() {
+  [ -z "${SSL_CERT_FILE:-}" ] && [ "$(uname -s)" = Darwin ] && command -v security >/dev/null 2>&1 || return 0
+  local f="${EA_AGENT_DIR}/state/system-ca.pem" tmp
+  if [ ! -s "$f" ] || [ -n "$(find "$f" -mtime +0 2>/dev/null)" ]; then
+    mkdir -p "${f%/*}" && tmp="$(mktemp "${f}.XXXXXX")" || return 0
+    { security find-certificate -a -p /System/Library/Keychains/SystemRootCertificates.keychain
+      security find-certificate -a -p /Library/Keychains/System.keychain; } > "$tmp" 2>/dev/null
+    if grep -q 'BEGIN CERTIFICATE' "$tmp"; then mv -f "$tmp" "$f"; else rm -f "$tmp"; fi
+  fi
+  [ -s "$f" ] && export SSL_CERT_FILE="$f"
+  return 0
+}
+
 # Pre-relocation location, kept only so migrate-storage.sh and the setup/status commands
 # can detect an un-migrated install and say so.
 EA_LEGACY_AGENT_DIR="${HOME}/.claude/engineer-agent"

@@ -217,7 +217,7 @@ crqa_exec_scripts() {
       echo "${name}: the PR already has a file at ${dir}/${name}" >> "$w/qa.err"; bad=1; continue
     fi
     cp "$w/scripts/$name" "$real/$name"
-    ( cd "$real" && with_timeout "$to" env -i HOME="$HOME" PATH="$PATH" USER="${USER:-}" LANG="${LANG:-C}" \
+    ( cd "$real" && with_timeout "$to" env -i HOME="$HOME" PATH="$PATH" USER="${USER:-}" LANG="${LANG:-C}" ${SSL_CERT_FILE:+"SSL_CERT_FILE=$SSL_CERT_FILE"} \
         TMPDIR="${TMPDIR:-/tmp}" "${argv[@]}" ) </dev/null > "$w/out/$name.log" 2>&1; rc=$?
     rm -f "$real/$name"
     printf '%s\t%s\n' "$name" "$rc" >> "$w/results.tsv"

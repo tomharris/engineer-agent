@@ -225,6 +225,9 @@ export JIRA_TOKEN=secret-token
 qa && ok "passing script + ACs pass" || bad "qa failed: $(cat "$TMP/qw/qa.err")"
 eq "script ran in the named dir" "$(cd "$TMP/wt/app" && pwd -P)" "$(cat "$TMP/qw/ran" 2>/dev/null)"
 grep -q secret-token "$TMP/qw/env.out" && bad "credential reached the script" || ok "script env has no credentials"
+qa_setup 0; SSL_CERT_FILE="$TMP/ca.pem" qa
+grep -qxF "SSL_CERT_FILE=$TMP/ca.pem" "$TMP/qw/env.out" && ok "script gets SSL_CERT_FILE" || bad "script env: no SSL_CERT_FILE"
+qa_setup 0; qa
 eq "results recorded by bash" "ENG-7-qa.sh${TAB}0" "$(cat "$TMP/qw/results.tsv")"
 [ -e "$TMP/wt/app/ENG-7-qa.sh" ] && bad "copied script left in the worktree" || ok "copied script removed"
 crqa_qa_comment "$TMP/qw" pass https://github.com/acme/web/pull/7 "$TMP/qw/c.md"
