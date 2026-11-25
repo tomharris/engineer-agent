@@ -453,7 +453,7 @@ Write the plan to ${plan} (a new file; it is the only file you may write) with e
 '## Summary' — 2 to 5 sentences: what changed and how each acceptance criterion is covered, no links; \
 '## Scripted Tests' — one \`\`\`json block: an array of at most 50 HTTP checks against the running app, each {\"name\", \"method\" (GET, POST, PUT, PATCH, DELETE or HEAD), \"path\" (starting with /), optional \"body\" (JSON), \"expect_status\", optional \"expect_contains\"}.${auth_rule} Cover every endpoint the diff adds or changes, success and failure paths; an empty array when the diff changes no endpoint; \
 ${script_rule}'## Manual Checklist' — '- [ ] ' items only a person can judge. \
-${unit_rule}${repl_rule}End the file with the line 'QA-NONCE: ${nonce}'. ${NO_MEMORY_RULE} Be concise."
+${unit_rule}${repl_rule}End the plan (${plan}), and no other file, with the line 'QA-NONCE: ${nonce}'. ${NO_MEMORY_RULE} Be concise."
   log "QA run on ${sha:0:7} (budget ${QA_BUDGET_USD})"
   ( cd "$WT" && "$CLAUDE_BIN" -p --plugin-dir "$PLUGIN_ROOT" --model sonnet --permission-mode default \
       --allowedTools "${tools[@]}" --max-budget-usd "$QA_BUDGET_USD" "$prompt" </dev/null ) >> "$LOG_FILE" 2>&1
