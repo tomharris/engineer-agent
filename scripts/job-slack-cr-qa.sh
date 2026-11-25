@@ -19,6 +19,7 @@ PLUGIN_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 . "${PLUGIN_ROOT}/scripts/lib-confined-run.sh"
 . "${PLUGIN_ROOT}/scripts/lib-review.sh"
 . "${PLUGIN_ROOT}/scripts/lib-cr-qa.sh"
+ea_trust_system_ca
 JOB="" ERRORS="/dev/null" ITEMS="/dev/null" BUDGET=""
 while [ $# -gt 0 ]; do
   case "$1" in

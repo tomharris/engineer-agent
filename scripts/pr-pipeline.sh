@@ -24,6 +24,7 @@ PLUGIN_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 . "${PLUGIN_ROOT}/scripts/lib-slite-api.sh"
 . "${PLUGIN_ROOT}/scripts/lib-review.sh"
 . "${PLUGIN_ROOT}/scripts/lib-decision-log.sh"
+ea_trust_system_ca
 
 ITEM="" EXPECT_HEAD=""
 while [ $# -gt 0 ]; do
@@ -539,7 +540,7 @@ qa_repl() {
     printf '%s' "${QA_REPL_TEXTS[$i]}" > "$tmp/input"
     # with_timeout backgrounds the command (stdin /dev/null), so the redirect lives inside it.
     rc=0
-    ( cd "$WT" && with_timeout "$secs" env -i PATH="$PATH" HOME="$HOME" USER="$USER" LANG="${LANG:-C.UTF-8}" \
+    ( cd "$WT" && with_timeout "$secs" env -i PATH="$PATH" HOME="$HOME" USER="$USER" LANG="${LANG:-C.UTF-8}" ${SSL_CERT_FILE:+"SSL_CERT_FILE=$SSL_CERT_FILE"} \
         TMPDIR="$tmp" QA_REPL_INPUT="$tmp/input" bash -c "exec < \"\$QA_REPL_INPUT\"; $1" ) </dev/null > "$D/qa/${name%.txt}.out" 2>&1 || rc=$?
     rm -rf "$tmp"
     pass="$(grep -c '^ *PASS: ' "$D/qa/${name%.txt}.out")"; fail="$(grep -c '^ *FAIL: ' "$D/qa/${name%.txt}.out")"
@@ -602,7 +603,7 @@ qa_script() {
   secs="$(jobs_duration_seconds "$(_arc "$P.qa.script.timeout")")"; secs="${secs:-600}"
   tmp="$(mktemp -d)" || { QA_SCRIPT="QA script: not executed — no temp dir"; QA_SCRIPT_STOP=refused; return; }
   printf '%s' "$QA_SCRIPT_TEXT" > "$tmp/qa-script.sh"
-  ( cd "$WT" && with_timeout "$secs" env -i PATH="$PATH" HOME="$HOME" USER="$USER" LANG="${LANG:-C.UTF-8}" \
+  ( cd "$WT" && with_timeout "$secs" env -i PATH="$PATH" HOME="$HOME" USER="$USER" LANG="${LANG:-C.UTF-8}" ${SSL_CERT_FILE:+"SSL_CERT_FILE=$SSL_CERT_FILE"} \
       TMPDIR="$tmp" QA_BASE_URL="$1" bash "$tmp/qa-script.sh" ) </dev/null > "$D/qa/script.out" 2>&1 || rc=$?
   rm -rf "$tmp"
   pass="$(grep -c '^ *PASS: ' "$D/qa/script.out")"; fail="$(grep -c '^ *FAIL: ' "$D/qa/script.out")"
@@ -627,7 +628,7 @@ qa_unit() {
   fi
   secs="$(jobs_duration_seconds "$(_arc "$P.qa.unit.timeout")")"; secs="${secs:-600}"
   tmp="$(mktemp -d)" || { QA_UNIT="Unit tests: not executed — no temp dir"; QA_UNIT_STOP=refused; return; }
-  ( cd "$WT" && with_timeout "$secs" env -i PATH="$PATH" HOME="$HOME" USER="$USER" LANG="${LANG:-C.UTF-8}" \
+  ( cd "$WT" && with_timeout "$secs" env -i PATH="$PATH" HOME="$HOME" USER="$USER" LANG="${LANG:-C.UTF-8}" ${SSL_CERT_FILE:+"SSL_CERT_FILE=$SSL_CERT_FILE"} \
       TMPDIR="$tmp" bash -c "$1 $QA_UNIT_DIR" ) </dev/null > "$D/qa/unit.out" 2>&1 || rc=$?
   rm -rf "$tmp"
   case "$rc" in

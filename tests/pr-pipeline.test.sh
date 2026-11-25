@@ -695,6 +695,9 @@ eq "raw unit output is kept locally" "1 passed" "$(cat "$PD/qa/unit.out" 2>/dev/
 qa_args="$(grep 'Write a QA plan' "$CLAUDE_ARGS")"
 printf '%s' "$qa_args" | grep -qE "Edit\(/$EA_AGENT_DIR/worktrees/[^ ]+/ea_qa/\*\*\)" && ok "QA run may write test files in ea_qa" || bad "no ea_qa Edit rule"
 
+qa_jira "$QA_UNIT_AFTER"; SSL_CERT_FILE="$TMP/ca.pem" QA_UNIT=pass run >/dev/null
+grep -qxF "SSL_CERT_FILE=$TMP/ca.pem" "$ST/unit.env" && ok "unit tests get SSL_CERT_FILE" || bad "unit env: no SSL_CERT_FILE"
+
 qa_jira "$QA_UNIT_AFTER"
 eq "failing unit tests stop" 1 "$(QA_UNIT=fail run)"
 eq "failed-unit reason" "stopped	QA: unit tests failed — plan: https://example.slite.com/app/docs/n1" "$(cat "$PD/result")"
@@ -752,6 +755,9 @@ note | grep -qx 'PASS: nav' && bad "raw REPL output was published" || ok "raw RE
 eq "raw REPL output is kept locally" "PASS: nav" "$(cat "$PD/qa/repl-1.out" 2>/dev/null)"
 qa_args="$(grep 'Write a QA plan' "$CLAUDE_ARGS")"
 printf '%s' "$qa_args" | grep -qE "Edit\(/$EA_AGENT_DIR/worktrees/[^ ]+/ea_repl/\*\*\)" && ok "QA run may write REPL scripts in ea_repl" || bad "no ea_repl Edit rule"
+
+qa_jira "$QA_REPL_AFTER"; SSL_CERT_FILE="$TMP/ca.pem" FAKE_REPL=pass run >/dev/null
+grep -qxF "SSL_CERT_FILE=$TMP/ca.pem" "$ST/repl.env" && ok "the REPL gets SSL_CERT_FILE" || bad "repl env: no SSL_CERT_FILE"
 
 qa_jira "$QA_REPL_AFTER"
 eq "a REPL script printing FAIL stops, though it exits 0" 1 "$(FAKE_REPL=fail run)"
