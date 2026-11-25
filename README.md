@@ -1031,7 +1031,12 @@ or via Approve), `scripts/pr-pipeline.sh` runs detached:
    adds unit tests: the run may also write test files under `ea_qa/` in its worktree, and bash runs
    `<command> ea_qa` there (timeout `qa.unit.timeout`, default 10m) with an env holding only `PATH`,
    `HOME`, `USER`, `LANG` and `TMPDIR`. This executes model-written code, so it is opt-in; a failure
-   stops like a failed check. `qa.script.enabled: true` (needs a server) adds a QA script: the plan
+   stops like a failed check. `qa.repl.command` adds REPL scripts a reviewer can rerun: the run
+   may write up to 10 files `ea_repl/repl-<N>.txt`, and bash pipes each on stdin to `<command>` in
+   the worktree (timeout `qa.repl.timeout` per script, default 5m) with the same env. A script
+   passes when it exits 0 and prints no `FAIL:` line; one over 64 KiB or naming a web address is
+   refused. Each checked script is published verbatim in the Slite note with how to rerun it; a
+   failure or refusal stops like a failed check. `qa.script.enabled: true` (needs a server) adds a QA script: the plan
    also holds a self-contained bash script that exercises every acceptance criterion the running app
    reaches, including behavior behind endpoints the diff does not change and multi-request flows
    (create, then publish, then read back). Bash runs it from the worktree while the branch is served

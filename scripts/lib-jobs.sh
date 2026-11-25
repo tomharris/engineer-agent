@@ -253,15 +253,16 @@ jobs_validate_after_pr() {
   _ar_check_keys "$p.ci" "timeout fix_attempts" "after_pr.ci" || return 1
   _ar_check_keys "$p.browser" "setup serve url ready_timeout setup_timeout instructions chrome_device" "after_pr.browser" || return 1
   _ar_check_keys "$p.security" "command fix_attempts review_last_fix timeout" "after_pr.security" || return 1
-  _ar_check_keys "$p.qa" "document server auth unit script" "after_pr.qa" || return 1
+  _ar_check_keys "$p.qa" "document server auth unit repl script" "after_pr.qa" || return 1
   _ar_check_keys "$p.qa.server" "setup serve url ready_timeout setup_timeout insecure" "after_pr.qa.server" || return 1
   _ar_check_keys "$p.qa.unit" "command timeout" "after_pr.qa.unit" || return 1
+  _ar_check_keys "$p.qa.repl" "command timeout" "after_pr.qa.repl" || return 1
   _ar_check_keys "$p.qa.script" "enabled timeout" "after_pr.qa.script" || return 1
   _ar_check_keys "$p.announce" "channel" "after_pr.announce" || return 1
   [ -n "$(gr_project_repos "$1")" ] || { echo "after_pr needs projects.$1.github.owner and github.repos"; return 1; }
   v="$(_arc "$p.budget_usd")"
   [ -z "$v" ] || [[ "$v" =~ ^[0-9]+(\.[0-9]+)?$ ]] || { echo "after_pr.budget_usd '${v}' must be a number"; return 1; }
-  for k in max_runtime ci.timeout browser.ready_timeout browser.setup_timeout qa.server.ready_timeout qa.server.setup_timeout qa.unit.timeout qa.script.timeout security.timeout; do
+  for k in max_runtime ci.timeout browser.ready_timeout browser.setup_timeout qa.server.ready_timeout qa.server.setup_timeout qa.unit.timeout qa.repl.timeout qa.script.timeout security.timeout; do
     v="$(_arc "$p.$k")"
     [ -z "$v" ] || [ -n "$(jobs_duration_seconds "$v")" ] || { echo "after_pr.${k} '${v}' must look like 30m or 2h"; return 1; }
   done
@@ -300,6 +301,9 @@ jobs_validate_after_pr() {
   fi
   if [ -n "$(_ar_children "$p.qa.unit")" ] && [ -z "$(_arc "$p.qa.unit.command")" ]; then
     echo "after_pr.qa.unit.command is required"; return 1
+  fi
+  if [ -n "$(_ar_children "$p.qa.repl")" ] && [ -z "$(_arc "$p.qa.repl.command")" ]; then
+    echo "after_pr.qa.repl.command is required"; return 1
   fi
   v="$(_arc "$p.qa.script.enabled")"
   _ar_bool "$v" || { echo "after_pr.qa.script.enabled '${v}' must be true or false"; return 1; }
